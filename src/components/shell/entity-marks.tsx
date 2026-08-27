@@ -1,6 +1,9 @@
 import type { LucideIcon } from "lucide-react";
 import {
+  AlarmClock,
+  BookMarked,
   BookOpen,
+  Braces,
   Bug,
   Calendar,
   CircleAlert,
@@ -77,10 +80,6 @@ export const KIND_ICON: Record<string, LucideIcon> = {
   lock: Lock,
   eye: Eye,
   "circle-help": CircleHelp,
-  // Two names GitHub made ordinary, and a section that reads a tracker has no
-  // other glyph for what is open and what was dealt with. Here rather than in
-  // whatever package wants them: this map is the window's icon vocabulary, and
-  // a type invented this morning draws from the same set as a section is.
   "circle-dot": CircleDot,
   "circle-check": CircleCheck,
   package: Package,
@@ -91,8 +90,11 @@ export const KIND_ICON: Record<string, LucideIcon> = {
   bug: Bug,
   shield: Shield,
   "book-open": BookOpen,
+  "book-marked": BookMarked,
   "clipboard-list": ClipboardList,
   "list-checks": ListChecks,
+  "alarm-clock": AlarmClock,
+  braces: Braces,
   "git-branch": GitBranch,
   users: Users,
   calendar: Calendar,
