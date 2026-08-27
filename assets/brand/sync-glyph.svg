@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Sync — monochrome slash glyph</title>
+  <desc id="desc">A standalone monochrome command slash.</desc>
+  <rect width="512" height="512" fill="#FFFFFF"/>
+  <path d="M312 139 H340 C347 139 351 146 348 152 L224 367 C221 372 218 374 212 374 H184 C177 374 173 367 176 361 L300 146 C303 141 306 139 312 139 Z" fill="#17191D"/>
+</svg>

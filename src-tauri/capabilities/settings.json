@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "settings",
+  "description": "What the settings window needs, and nothing the main window's capability grants it. It is built hidden and reveals itself once it has painted, so it needs `show` with `set-focus`. Closing it is the system's own Close Window command from the menu bar, which is not an IPC call and needs no permission. It opens no folder, borrows no memory session and drags no title bar, so none of the main window's permissions appear here.",
+  "windows": ["settings"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-show",
+    "core:window:allow-set-focus"
+  ]
+}

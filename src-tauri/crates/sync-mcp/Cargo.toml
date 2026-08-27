@@ -1,0 +1,65 @@
+[package]
+name = "sync-mcp"
+description = "The MCP interface Sync publishes, with the memory engine linked into it"
+version = "0.1.0"
+edition = "2024"
+# memory-hub is built for 1.91; linking it raises this crate's floor to the same.
+rust-version = "1.91"
+publish = false
+
+[dependencies]
+# The engine, as a library. Nothing here speaks a protocol to it: `memory-hub-mcp`
+# owns the tool catalogue and the dispatch, and `Session::call` is the whole of
+# running one — reconciliation and index synchronisation included.
+memory-hub-mcp = { git = "https://github.com/sync-buzz/memory-hub", tag = "v0.2.2" }
+memory-hub-service = { git = "https://github.com/sync-buzz/memory-hub", tag = "v0.2.2" }
+# Shared with the window: the error vocabulary, the product DTOs and the
+# JSON-RPC framing both sides of the host channel speak. A light crate — serde
+# and hashing — so depending on it costs the daemon nothing.
+sync-memory = { path = "../sync-memory" }
+# The speakers. Linked here rather than reached through the window, because the
+# window's host channel runs one way — the window calls this process, and there
+# is no route back. An agent that may speak is one connected to this server, so
+# this is where the sentence has to be said, and it is the process that outlives
+# every window besides.
+sync-voice = { path = "../sync-voice" }
+rmcp = { version = "3.1", default-features = false, features = [
+    "server",
+    "transport-io",
+    # The same handler over a second door. stdio stays: it is what CI, the
+    # tests and a machine with Sync closed still reach.
+    "transport-streamable-http-server",
+] }
+# The HTTP door itself. `rmcp` hands over a tower service and says nothing about
+# how it is served; axum is what puts it on a port and what the token and
+# `Origin` checks are written as — hand-rolling either over hyper would be
+# writing a router to avoid depending on one.
+axum = "0.8"
+base64 = "0.22"
+serde = { version = "1", features = ["derive"] }
+# `preserve_order`, because the project key is the first thing every tool's
+# schema states and the first thing a model reads. Without it a schema's
+# properties come back alphabetised, and the argument that answers "which
+# project" would sit wherever its name happens to fall.
+serde_json = { version = "1", features = ["preserve_order"] }
+# `io-util` for the host socket's line framing, `net` for the socket itself.
+tokio = { version = "1", features = [
+    "macros",
+    "rt-multi-thread",
+    "io-std",
+    "io-util",
+    "net",
+    "signal",
+] }
+
+[lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+expect_used = "warn"
+
+[dev-dependencies]
+tempfile = "3"

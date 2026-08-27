@@ -1,0 +1,49 @@
+[package]
+name = "sync-extensions"
+description = "Sync's extension packages: the manifest, the archive, and the artefact store"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.91"
+publish = false
+
+[dependencies]
+hex = "0.4"
+# The archive. zip rather than tar.gz because macOS opens one natively and a
+# person can look inside without tools, and because the central directory makes
+# the manifest readable without unpacking everything behind it.
+zip = { version = "4", default-features = false, features = ["deflate"] }
+# The same mechanism the updater already verifies its packages with. One signing
+# story for both artefacts a person downloads, and no second key format.
+minisign-verify = "0.2"
+# The registry, and the only outward connection this application makes. Already
+# in the tree under the updater plugin, so this costs no new dependency graph —
+# and `blocking` because everything else in this crate is a plain function over
+# a path, and one async island would spread through the command layer above it.
+# `rustls` rather than the platform's TLS: one behaviour to reason about, and
+# the same one the updater already verifies a download with.
+reqwest = { version = "0.12", default-features = false, features = [
+    "blocking",
+    "rustls-tls",
+] }
+# Parsing a URL rather than splitting one. An artefact's address is pinned to a
+# repository of one organisation, and every shape that makes a URL read as one
+# place and resolve to another — a `..` segment, credentials before the host, a
+# port — is a parser's business, not a substring's. Already in the tree under
+# reqwest, so this costs no new dependency graph either.
+url = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+expect_used = "warn"

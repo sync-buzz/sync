@@ -1,0 +1,60 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/api-extractor/v7/api-extractor.schema.json",
+
+  // The extension boundary, and only it. Everything reachable from this file is
+  // what a package compiles against; everything else in `src` is the shell's
+  // private business and must not appear in the report.
+  "mainEntryPointFilePath": "<projectFolder>/temp/dts/lib/extension-api/index.d.ts",
+
+  // Not `tsconfig.api.json` — that one emits the declarations. This one reads
+  // them, and points `@/*` at `temp/dts` so a re-export stays inside the
+  // declaration world. See the comment in the file itself.
+  "compiler": {
+    "tsconfigFilePath": "<projectFolder>/tsconfig.api-extractor.json"
+  },
+
+  // The report is the artefact. It is committed, and CI fails when a build
+  // produces a different one — which is the whole mechanism: a surface cannot
+  // change quietly, so `SYNC_API_VERSION` cannot fall out of step quietly.
+  "apiReport": {
+    "enabled": true,
+    "reportFolder": "<projectFolder>/api/",
+    "reportFileName": "extension-api.api.md"
+  },
+
+  // The rollup is what an extension compiles against. It is emitted into
+  // `temp/`, which is not committed, and copied into the extensions repository
+  // by `pnpm api:publish` — until `@sync/extension-api` is published from a
+  // repository of its own, that copy is how a package outside this tree knows
+  // what it may name. No doc model: nothing renders one.
+  "docModel": { "enabled": false },
+  "dtsRollup": {
+    "enabled": true,
+    "untrimmedFilePath": "<projectFolder>/temp/extension-api.d.ts"
+  },
+  "tsdocMetadata": { "enabled": false },
+
+  "messages": {
+    "compilerMessageReporting": {
+      "default": { "logLevel": "warning" },
+      // The inferred type of a Plate plugin array cannot be named without
+      // reaching into a pnpm store path. It is a property of the dependency
+      // layout rather than of this code, it appears only when declarations are
+      // emitted — `pnpm typecheck` never sees it — and nothing it touches is in
+      // the surface. If one ever were, the report itself would say so.
+      "TS2742": { "logLevel": "none" }
+    },
+    "extractorMessageReporting": {
+      "default": { "logLevel": "warning" },
+      // A type used in the surface but not exported from it. Worth an error:
+      // an extension cannot name what it is handed.
+      "ae-forgotten-export": { "logLevel": "error", "addToApiReportFile": false },
+      // TSDoc release tags are not this project's vocabulary. Everything in the
+      // entry point is public by construction — that is what the file is.
+      "ae-missing-release-tag": { "logLevel": "none" }
+    },
+    "tsdocMessageReporting": {
+      "default": { "logLevel": "none" }
+    }
+  }
+}

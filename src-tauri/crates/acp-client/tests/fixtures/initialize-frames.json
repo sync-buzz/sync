@@ -1,0 +1,392 @@
+{
+ "claude": {
+  "at": "2026-08-10T00:37:37.996Z",
+  "frame": {
+   "jsonrpc": "2.0",
+   "id": 1,
+   "result": {
+    "protocolVersion": 1,
+    "agentCapabilities": {
+     "_meta": {
+      "claudeCode": {
+       "promptQueueing": true
+      }
+     },
+     "promptCapabilities": {
+      "image": true,
+      "embeddedContext": true
+     },
+     "mcpCapabilities": {
+      "http": true,
+      "sse": true
+     },
+     "auth": {
+      "logout": {}
+     },
+     "providers": {},
+     "loadSession": true,
+     "sessionCapabilities": {
+      "additionalDirectories": {},
+      "close": {},
+      "delete": {},
+      "fork": {},
+      "list": {},
+      "resume": {}
+     }
+    },
+    "agentInfo": {
+     "name": "@agentclientprotocol/claude-agent-acp",
+     "title": "Claude Agent",
+     "version": "0.66.0"
+    },
+    "authMethods": [],
+    "_meta": {
+     "steering": {
+      "supported": true
+     },
+     "goal": {
+      "version": 1,
+      "controlMethod": "_session/goal",
+      "actions": [
+       "set",
+       "clear"
+      ]
+     }
+    }
+   }
+  }
+ },
+ "codex": {
+  "at": "2026-08-10T00:28:28.697Z",
+  "frame": {
+   "jsonrpc": "2.0",
+   "result": {
+    "protocolVersion": 1,
+    "agentCapabilities": {
+     "loadSession": true,
+     "promptCapabilities": {
+      "image": true,
+      "audio": false,
+      "embeddedContext": true
+     },
+     "mcpCapabilities": {
+      "http": true,
+      "sse": false,
+      "acp": false
+     },
+     "sessionCapabilities": {
+      "list": {},
+      "resume": {},
+      "close": {}
+     },
+     "auth": {
+      "logout": {}
+     }
+    },
+    "authMethods": [
+     {
+      "id": "chatgpt",
+      "name": "Login with ChatGPT",
+      "description": "Use your ChatGPT login with Codex CLI (requires a paid ChatGPT subscription)"
+     },
+     {
+      "type": "env_var",
+      "id": "codex-api-key",
+      "name": "Use CODEX_API_KEY",
+      "description": "Requires setting the `CODEX_API_KEY` environment variable.",
+      "vars": [
+       {
+        "name": "CODEX_API_KEY"
+       }
+      ]
+     },
+     {
+      "type": "env_var",
+      "id": "openai-api-key",
+      "name": "Use OPENAI_API_KEY",
+      "description": "Requires setting the `OPENAI_API_KEY` environment variable.",
+      "vars": [
+       {
+        "name": "OPENAI_API_KEY"
+       }
+      ]
+     }
+    ],
+    "agentInfo": {
+     "name": "codex-acp",
+     "title": "Codex",
+     "version": "0.16.0"
+    }
+   },
+   "id": 1
+  }
+ },
+ "opencode": {
+  "at": "2026-08-10T00:29:56.074Z",
+  "frame": {
+   "jsonrpc": "2.0",
+   "id": 1,
+   "result": {
+    "protocolVersion": 1,
+    "agentCapabilities": {
+     "loadSession": true,
+     "mcpCapabilities": {
+      "http": true,
+      "sse": true
+     },
+     "promptCapabilities": {
+      "embeddedContext": true,
+      "image": true
+     },
+     "sessionCapabilities": {
+      "close": {},
+      "fork": {},
+      "list": {},
+      "resume": {}
+     }
+    },
+    "authMethods": [
+     {
+      "description": "Run `opencode auth login` in the terminal",
+      "name": "Login with opencode",
+      "id": "opencode-login"
+     }
+    ],
+    "agentInfo": {
+     "name": "OpenCode",
+     "version": "1.17.20"
+    }
+   }
+  }
+ },
+ "grok": {
+  "at": "2026-08-10T00:33:48.543Z",
+  "frame": {
+   "jsonrpc": "2.0",
+   "id": 1,
+   "result": {
+    "protocolVersion": 1,
+    "agentCapabilities": {
+     "loadSession": true,
+     "promptCapabilities": {
+      "image": false,
+      "audio": false,
+      "embeddedContext": true
+     },
+     "mcpCapabilities": {
+      "http": true,
+      "sse": true
+     },
+     "sessionCapabilities": {
+      "list": {},
+      "resume": {},
+      "close": {}
+     },
+     "auth": {},
+     "_meta": {
+      "x.ai/fs_notify": true,
+      "x.ai/hooks": {
+       "blockingEvents": [
+        "pre_tool_use",
+        "stop",
+        "subagent_stop"
+       ],
+       "decisions": [
+        "deny",
+        "block"
+       ],
+       "stopSignals": [
+        "continue",
+        "stopReason",
+        "additionalContext"
+       ]
+      },
+      "x.ai/capabilities": {
+       "toolOverrides": {
+        "x_keyword_search": true,
+        "x_semantic_search": true,
+        "x_user_search": false,
+        "x_thread_fetch": false
+       }
+      }
+     }
+    },
+    "authMethods": [
+     {
+      "id": "cached_token",
+      "name": "cached_token",
+      "description": "Cached token from ~/.grok/auth.json"
+     },
+     {
+      "id": "grok.com",
+      "name": "Grok",
+      "description": "Sign in with Grok"
+     }
+    ],
+    "_meta": {
+     "grokShell": true,
+     "defaultAuthMethodId": "cached_token",
+     "x.ai/mcp/sdk": true,
+     "x.ai/pluginDirs": true,
+     "currentWorkingDirectory": "/private/tmp/acp-spike/grok",
+     "agentVersion": "1.0.0",
+     "agentId": "e8c9c6ab-5607-563c-b8da-4c1a7e75a4d0",
+     "agentInstanceId": "6d2d9017-9220-48d1-8708-2b45ebcce1b6",
+     "hostname": "MacBookPro",
+     "modelState": {
+      "currentModelId": "grok-4.5",
+      "availableModels": [
+       {
+        "modelId": "grok-4.5",
+        "name": "Grok 4.5",
+        "description": "SpaceXAI's new frontier model",
+        "_meta": {
+         "totalContextTokens": 500000,
+         "agentType": "grok-build-plan",
+         "supportsReasoningEffort": true,
+         "reasoningEffort": "medium",
+         "reasoningEfforts": [
+          {
+           "id": "high",
+           "value": "high",
+           "label": "High Effort",
+           "description": "Highest implementation quality with extensive reasoning",
+           "default": true
+          },
+          {
+           "id": "medium",
+           "value": "medium",
+           "label": "Medium Effort",
+           "description": "Balanced effort with standard implementation and testing",
+           "default": false
+          },
+          {
+           "id": "low",
+           "value": "low",
+           "label": "Low Effort",
+           "description": "Quick, fast implementations",
+           "default": false
+          }
+         ]
+        }
+       }
+      ]
+     },
+     "mcpServers": [],
+     "mcpApps": false,
+     "metadata": null,
+     "availableCommands": [
+      {
+       "name": "compact",
+       "description": "Compress conversation history to save context window",
+       "input": {
+        "hint": "optional context about what to preserve"
+       }
+      },
+      {
+       "name": "always-approve",
+       "description": "Toggle always-approve mode (skip all permission prompts)",
+       "input": {
+        "hint": "on|off"
+       }
+      },
+      {
+       "name": "context",
+       "description": "Show context window usage and session stats",
+       "input": null
+      },
+      {
+       "name": "session-info",
+       "description": "Show session details (model, turns, context usage)",
+       "input": null
+      },
+      {
+       "name": "deep-research",
+       "description": "Research with bounded parallel agents, cross-check evidence, and write a cited report",
+       "input": {
+        "hint": "<query>"
+       }
+      },
+      {
+       "name": "workflow",
+       "description": "Launch a saved workflow, or manage a run (pause, resume, stop, save)",
+       "input": {
+        "hint": "<name> [args] | pause|resume|stop|save [name]"
+       }
+      },
+      {
+       "name": "goal",
+       "description": "Set, manage, or check an autonomous goal",
+       "input": {
+        "hint": "<objective> [--budget <tokens>] | status | pause | resume | clear"
+       }
+      }
+     ],
+     "cancelRewind": true,
+     "sessionRecap": true,
+     "voiceMode": true
+    }
+   }
+  }
+ },
+ "gemini": {
+  "at": "2026-08-10T00:26:24.953Z",
+  "frame": {
+   "jsonrpc": "2.0",
+   "id": 1,
+   "result": {
+    "protocolVersion": 1,
+    "authMethods": [
+     {
+      "id": "oauth-personal",
+      "name": "Log in with Google",
+      "description": "Log in with your Google account"
+     },
+     {
+      "id": "gemini-api-key",
+      "name": "Gemini API key",
+      "description": "Use an API key with Gemini Developer API",
+      "_meta": {
+       "api-key": {
+        "provider": "google"
+       }
+      }
+     },
+     {
+      "id": "vertex-ai",
+      "name": "Vertex AI",
+      "description": "Use an API key with Vertex AI GenAI API"
+     },
+     {
+      "id": "gateway",
+      "name": "AI API Gateway",
+      "description": "Use a custom AI API Gateway",
+      "_meta": {
+       "gateway": {
+        "protocol": "google",
+        "restartRequired": "false"
+       }
+      }
+     }
+    ],
+    "agentInfo": {
+     "name": "gemini-cli",
+     "title": "Gemini CLI",
+     "version": "0.45.2"
+    },
+    "agentCapabilities": {
+     "loadSession": true,
+     "promptCapabilities": {
+      "image": true,
+      "audio": true,
+      "embeddedContext": true
+     },
+     "mcpCapabilities": {
+      "http": true,
+      "sse": true
+     }
+    }
+   }
+  }
+ }
+}

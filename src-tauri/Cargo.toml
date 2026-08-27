@@ -1,0 +1,103 @@
+[workspace]
+members = ["crates/*"]
+# `sync-mcp` links the memory engine, which brings LanceDB and llama.cpp with
+# it. Neither belongs in the window's build, and an ordinary `cargo check` here
+# is the window's build — so the sidecar is a member that is not a default one,
+# reached with `-p sync-mcp` when it is the thing being worked on.
+default-members = [".", "crates/sync-memory", "crates/sync-extensions", "crates/sync-handlers", "crates/sync-voice", "crates/acp-client", "crates/agent-bridge"]
+
+[package]
+name = "sync"
+version = "0.8.0"
+# The workspace's default members hold two binaries — this window and the ACP
+# stub agent one test raises — so `cargo run` has two to choose from and picks
+# neither. Naming the window here is what `tauri dev` needs to start at all.
+default-run = "sync"
+description = "Sync desktop shell"
+authors = ["Sync"]
+license = "FSL-1.1-MIT"
+repository = "https://github.com/sync-buzz/sync"
+edition = "2024"
+# Raised by the engine: `sync-mcp` links memory-hub, which is built for 1.91
+# and edition 2024. Cargo resolves one graph for the whole workspace against
+# the lowest floor in it, so leaving this at 1.85 picked dependency versions
+# the engine cannot build with.
+rust-version = "1.91"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dev-dependencies]
+tauri = { version = "2.11.3", features = ["test"] }
+tempfile = "3"
+
+[lib]
+name = "sync_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.6.3", features = [] }
+
+[dependencies]
+# The agents this window drives, and the bridge for the one that does not speak
+# ACP natively. Both are leaf crates: they know the protocol and the CLIs, and
+# nothing about Tauri or about this application.
+acp-client = { path = "crates/acp-client" }
+agent-bridge = { path = "crates/agent-bridge" }
+async-trait = "0.1.92"
+# An image pasted into a conversation crosses the window boundary as base64 —
+# the protocol's own spelling for one — and is decoded here to be held as the
+# bytes it is. Already in the tree for the memory crates; this is the first
+# time the application itself needs it.
+base64 = "0.22"
+getrandom = "0.3"
+jsonc-parser = { version = "0.33.1", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sync-extensions = { path = "crates/sync-extensions" }
+# What an extension runs when no screen is mounted. Tauri-free like its
+# neighbours: it takes a module and a name and answers, and everything it is
+# allowed to reach is decided in `handlers.rs`, where the project is known.
+sync-handlers = { path = "crates/sync-handlers" }
+sync-memory = { path = "crates/sync-memory" }
+# What the machine says out loud. Tauri-free like its neighbours: it takes a
+# sentence and says it, and who may ask for one is decided in `voice.rs`, where
+# the installation's chosen voice is known.
+sync-voice = { path = "crates/sync-voice" }
+tauri = { version = "2.11.3", features = ["macos-private-api", "tray-icon", "image-png"] }
+tauri-plugin-autostart = "2"
+tauri-plugin-dialog = "2.7.2"
+tauri-plugin-opener = "2.5"
+# Updating happens behind the window and never through it: the plugin's
+# commands are in no capability, so the whole flow is `src/updates.rs`.
+tauri-plugin-updater = "2"
+# The agent connections are async and own background tasks, so the window needs
+# a handle on the runtime Tauri is already running on rather than a second one.
+tokio = { version = "1", features = ["sync", "rt", "time", "process", "io-util"] }
+toml_edit = "0.25.13"
+# Finding an agent's executable. Hand-rolling a PATH walk means re-deciding what
+# an executable is on each platform — `which` is that decision, already made,
+# and its `which_in` takes the PATH to search rather than reading the process's
+# own, which is the whole reason this is not `std`: a bundled `.app` launched
+# from Finder inherits almost no PATH, and every agent on this machine lives
+# somewhere a login shell puts there and Finder does not.
+which = "8"
+
+# The Dock icon's menu. macOS asks the application delegate for it and Tao's
+# delegate does not answer, so `src/dock.rs` adds the method to it — which is
+# the Objective-C runtime and these two crates' typed bindings to it. Both are
+# already in the tree under Tauri; they are named here because this crate calls
+# them directly.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = [
+  "std",
+  "NSApplication",
+  "NSButton",
+  "NSControl",
+  "NSMenu",
+  "NSMenuItem",
+  "NSResponder",
+  "NSView",
+  "NSWindow",
+] }
+objc2-foundation = { version = "0.3", features = ["std", "NSString"] }

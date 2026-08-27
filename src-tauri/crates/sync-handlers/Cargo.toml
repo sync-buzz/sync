@@ -1,0 +1,30 @@
+[package]
+name = "sync-handlers"
+description = "Sync's extension handlers: what runs when no screen is mounted"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.91"
+publish = false
+
+[dependencies]
+# QuickJS, embedded. Chosen over a wasm runtime because the extensions that
+# exist are TypeScript and a wasm component would make their authors learn a
+# second language to poll an issue — measured at +528 KB against wasmtime's
+# +4.03 MB, with the interrupt handler and the memory cap this crate depends on
+# both available. See `docs/background.md` §3.2.
+#
+# `loader` is not enabled: a handler's module is evaluated from a string this
+# crate was handed, and a resolver would be a way to reach a second file. There
+# is exactly one file.
+rquickjs = { version = "0.9", features = ["bindgen"] }
+serde_json = "1"
+thiserror = "2"
+
+[lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+expect_used = "warn"

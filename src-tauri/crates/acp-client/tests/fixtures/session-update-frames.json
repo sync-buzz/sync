@@ -1,0 +1,239 @@
+{
+  "claude": [
+    {
+      "sessionId": "32730987-2558-4c98-9255-27b175c0ffa4",
+      "update": {
+        "sessionUpdate": "available_commands_update",
+        "availableCommands": [
+          {
+            "name": "compact",
+            "description": "Free up context by summarizing the conversation so far",
+            "input": {
+              "hint": "<optional custom summarization instructions>"
+            }
+          },
+          {
+            "name": "model",
+            "description": "Set the AI model for Claude Code",
+            "input": {
+              "hint": "<model>"
+            }
+          },
+          {
+            "name": "usage",
+            "description": "Show session cost, plan usage, and what's contributing to your limits",
+            "input": null
+          },
+          {
+            "name": "init",
+            "description": "Initialize a new CLAUDE.md file with codebase documentation",
+            "input": null
+          }
+        ]
+      }
+    },
+    {
+      "sessionId": "32730987-2558-4c98-9255-27b175c0ffa4",
+      "update": {
+        "sessionUpdate": "usage_update",
+        "used": 33794,
+        "size": 1000000
+      }
+    }
+  ],
+  "codex": [
+    {
+      "sessionId": "019fe912-280f-7cf2-a490-6f95d0e267a2",
+      "update": {
+        "sessionUpdate": "usage_update",
+        "used": 41643,
+        "size": 258400
+      }
+    },
+    {
+      "sessionId": "019fe912-280f-7cf2-a490-6f95d0e267a2",
+      "update": {
+        "sessionUpdate": "available_commands_update",
+        "availableCommands": [
+          {
+            "name": "review",
+            "description": "Review my current changes and find issues",
+            "input": {
+              "hint": "optional custom review instructions"
+            }
+          },
+          {
+            "name": "review-branch",
+            "description": "Review the code changes against a specific branch",
+            "input": {
+              "hint": "branch name"
+            }
+          },
+          {
+            "name": "review-commit",
+            "description": "Review the code changes introduced by a commit",
+            "input": {
+              "hint": "commit sha"
+            }
+          },
+          {
+            "name": "init",
+            "description": "create an AGENTS.md file with instructions for Codex"
+          },
+          {
+            "name": "compact",
+            "description": "summarize conversation to prevent hitting the context limit"
+          },
+          {
+            "name": "logout",
+            "description": "logout of Codex"
+          }
+        ]
+      }
+    }
+  ],
+  "opencode": [
+    {
+      "sessionId": "ses_016ec7df6ffex9nm3djiOMA8Cl",
+      "update": {
+        "sessionUpdate": "available_commands_update",
+        "availableCommands": [
+          {
+            "name": "init",
+            "description": "guided AGENTS.md setup"
+          },
+          {
+            "name": "review",
+            "description": "review changes [commit|branch|pr], defaults to uncommitted"
+          },
+          {
+            "name": "customize-opencode",
+            "description": "Use ONLY when the user is editing or creating opencode's own configuration: opencode.json, opencode.jsonc, files under .opencode/, or files under ~/.config/opencode/. Also use when creating or fixing opencode agents, subagents, skills, plugins, MCP servers, or permission rules. Do not use for the user's own application code, or for any project that is not configuring opencode itself."
+          }
+        ]
+      }
+    },
+    {
+      "sessionId": "ses_016ec7df6ffex9nm3djiOMA8Cl",
+      "update": {
+        "sessionUpdate": "usage_update",
+        "used": 68430,
+        "size": 1048576,
+        "cost": {
+          "amount": 0.00479098,
+          "currency": "USD"
+        }
+      }
+    }
+  ],
+  "grok": [
+    {
+      "sessionId": "019fe917-080d-7183-b073-b3c7d5cdebef",
+      "update": {
+        "sessionUpdate": "available_commands_update",
+        "availableCommands": [
+          {
+            "name": "compact",
+            "description": "Compress conversation history to save context window",
+            "input": {
+              "hint": "optional context about what to preserve"
+            }
+          },
+          {
+            "name": "context",
+            "description": "Show context window usage and session stats",
+            "input": null
+          },
+          {
+            "name": "bundled:imagine",
+            "description": "Prompting and workflow guidance for Imagine image tools",
+            "input": null,
+            "_meta": {
+              "scope": "bundled",
+              "path": "/Users/example/.grok/bundled/skills/imagine/SKILL.md"
+            }
+          },
+          {
+            "name": "build-with-ai",
+            "description": "Build AI apps on SpaceXAI (XAI_API_KEY + api.x.ai)",
+            "input": {
+              "hint": "<what you're building>"
+            },
+            "_meta": {
+              "scope": "bundled",
+              "path": "/Users/example/.grok/bundled/skills/build-with-ai/SKILL.md"
+            }
+          },
+          {
+            "name": "technical-writing",
+            "description": "Write clear, concise, and accurate technical documentation including API references, user guides, tutorials, changelogs, and architecture docs, tailored to the target audience.",
+            "input": null,
+            "_meta": {
+              "scope": "user",
+              "path": "/Users/example/.claude/skills/technical-writing/SKILL.md"
+            }
+          }
+        ],
+        "_meta": {
+          "tools": [
+            "run_terminal_command",
+            "read_file",
+            "search_replace",
+            "list_dir",
+            "grep",
+            "kill_command_or_subagent",
+            "todo_write",
+            "get_command_or_subagent_output",
+            "spawn_subagent",
+            "scheduler_create",
+            "scheduler_delete",
+            "scheduler_list",
+            "monitor",
+            "search_tool",
+            "use_tool",
+            "workflow",
+            "enter_plan_mode",
+            "exit_plan_mode",
+            "ask_user_question",
+            "web_search",
+            "web_fetch",
+            "image_gen",
+            "image_edit",
+            "image_to_video",
+            "reference_to_video",
+            "write"
+          ]
+        }
+      },
+      "_meta": {
+        "totalTokens": 1039,
+        "eventId": "019fe917-080d-7183-b073-b3c7d5cdebef-0",
+        "agentTimestampMs": 1786322029582,
+        "updateType": "AvailableCommandsUpdate",
+        "updateParams": {
+          "commandsCount": 99
+        }
+      }
+    },
+    {
+      "sessionId": "019fe917-080d-7183-b073-b3c7d5cdebef",
+      "update": {
+        "sessionUpdate": "agent_thought_chunk",
+        "content": {
+          "type": "text",
+          "text": "The"
+        }
+      },
+      "_meta": {
+        "totalTokens": 10137,
+        "eventId": "019fe917-080d-7183-b073-b3c7d5cdebef-3",
+        "agentTimestampMs": 1786322033293,
+        "promptId": "6d8219b4-ae29-4ebd-8903-2a69cacc1e05",
+        "streamStartMs": 1786322031753,
+        "turnStartMs": 1786322031149,
+        "updateType": "AgentThoughtChunk",
+        "chunkId": 1
+      }
+    }
+  ]
+}

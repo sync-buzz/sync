@@ -1,0 +1,38 @@
+[package]
+name = "sync-voice"
+description = "Sync's speech engines: the voices this machine has, and what it says with them"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.91"
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+# The system's synthesiser, and the whole of the first engine. `objc2` and
+# `objc2-foundation` are already in the tree for the Dock menu, so what this
+# adds is the AVFAudio bindings and nothing under them — and only the one
+# framework header that has speech in it, rather than the fifty-odd files
+# `default` would compile for audio engines, players and recorders this never
+# touches.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-avf-audio = { version = "0.3", default-features = false, features = [
+  "std",
+  "AVSpeechSynthesis",
+] }
+objc2-foundation = { version = "0.3", default-features = false, features = [
+  "std",
+  "NSArray",
+  "NSString",
+] }
+
+[lints.rust]
+unused_must_use = "deny"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+expect_used = "warn"

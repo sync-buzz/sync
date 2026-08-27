@@ -1,0 +1,18 @@
+{
+   "platforms": {
+      "darwin-aarch64": {
+         "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRC9FL2xjemRxZVBPTVZLcmkwOTE5dWp6OGNYS0lrVGkycHNRdnJuOVVNRyttMzdneEh6VWZScWJ2M1d3RzJ5ZjJzTUpBUHo1WEkxc2MxWTdRbjhSZ010amdhT2VLY3drPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg1MDc4MDE2CWZpbGU6U3luYy5hcHAudGFyLmd6CkJHeERtNm9SOGk5b2JKQ21aTkRRcmFtbmVETzRESWlkdmdwMnZLR2ZDam5Wa2MxTks0Z05IRXBTeUtXUVJoL1ZuSjNYeTljT29LQ0VsK1hIWGxLQkJRPT0K",
+         "url": "https://github.com/sync-buzz/sync-legacy/releases/download/v0.6.13/Sync_macOS_aarch64.app.tar.gz"
+      },
+      "linux-x86_64": {
+         "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRC9FL2xjemRxZU4rREVXYjU5STJjOGxFZUdPdXgrZzNEMDhlRTc3SDM1UzkxOVNNUWFXSGNLSjVnci9wY1RzYTdHU3RWMkxvc1Y0aFZvYTh3UzFuOVY4Y3UyNkI2M0FVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg1MDc4MzI5CWZpbGU6U3luY18wLjYuMTNfYW1kNjQuQXBwSW1hZ2UKUGNKNjR0TFVibkFMZXZuSDY4VWg0cStJMHFCQmlJOG1YSkp1WVU5RE1aWEtyUFdYaDlvVlhwTE9XR3lYekQvRTdhRjBILy9MTDNZMkMxVGhRaXo2Qnc9PQo=",
+         "url": "https://github.com/sync-buzz/sync-legacy/releases/download/v0.6.13/Sync_Linux_x86_64.AppImage"
+      },
+      "windows-x86_64": {
+         "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRRC9FL2xjemRxZUo3dFEwNHQrY3UrczF2N1ZqMXB5RjVoZEdsK2FkcGdmQWR5SzRCWjVnMDQ4RlJjM2FlcW9BMzAzdHFYSkRsUTU5NjNxTmRlVGk4bWdjZlFLdjR6WGc4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg1MDc5NDY4CWZpbGU6U3luY18wLjYuMTNfeDY0LXNldHVwLmV4ZQo3ZkY3UUxyYTZtV25ibkROa1BOTnJjb3Y4Q3FtWXRDcDlZdCtVNFdzZjdBZk1RTnBBOTZCLzAwV2pvRWpSSFlBTFZDWjNkaW84VVJSNFBKQThOU2hCdz09Cg==",
+         "url": "https://github.com/sync-buzz/sync-legacy/releases/download/v0.6.13/Sync_Windows_x64-setup.exe"
+      }
+   },
+   "pub_date": "2026-07-26T18:50:18Z",
+   "version": "0.6.13"
+}

@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="slash" x1="340" y1="139" x2="184" y2="374" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#202326"/>
+      <stop offset="0.38" stop-color="#292C2F"/>
+      <stop offset="1" stop-color="#4B4E51"/>
+    </linearGradient>
+    <linearGradient id="outerRim" x1="184" y1="374" x2="340" y2="139" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#B5B9BB" stop-opacity="0.78"/>
+      <stop offset="0.48" stop-color="#85898C" stop-opacity="0.60"/>
+      <stop offset="1" stop-color="#C4C7C9" stop-opacity="0.72"/>
+    </linearGradient>
+    <linearGradient id="convexSheen" x1="176" y1="245" x2="350" y2="272" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.26"/>
+      <stop offset="0.18" stop-color="#FFFFFF" stop-opacity="0.08"/>
+      <stop offset="0.48" stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop offset="0.80" stop-color="#000000" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0.10"/>
+    </linearGradient>
+    <filter id="slashShadow" x="-20%" y="-20%" width="160%" height="170%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="7" dy="9" stdDeviation="8" flood-color="#111216" flood-opacity="0.21"/>
+    </filter>
+    <filter id="outerRimSoft" x="-10%" y="-10%" width="120%" height="120%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="0.9"/>
+    </filter>
+    <filter id="liquidSurface" x="-12%" y="-12%" width="124%" height="124%" color-interpolation-filters="sRGB">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="0.72" result="softBase"/>
+      <feGaussianBlur in="SourceAlpha" stdDeviation="3.2" result="softAlpha"/>
+      <feSpecularLighting in="softAlpha" surfaceScale="6" specularConstant="0.055" specularExponent="18" lighting-color="#FFFFFF" result="specular">
+        <feDistantLight azimuth="225" elevation="58"/>
+      </feSpecularLighting>
+      <feComposite in="specular" in2="SourceAlpha" operator="in" result="clippedSpecular"/>
+      <feBlend in="softBase" in2="clippedSpecular" mode="screen"/>
+    </filter>
+  </defs>
+  <path d="M 327.68 0 c 64.518 0 96.7771 0 121.4197 12.556 a 115.2 115.2 0 0 1 50.3442 50.3442 c 12.556 24.6426 12.556 56.9017 12.556 121.4197 L 512 327.68 c 0 64.518 0 96.7771 -12.556 121.4197 a 115.2 115.2 0 0 1 -50.3442 50.3442 c -24.6426 12.556 -56.9017 12.556 -121.4197 12.556 L 184.32 512 c -64.518 0 -96.7771 0 -121.4197 -12.556 a 115.2 115.2 0 0 1 -50.3442 -50.3442 c -12.556 -24.6426 -12.556 -56.9017 -12.556 -121.4197 L 0 184.32 c 0 -64.518 0 -96.7771 12.556 -121.4197 a 115.2 115.2 0 0 1 50.3442 -50.3442 c 24.6426 -12.556 56.9017 -12.556 121.4197 -12.556 Z" fill="#FFFFFF"/>
+  <g transform="translate(-69.371 -62.540) scale(1.241872)">
+    <path d="M312 139 H340 C347 139 351 146 348 152 L224 367 C221 372 218 374 212 374 H184 C177 374 173 367 176 361 L300 146 C303 141 306 139 312 139 Z" fill="#25282B" filter="url(#slashShadow)"/>
+    <path d="M312 139 H340 C347 139 351 146 348 152 L224 367 C221 372 218 374 212 374 H184 C177 374 173 367 176 361 L300 146 C303 141 306 139 312 139 Z" fill="none" stroke="url(#outerRim)" stroke-width="6" stroke-linejoin="round" filter="url(#outerRimSoft)"/>
+    <path d="M312 139 H340 C347 139 351 146 348 152 L224 367 C221 372 218 374 212 374 H184 C177 374 173 367 176 361 L300 146 C303 141 306 139 312 139 Z" fill="url(#slash)" stroke-linejoin="round" filter="url(#liquidSurface)"/>
+    <path d="M312 139 H340 C347 139 351 146 348 152 L224 367 C221 372 218 374 212 374 H184 C177 374 173 367 176 361 L300 146 C303 141 306 139 312 139 Z" fill="url(#convexSheen)" opacity="0.46"/>
+  </g>
+</svg>

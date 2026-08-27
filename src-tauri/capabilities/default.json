@@ -1,0 +1,23 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The minimum the shell needs: the core defaults; the two window commands that the native drag region in the application header calls; `set-effects`, which both applies and — called with no effects — withdraws the window material when the system asks for reduced transparency; `show` with `set-focus`, because the window is created hidden and is revealed only once it has something to show; `dialog:allow-open`, which is how a person chooses the folder to open as a project, the files a record's path field names, and the files attached to a message in Chat — the panel answers with a path, and nothing here can read one; and `open-url` under the opener's own default scope, which is how a link to the web reaches the browser. Nothing else is granted — no filesystem, shell, process or network access, and none of the updater's commands although the plugin is loaded: updating is a Rust flow in `src/updates.rs` that the webview has no route into, none of the dialog plugin's other commands, and neither of the opener's others: `open-path` would launch a file on the disk and `reveal-item-in-dir` would open Finder, and a record's body is not allowed to ask for either. Autostart's three commands are granted so the Server section can offer opening Sync at login — the server is what agents reach, and an agent working while Sync is closed reaches nothing. Two labels rather than one: a person can have any number of project windows open, and the ones after the first are `main-2`, `main-3` and so on — a capability is granted per label, so a window built under a name this pattern did not cover would be one whose webview could not so much as show itself.",
+  "windows": [
+    "main",
+    "main-*"
+  ],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-internal-toggle-maximize",
+    "core:window:allow-set-effects",
+    "core:window:allow-show",
+    "core:window:allow-set-focus",
+    "dialog:allow-open",
+    "opener:allow-open-url",
+    "opener:allow-default-urls",
+    "autostart:allow-enable",
+    "autostart:allow-disable",
+    "autostart:allow-is-enabled"
+  ]
+}

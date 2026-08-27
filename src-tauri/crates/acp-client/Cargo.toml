@@ -1,0 +1,67 @@
+[package]
+name = "acp-client"
+description = "Agent Client Protocol (ACP) client over stdio — bidirectional JSON-RPC transport, tolerant session/update decoding, and a declarative launch registry for the agent CLIs measured live."
+version = "0.1.0"
+# Edition 2021, unlike its neighbours: the crate arrived from the previous Sync
+# whole, and a dialect change is not part of a port that has to stay checkable
+# against the source it came from. Cargo resolves one graph across editions, so
+# nothing else in the workspace is held back by it.
+edition = "2021"
+rust-version = "1.91"
+publish = false
+
+[dependencies]
+# The protocol authors' own message types, and nothing else. The full
+# `agent-client-protocol` SDK is deliberately NOT taken: its connection layer
+# is built on the smol stack (`async-io`, `async-process`, `blocking`), which
+# would compile a second reactor into a tokio process for code we replace with
+# tokio anyway. What the types buy is the part that would be guesswork by hand
+# — they were run against `initialize` frames captured live off five agent CLIs
+# and all five deserialize, `_meta` extensions and divergent `authMethods`
+# included. `v1` is the module we use: every agent measured answers
+# `protocolVersion: 1`.
+agent-client-protocol-schema = "1.5"
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = [
+    "io-util",
+    "io-std",
+    "process",
+    "sync",
+    "time",
+    "macros",
+    "rt",
+] }
+tracing = "0.1"
+
+[dev-dependencies]
+futures = "0.3"
+tempfile = "3"
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "macros",
+    "time",
+    "io-util",
+    "sync",
+] }
+
+[lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+expect_used = "warn"
+todo = "warn"
+dbg_macro = "warn"
+
+# The counterpart the one process-level test talks to. It is an ACP *agent*,
+# i.e. the other side of this crate's wire, and it exists so that exactly one
+# test has to raise a process: everything else runs the protocol over an
+# in-memory duplex.
+[[bin]]
+name = "acp-stub-agent"
+path = "src/bin/acp_stub_agent.rs"

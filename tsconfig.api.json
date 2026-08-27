@@ -1,0 +1,23 @@
+{
+  // Declarations, and nothing else.
+  //
+  // The application never emits: `tsconfig.json` sets `noEmit`, because Next.js
+  // owns the build. API Extractor reads `.d.ts` files, so this configuration
+  // exists solely to produce them into `temp/`, which is not committed and is
+  // read by one command.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "declarationMap": false,
+    "incremental": false,
+    "rootDir": "src",
+    "outDir": "temp/dts"
+  },
+  // The extension surface and everything it re-exports. `src/app` is left out
+  // on purpose: it is the Next.js entry point, it imports a stylesheet, and a
+  // declaration build has no idea what a `.css` module is.
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["node_modules", "src-tauri", "src/app/**"]
+}

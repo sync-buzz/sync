@@ -1,0 +1,550 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+/*
+ * Sync design foundation.
+ *
+ * One semantic token layer, two designed appearances. Components must consume
+ * the tokens below and never hard-code a colour, radius, control height or
+ * motion value. Appearance follows the operating system unless a person chose
+ * otherwise in settings, and the greys are mixed from one hue so that the base
+ * colours shadcn/ui publishes are a tint of the same design rather than a
+ * second palette.
+ *
+ * The window is a frame and a slab. The frame is a tinted material that runs
+ * behind everything and shows as a narrow border on all four sides; the slab is
+ * the whole interface — toolbar, sidebar and all three content columns — as one
+ * opaque, rounded surface inset into it. Depth comes from that nesting, not
+ * from borders drawn everywhere.
+ *
+ * The material is deliberately muted rather than transparent. A tint at high
+ * opacity sits over it, so the frame keeps a colour we chose and the desktop
+ * behind the window only shifts its hue. Glass is not a surface here; it is the
+ * edge of the window catching what is behind it.
+ *
+ * The material itself is a window effect owned by Tauri; CSS only decides how
+ * much of it comes through, and it does so under `html[data-vibrancy="on"]`,
+ * which `useWindowMaterial` sets only when the effect is actually applied.
+ *
+ * Panel geometry (minimum / preferred / maximum widths) is intentionally NOT a
+ * CSS token. It is behaviour, not paint, and lives in `src/lib/shell-layout.ts`
+ * as the single source of truth for the resizable panel group.
+ */
+
+/*
+ * The appearance follows the system until somebody says otherwise.
+ *
+ * `data-appearance` on the document is that decision — `light`, `dark`, or
+ * absent for the system's own. It is set before the window is revealed, so the
+ * choice is never seen being applied.
+ */
+@custom-variant dark {
+  @media (prefers-color-scheme: dark) {
+    &:where(
+        :root:not([data-appearance="light"]),
+        :root:not([data-appearance="light"]) *
+      ) {
+      @slot;
+    }
+  }
+  &:where(
+      .dark,
+      .dark *,
+      :root[data-appearance="dark"],
+      :root[data-appearance="dark"] *
+    ) {
+    @slot;
+  }
+}
+
+/* ---------------------------------------------------------------- *
+ * Light appearance
+ * ---------------------------------------------------------------- */
+:root {
+  /*
+   * The tint every grey in this layer is mixed from: one hue, and one scale
+   * over the saturations chosen for it. The default is the zinc the shell was
+   * designed in; the other base colours shadcn/ui publishes are the same
+   * surfaces at another hue, which is why they are two numbers rather than a
+   * second palette to keep in step.
+   */
+  --tint-h: 240;
+  --tint-s: 1;
+
+  /* Surfaces. Content moves away from mid-grey, chrome stays near it. */
+  --surface-window: hsl(var(--tint-h) calc(5% * var(--tint-s)) 84%); /* the frame around the slab */
+  --surface-sidebar: hsl(var(--tint-h) calc(5% * var(--tint-s)) 94%); /* primary sidebar, inside the slab */
+  --surface-panel: hsl(var(--tint-h) calc(5% * var(--tint-s)) 97%); /* context navigator and inspector */
+  --surface-workspace: hsl(0 0% 100%); /* dominant content surface */
+  --surface-raised: hsl(0 0% 100%); /* controls, menus, popovers */
+
+  /*
+   * The frame over the window material. Opaque enough that the colour above is
+   * still the colour you see; the desktop only tints it.
+   */
+  --surface-window-material: hsl(var(--tint-h) calc(5% * var(--tint-s)) 84% / 0.78);
+
+  /* Text */
+  --text-primary: hsl(var(--tint-h) calc(6% * var(--tint-s)) 11%);
+  --text-secondary: hsl(var(--tint-h) calc(4% * var(--tint-s)) 36%);
+  --text-tertiary: hsl(var(--tint-h) calc(4% * var(--tint-s)) 47%);
+
+  /* Structure */
+  --separator: hsl(var(--tint-h) calc(5% * var(--tint-s)) 86%); /* hairlines inside a panel */
+  --separator-strong: hsl(var(--tint-h) calc(6% * var(--tint-s)) 78%); /* structural edges between panels */
+
+  /* Interaction states */
+  --state-hover: hsl(var(--tint-h) calc(8% * var(--tint-s)) 12% / 0.045);
+  --state-selected: hsl(var(--tint-h) calc(8% * var(--tint-s)) 12% / 0.075);
+  --focus-ring: hsl(211 100% 43%);
+  /*
+   * The dim over the slab while a sheet is open. It is the one overlay in the
+   * shell that has to darken a surface rather than tint a control, so no
+   * interaction-state token covers it.
+   */
+  --scrim: hsl(var(--tint-h) calc(8% * var(--tint-s)) 12% / 0.24);
+
+  /* Status. Supporting information only, never layout. */
+  --status-success: hsl(145 63% 27%);
+  --status-warning: hsl(32 90% 32%);
+  --status-danger: hsl(0 68% 42%);
+
+  /* Geometry */
+  --control-height-sm: 24px;
+  --control-height: 28px;
+  --control-height-lg: 32px;
+  --radius-control: 7px;
+  --radius-surface: 10px;
+  /* The slab, rounded a shade tighter than the window macOS draws around it. */
+  --radius-window: 10px;
+  /* The width of the frame the slab is inset by. */
+  --window-inset: 8px;
+  --header-height: 44px;
+  --panel-header-height: 34px;
+  /*
+   * Leading space reserved for the native macOS window controls, measured from
+   * the edge of the slab — the frame already accounts for the rest.
+   *
+   * The buttons themselves are placed by `trafficLightPosition` in
+   * `src-tauri/tauri.conf.json`, in window coordinates, and that position is
+   * not the plain offset it looks like: tao sets the title bar container's
+   * height to `button height + y`, which leaves the buttons sitting `y - 8`
+   * from the top of the window. Centring them on this header therefore means
+   *
+   *   x = window inset + 20            (the inset the buttons want, from the slab)
+   *   y = window inset + header / 2 + 2
+   *
+   * so 8 + 20 = 28 and 8 + 22 + 2 = 32. Changing the frame or the header
+   * height means recomputing both.
+   */
+  --titlebar-inset: 84px;
+
+  /*
+   * The lift that separates the slab from the frame: a hairline ring and one
+   * soft shadow. It is the only shadow in the shell, and it expresses nesting
+   * rather than decorating a card.
+   */
+  --shadow-content:
+    0 0 0 0.5px hsl(var(--tint-h) calc(8% * var(--tint-s)) 12% / 0.16), 0 1px 2px hsl(var(--tint-h) calc(8% * var(--tint-s)) 12% / 0.08),
+    0 14px 32px -14px hsl(var(--tint-h) calc(8% * var(--tint-s)) 12% / 0.32);
+
+  /* Motion */
+  --motion-duration-fast: 90ms;
+  --motion-duration: 140ms;
+  --motion-ease: cubic-bezier(0.32, 0.72, 0, 1);
+
+  /* shadcn/ui contract, mapped onto the tokens above. */
+  --background: var(--surface-workspace);
+  --foreground: var(--text-primary);
+  --card: var(--surface-raised);
+  --card-foreground: var(--text-primary);
+  --popover: var(--surface-raised);
+  --popover-foreground: var(--text-primary);
+  --primary: var(--text-primary);
+  --primary-foreground: var(--surface-workspace);
+  --secondary: var(--surface-panel);
+  --secondary-foreground: var(--text-primary);
+  --muted: var(--surface-panel);
+  --muted-foreground: var(--text-secondary);
+  --accent: var(--state-hover);
+  --accent-foreground: var(--text-primary);
+  --destructive: var(--status-danger);
+  --border: var(--separator);
+  --input: var(--separator-strong);
+  --ring: var(--focus-ring);
+  --radius: var(--radius-surface);
+}
+
+/* ---------------------------------------------------------------- *
+ * Dark appearance
+ *
+ * Designed, not inverted. The ordering rule is preserved rather than the
+ * values: content sits furthest from mid-grey, chrome sits closest to it, so
+ * the workspace still reads as the surface that carries the work.
+ * ---------------------------------------------------------------- */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-appearance="light"]) {
+    --surface-window: hsl(var(--tint-h) calc(7% * var(--tint-s)) 5%);
+    --surface-window-material: hsl(var(--tint-h) calc(7% * var(--tint-s)) 5% / 0.72);
+    --surface-sidebar: hsl(var(--tint-h) calc(5% * var(--tint-s)) 15%);
+    --surface-panel: hsl(var(--tint-h) calc(5% * var(--tint-s)) 13%);
+    --surface-workspace: hsl(var(--tint-h) calc(6% * var(--tint-s)) 9.5%);
+    --surface-raised: hsl(var(--tint-h) calc(4% * var(--tint-s)) 22%);
+
+    --text-primary: hsl(var(--tint-h) calc(10% * var(--tint-s)) 95%);
+    --text-secondary: hsl(var(--tint-h) calc(5% * var(--tint-s)) 70%);
+    --text-tertiary: hsl(var(--tint-h) calc(5% * var(--tint-s)) 58%);
+
+    --separator: hsl(var(--tint-h) calc(10% * var(--tint-s)) 100% / 0.12);
+    --separator-strong: hsl(var(--tint-h) calc(10% * var(--tint-s)) 100% / 0.2);
+
+    --shadow-content:
+      0 0 0 0.5px hsl(0 0% 100% / 0.11), 0 1px 2px hsl(0 0% 0% / 0.5),
+      0 16px 36px -14px hsl(0 0% 0% / 0.7);
+
+    --state-hover: hsl(0 0% 100% / 0.05);
+    --state-selected: hsl(0 0% 100% / 0.085);
+    --focus-ring: hsl(211 100% 64%);
+    --scrim: hsl(var(--tint-h) calc(7% * var(--tint-s)) 3% / 0.48);
+
+    --status-success: hsl(145 50% 58%);
+    --status-warning: hsl(38 88% 60%);
+    --status-danger: hsl(0 78% 66%);
+  }
+}
+
+.dark,
+:root[data-appearance="dark"] {
+  --surface-window: hsl(var(--tint-h) calc(7% * var(--tint-s)) 5%);
+  --surface-window-material: hsl(var(--tint-h) calc(7% * var(--tint-s)) 5% / 0.72);
+  --surface-sidebar: hsl(var(--tint-h) calc(5% * var(--tint-s)) 15%);
+  --surface-panel: hsl(var(--tint-h) calc(5% * var(--tint-s)) 13%);
+  --surface-workspace: hsl(var(--tint-h) calc(6% * var(--tint-s)) 9.5%);
+  --surface-raised: hsl(var(--tint-h) calc(4% * var(--tint-s)) 22%);
+
+  --text-primary: hsl(var(--tint-h) calc(10% * var(--tint-s)) 95%);
+  --text-secondary: hsl(var(--tint-h) calc(5% * var(--tint-s)) 70%);
+  --text-tertiary: hsl(var(--tint-h) calc(5% * var(--tint-s)) 58%);
+
+  --separator: hsl(var(--tint-h) calc(10% * var(--tint-s)) 100% / 0.12);
+  --separator-strong: hsl(var(--tint-h) calc(10% * var(--tint-s)) 100% / 0.2);
+
+  --shadow-content:
+    0 0 0 0.5px hsl(0 0% 100% / 0.11), 0 1px 2px hsl(0 0% 0% / 0.5),
+    0 16px 36px -14px hsl(0 0% 0% / 0.7);
+
+  --state-hover: hsl(0 0% 100% / 0.05);
+  --state-selected: hsl(0 0% 100% / 0.085);
+  --focus-ring: hsl(211 100% 64%);
+  --scrim: hsl(var(--tint-h) calc(7% * var(--tint-s)) 3% / 0.48);
+
+  --status-success: hsl(145 50% 58%);
+  --status-warning: hsl(38 88% 60%);
+  --status-danger: hsl(0 78% 66%);
+}
+
+/* ---------------------------------------------------------------- *
+ * Base colours
+ *
+ * The five greys shadcn/ui publishes, expressed as what actually differs
+ * between them: a hue and how much of it the surfaces carry. Nothing else in
+ * the layer changes, so a project that prefers a warmer window gets the same
+ * shell rather than a second one to maintain.
+ * ---------------------------------------------------------------- */
+[data-tint="neutral"] {
+  --tint-h: 0;
+  --tint-s: 0;
+}
+
+[data-tint="zinc"] {
+  --tint-h: 240;
+  --tint-s: 1;
+}
+
+[data-tint="gray"] {
+  --tint-h: 220;
+  --tint-s: 1.6;
+}
+
+[data-tint="slate"] {
+  --tint-h: 215;
+  --tint-s: 2.6;
+}
+
+[data-tint="stone"] {
+  --tint-h: 20;
+  --tint-s: 1.1;
+}
+
+/* The mark that names a base colour, drawn in the colour it names. */
+.tint-swatch {
+  background-color: hsl(var(--tint-h) calc(12% * var(--tint-s)) 52%);
+}
+
+/* ---------------------------------------------------------------- *
+ * Window material
+ *
+ * Only the frame changes: it swaps its opaque grey for the same grey at high
+ * opacity, so the material underneath tints it instead of replacing it. The
+ * slab never becomes translucent, which is what keeps the interface itself
+ * free of glass.
+ *
+ * `useWindowMaterial` sets `data-vibrancy` after Tauri confirms the effect was
+ * applied, so a browser — and a system asking for reduced transparency — keeps
+ * the opaque value and the window still reads the same.
+ * ---------------------------------------------------------------- */
+html[data-vibrancy="on"] {
+  /* The document canvas must not paint, or there is nothing to tint. */
+  background-color: transparent;
+}
+
+html[data-vibrancy="on"] body {
+  background-color: var(--surface-window-material);
+}
+
+/* ---------------------------------------------------------------- *
+ * Accessibility preferences
+ * ---------------------------------------------------------------- */
+
+/*
+ * Translucency in the shell is the window material plus the alpha of the hover
+ * and selection overlays. The material is withdrawn in JavaScript because it
+ * belongs to the window, not to a stylesheet; the overlays harden here, with
+ * opaque equivalents tuned for the sidebar, where selection lives.
+ */
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --state-hover: hsl(var(--tint-h) calc(5% * var(--tint-s)) 91%);
+    --state-selected: hsl(var(--tint-h) calc(5% * var(--tint-s)) 87%);
+    --scrim: hsl(var(--tint-h) calc(6% * var(--tint-s)) 62%);
+  }
+}
+
+@media (prefers-color-scheme: dark) and (prefers-reduced-transparency: reduce) {
+  :root:not([data-appearance="light"]) {
+    --state-hover: hsl(var(--tint-h) calc(4% * var(--tint-s)) 19%);
+    --state-selected: hsl(var(--tint-h) calc(4% * var(--tint-s)) 23%);
+    --scrim: hsl(var(--tint-h) calc(7% * var(--tint-s)) 6%);
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --text-secondary: var(--text-primary);
+    --text-tertiary: hsl(var(--tint-h) calc(5% * var(--tint-s)) 28%);
+    --separator: hsl(var(--tint-h) calc(6% * var(--tint-s)) 62%);
+    --separator-strong: hsl(var(--tint-h) calc(8% * var(--tint-s)) 42%);
+    --state-selected: hsl(var(--tint-h) calc(8% * var(--tint-s)) 12% / 0.18);
+  }
+}
+
+@media (prefers-color-scheme: dark) and (prefers-contrast: more) {
+  :root:not([data-appearance="light"]) {
+    --text-tertiary: hsl(var(--tint-h) calc(8% * var(--tint-s)) 80%);
+    --separator: hsl(var(--tint-h) calc(10% * var(--tint-s)) 100% / 0.32);
+    --separator-strong: hsl(var(--tint-h) calc(10% * var(--tint-s)) 100% / 0.48);
+    --state-selected: hsl(0 0% 100% / 0.22);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-duration-fast: 0ms;
+    --motion-duration: 0ms;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ---------------------------------------------------------------- *
+ * Tailwind theme
+ * ---------------------------------------------------------------- */
+@theme inline {
+  /* System typography only. No downloaded or remote fonts. */
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue",
+    "Segoe UI", system-ui, sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  /* Desktop density: a 4px spacing grid drives every numeric utility. */
+  --spacing: 4px;
+
+  --text-xs: 11px;
+  --text-xs--line-height: 14px;
+  --text-sm: 12px;
+  --text-sm--line-height: 16px;
+  --text-base: 13px;
+  --text-base--line-height: 18px;
+  --text-lg: 15px;
+  --text-lg--line-height: 20px;
+  /*
+   * One size above the interface scale, for the launch screen alone. The shell
+   * has no brand mark, so at launch the name of the application has to do the
+   * work an icon would, and it cannot do that at fifteen pixels in the middle
+   * of an empty window.
+   */
+  --text-display: 26px;
+  --text-display--line-height: 32px;
+
+  --color-window: var(--surface-window);
+  --color-sidebar: var(--surface-sidebar);
+  --color-panel: var(--surface-panel);
+  --color-workspace: var(--surface-workspace);
+  --color-raised: var(--surface-raised);
+
+  --color-fg: var(--text-primary);
+  --color-fg-secondary: var(--text-secondary);
+  --color-fg-tertiary: var(--text-tertiary);
+
+  --color-separator: var(--separator);
+  --color-separator-strong: var(--separator-strong);
+  --color-hover: var(--state-hover);
+  --color-selected: var(--state-selected);
+  --color-focus: var(--focus-ring);
+  --color-scrim: var(--scrim);
+
+  --color-success: var(--status-success);
+  --color-warning: var(--status-warning);
+  --color-danger: var(--status-danger);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --radius-sm: calc(var(--radius) * 0.5);
+  --radius-md: calc(var(--radius) * 0.75);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.5);
+
+  --ease-shell: var(--motion-ease);
+}
+
+/* ---------------------------------------------------------------- *
+ * Animation
+ *
+ * The one keyframe animation in the shell. It belongs to the launch screen,
+ * where something has to say that time is passing without claiming to know how
+ * much of it is left.
+ * ---------------------------------------------------------------- */
+@keyframes launch-progress {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+
+/* ---------------------------------------------------------------- *
+ * Base layer
+ * ---------------------------------------------------------------- */
+@layer base {
+  *,
+  ::after,
+  ::before {
+    border-color: var(--separator);
+  }
+
+  html {
+    height: 100%;
+    /* Let native controls, scrollbars and form widgets follow the system. */
+    color-scheme: light dark;
+  }
+
+  body {
+    height: 100%;
+    overflow: hidden;
+    background-color: var(--surface-window);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    line-height: var(--text-sm--line-height);
+  }
+
+  /*
+   * The surface a record's text is set on, and the one place both surfaces
+   * agree.
+   *
+   * A record read and a record being edited must not be two documents — that is
+   * the rule `components/editor/nodes.tsx` exists to hold — so the size, the
+   * face, the measure and the line live in four variables here rather than in
+   * two components that would drift. Everything inside is expressed in `em`, so
+   * the size is the *base of the scale* and not a patch over it: headings,
+   * quotes, code and tables all move together and keep the proportions the
+   * design chose.
+   *
+   * The defaults sit on `:root` rather than on the surface, and that is not
+   * tidiness: a person's choice is written to `:root`, and a copy declared on
+   * the surface would win over it every time. They are stated here as well as
+   * in `lib/settings/typography.ts` so the prerendered document is right before
+   * any script has run — thirteen pixels of the system's own face, in a column
+   * of six hundred and eighty, set at one and a half.
+   */
+  :root {
+    --prose-size: 13px;
+    --prose-family: var(--font-sans);
+    --prose-measure: 680px;
+    --prose-leading: 1.5;
+  }
+
+  .prose-surface {
+    max-width: var(--prose-measure);
+    font-family: var(--prose-family);
+    font-size: var(--prose-size);
+    line-height: var(--prose-leading);
+  }
+
+  /*
+   * The line and the gap between blocks are one decision, so the gap is half a
+   * line rather than a number of its own. Pressing Return should land the caret
+   * where the next paragraph starts; a full line of air made every break read
+   * as a section.
+   *
+   * Not scoped under `.prose-surface`, because the variable is inherited and
+   * the two classes sometimes sit on the same element — the preview in settings
+   * is one, and a descendant selector would have quietly skipped it.
+   */
+  .prose-blocks > * + * {
+    margin-top: calc(var(--prose-leading) * 0.5em);
+  }
+
+  /* Keyboard focus is always visible and never depends on colour alone. */
+  :focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 1px;
+  }
+
+  @media (prefers-contrast: more) {
+    :focus-visible {
+      outline-width: 3px;
+    }
+  }
+
+  ::selection {
+    background-color: var(--state-selected);
+  }
+}

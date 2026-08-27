@@ -1,0 +1,178 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  frontend:
+    name: frontend
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The API surface check compares the committed report against the
+          # base branch, so the base branch has to be here to compare with.
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Lint
+        run: pnpm lint
+      - name: Type-check
+        run: pnpm exec tsc --noEmit
+      # What an extension is allowed to see, and the number it is promised
+      # under. Two failures are worth having and they are different: the surface
+      # moved and the report was not updated, or the report was updated and
+      # `SYNC_API_VERSION` was left where it was. The second is the quiet one —
+      # a package states a range against that number and would go on believing
+      # it. See `scripts/api-surface.mjs`.
+      - name: Extension API surface
+        env:
+          API_SURFACE_BASE: >-
+            ${{ github.event_name == 'pull_request'
+                && format('origin/{0}', github.base_ref)
+                || 'HEAD' }}
+        run: pnpm api:check
+      - name: Static export
+        run: pnpm build
+
+  rust:
+    name: rust
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Lint
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --workspace
+
+  # The rule the whole extension design rests on, and the only one a compiler
+  # cannot hold: nothing in this repository is an extension. `ShellAreaId`,
+  # `AREA_IMPLEMENTATIONS` and the `EXTENSIONS` catalogue are gone, so the
+  # window can no longer name one in a type or a constant — but nothing stops
+  # somebody adding `src/extensions/` back and importing from it, and the
+  # failure would look like a feature until the day an extension has to be
+  # loaded from a package.
+  extensions-outside:
+    name: extensions / none of them are in here
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: No extension lives in this repository
+        run: |
+          set -eu
+          if [ -e src/extensions ]; then
+            echo "src/extensions exists. Extensions are built in sync-extensions" >&2
+            echo "and installed as packages; see docs/extensions.md §1." >&2
+            exit 1
+          fi
+          # A reference to it is the same failure one commit earlier: the
+          # directory is gone and something still expects it back. Only the
+          # code is searched, and only for something that resolves — prose
+          # about the rule is not a breach of it, and the sentence explaining
+          # why the lint rule was retired names the path it retired.
+          leaks=$(grep -rnE "from ['\"]@/extensions|require\\(['\"]@/extensions|['\"][^'\"]*src/extensions" \
+            --include='*.ts' --include='*.tsx' --include='*.mjs' \
+            src scripts \
+            || true)
+          if [ -n "$leaks" ]; then
+            echo "something still points at the extensions directory:" >&2
+            echo "$leaks" >&2
+            exit 1
+          fi
+
+  # Everything about the engine lives behind `sync-memory`. If another module
+  # starts reading `refs/memory/*`, opening the index, or loading a model
+  # directly, the isolation that makes a crash in ggml a reconnect rather than a
+  # lost window is gone — and it would go quietly, so it is checked here.
+  memory-boundary:
+    name: memory / client is the only door
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: No direct engine access from the window
+        run: |
+          set -eu
+          # A name that resolves, not a name that is mentioned — the same
+          # distinction `extensions-outside` makes, for the same reason. The
+          # ref, the index, the model and the database are each reached by
+          # writing them down as a path or an import, so what is searched for
+          # is the quote or the `use` in front of them. A doc comment saying
+          # every save is a commit on `refs/memory/*`, and the line in the type
+          # sheet that tells a person which ref their records go to, say the
+          # words this job forbids and open nothing; the first spelling of this
+          # check caught all six of them and had never caught anything else.
+          module='[A-Za-z0-9_./@-]*'
+          leaks=$(grep -rnE \
+            -e "['\"]${module}refs/memory" \
+            -e "['\"]${module}memory-hub/index" \
+            -e "['\"]${module}\.gguf" \
+            -e "['\"]${module}lancedb" \
+            -e "(use|extern crate) +lancedb" \
+            -e "lancedb::" \
+            --include='*.rs' --include='*.ts' --include='*.tsx' \
+            src src-tauri/src \
+            || true)
+          if [ -n "$leaks" ]; then
+            echo "memory internals reached the window or the frontend:" >&2
+            echo "$leaks" >&2
+            exit 1
+          fi
+  # The memory engine is a separate repository on its own release cadence, and
+  # Sync links it: the bundled sidecar is `sync-mcp` with the engine inside it,
+  # not the engine itself. The manifest pins the engine to a tag, so what this
+  # job builds is what a release is cut against and what a bundle would ship —
+  # and the tag's own repository already tested the engine at that tag, so what
+  # is worth running here is Sync's end-to-end tests through the real sidecar.
+  # A failure is a release blocker: that sidecar is what users get.
+  memory-contract:
+    name: memory / bundled sidecar contract
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # Built from this workspace, not copied from anywhere. The bundled sidecar
+      # *is* `sync-mcp` with the engine linked inside it, so staging a
+      # `memory-hub` here would stage something that does not speak the window's
+      # channel at all.
+      - name: Build and stage the sidecar the way the bundle will
+        run: ./scripts/prepare-sidecar.sh
+
+      # No `SYNC_MCP_BINARY`: the suites find the copy just staged in
+      # `binaries/`, which is the one a bundle would ship and therefore the one
+      # worth testing. Setting it would test something else.
+      - name: Run Sync's end-to-end tests through the real sidecar
+        working-directory: src-tauri
+        run: |
+          cargo test --locked -p sync-mcp --test agent_surface
+          cargo test --locked -p sync-memory --test sidecar_smoke
+          cargo test --locked --test memory_commands
+          cargo test --locked --test project_commands
+          cargo test --locked --test connect_commands
+          cargo test --locked --test extension_commands

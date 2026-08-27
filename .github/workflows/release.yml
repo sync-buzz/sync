@@ -1,0 +1,193 @@
+name: release
+
+# Tag-triggered. Pushing a semver tag is what cuts a release:
+#
+#   scripts/release.sh 0.8.1 --push
+#
+# The `build` matrix runs the Tauri bundler on each host OS it publishes for and
+# produces a platform-native installer, never a loose binary:
+#
+#   macOS -> .dmg
+#
+# It is one entry, and that is a decision rather than a limit of the pipeline.
+# The window is drawn against macOS: the `underWindowBackground` material, the
+# title bar the header occupies, the traffic lights placed by hand, the Dock
+# menu, the system speech synthesiser. Some of that degrades honestly elsewhere
+# and some of it does not, and nobody has yet launched a Linux or Windows build
+# to find out which. Shipping an installer nobody has opened is a worse first
+# impression than shipping none. Adding a row back is the whole of the change,
+# once somebody can open what it produces.
+#
+# The installer is uploaded as an artifact, and the separate `release` job
+# publishes it. The two are kept apart so that adding platforms back does not
+# reintroduce the create-race several matrix runners would otherwise have.
+#
+# Two things worth knowing before reading it. The bundle ships `sync-mcp` as an
+# `externalBin`, and that binary *links* the memory engine — so the runner builds
+# it before the bundler runs, which is the long pole of this workflow. And the
+# frontend is a static Next.js export built with pnpm, produced here rather than
+# by `beforeBuildCommand`, which `tauri.ci.conf.json` empties: the in-repo
+# command is written for a developer's working directory.
+#
+# macOS signing is driven by repository secrets. With them unset the .dmg builds
+# UNSIGNED and Gatekeeper reports it as damaged on first launch — a release
+# still succeeds, so a fork is not blocked, but a release meant for people needs
+# all three signing values and one notarisation method.
+
+on:
+  push:
+    tags: ["v*"]
+
+# Least privilege: only the publishing job needs write.
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  build:
+    name: build / ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ${{ matrix.target }}
+
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          version: "25.1"
+
+      - name: Build the frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      # Before the bundler, because the bundler copies it in. This is the
+      # engine: `sync-mcp` links `memory-hub` rather than spawning it, so this
+      # step is a full release build of the memory stack and is most of the
+      # time this job takes.
+      - name: Build and stage the sidecar
+        shell: bash
+        run: ./scripts/prepare-sidecar.sh --target ${{ matrix.target }}
+
+      - name: Build the installer
+        uses: tauri-apps/tauri-action@v0
+        env:
+          # Developer ID signing and notarisation. tauri-action imports the
+          # certificate into a throwaway keychain and notarises the .dmg when
+          # these are set; absent, the bundle is unsigned and the release still
+          # succeeds, so a fork with no certificate is not blocked.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # A minisign keypair, and nothing to do with the Apple certificate.
+          # The private half signs the packages the installed application
+          # downloads, so that it can verify them against the public half
+          # compiled into it. The password variable is set even when it is
+          # empty on purpose: unset, the bundler prompts and hangs the runner.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          # The Tauri crate is not the repository root. `tauri.ci.conf.json` is
+          # resolved relative to this and empties `beforeBuildCommand`, since
+          # the frontend is already built above. `tauri.updater.conf.json` is
+          # layered on only when the signing key is provisioned: with it on and
+          # no key the bundler hard-fails, which would break forks, and without
+          # it the build simply produces no updater artifacts and stays green.
+          projectPath: src-tauri
+          args: --target ${{ matrix.target }} --config tauri.ci.conf.json ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' && '--config tauri.updater.conf.json' || '' }}
+
+      - name: Collect installers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          base="src-tauri/target/${{ matrix.target }}/release/bundle"
+          shopt -s nullglob
+
+          # Stable, version-less filenames. The README links to
+          # releases/latest/download/<stable name>, which GitHub resolves to the
+          # newest release, so those links never need editing. The version is
+          # carried by the tag and the release title, not by the filename — keep
+          # these names in step with the download links in README.md.
+          stable_copy() {          # <source glob> <stable name>
+            local src
+            for src in $1; do
+              cp "$src" "dist/$2"
+            done
+          }
+          stable_copy "$base/dmg/*.dmg"           "Sync_macOS_aarch64.dmg"
+
+          # The signed package the background updater downloads, and its
+          # signature. `scripts/release.sh --publish-manifest` reads the .sig
+          # back off the release to assemble updater/manifest.json. Absent on
+          # unsigned builds, where nullglob simply skips them.
+          stable_copy "$base/macos/*.app.tar.gz"      "Sync_macOS_aarch64.app.tar.gz"
+          stable_copy "$base/macos/*.app.tar.gz.sig"  "Sync_macOS_aarch64.app.tar.gz.sig"
+
+          ls -la dist
+          # Only wrapped installers ship — the loose .app and the unpacked
+          # directories are deliberately not uploaded. Fail loudly on nothing.
+          [ -n "$(ls -A dist)" ] || { echo "::error::no installers produced for ${{ matrix.target }}"; exit 1; }
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: publish github release
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # create the release and upload its assets
+    steps:
+      - name: Gather every built installer
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true # flatten every release-* artifact into dist/
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+          # Published, not drafted: the tag is the decision. What makes a
+          # version reach installed copies is a separate act — pushing
+          # updater/manifest.json — so there is nothing here to hold back.
+          draft: false

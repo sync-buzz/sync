@@ -1,0 +1,26 @@
+{
+  // The configuration API Extractor analyses declarations with.
+  //
+  // Separate from `tsconfig.api.json`, which *emits* them, and the difference
+  // is one line: `@/*`. When declarations are emitted the alias points at
+  // `src`, because that is where the TypeScript is. When they are analysed it
+  // has to point at `temp/dts`, or the analyser follows a re-export out of the
+  // declaration world and back into the source — where it finds a `const` it
+  // cannot follow and reports an internal error naming nothing useful.
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "noEmit": true,
+    "paths": {
+      "@/*": ["./temp/dts/*"]
+    }
+  },
+  "include": ["temp/dts/**/*.d.ts"]
+}
