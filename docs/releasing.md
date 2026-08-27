@@ -78,15 +78,36 @@ installed on machines. They poll
 launch, and that path now resolves to this repository.
 
 `updater/latest.json` is therefore a tombstone, frozen at `0.6.13` — the last
-version that product ever released through its own channel — with its download
-URLs pointed at the archived repository so they still resolve. An old copy
-asking gets a truthful "nothing newer" and stays where it is.
+version that product shipped *through the updater*, whatever later releases its
+repository carries — with its download URLs pointed at `sync-buzz/sync-legacy`,
+where that repository now lives, so they still resolve.
 
-**Never write a current version into it.** The two products share no data
-format, and the updater does not care: it would download the package, verify
-it against a key those builds do not have — and fail, or worse, succeed if the
-key were ever reused. This file is read-only history. New versions go to
-`updater/manifest.json`, which nothing old has ever heard of.
+**This version must never reach a copy of that one**, and three separate things
+have to fail before it could. Each is worth knowing, because only the third
+survives a mistake:
+
+1. **A different file.** Old copies poll `latest.json`; this product publishes
+   `manifest.json`, which nothing old has ever heard of. A release here is
+   invisible over there.
+2. **A version that never rises.** `latest.json` says `0.6.13` and stays there.
+   The updater only moves upward, so a copy at or above that number does
+   nothing. A copy below it updates to `0.6.13` and no further — the old
+   product's own last build, from the archived repository.
+3. **A key that cannot verify us.** The two products were signed with different
+   minisign keys, and each verifies against the public half compiled into it:
+
+   ```
+   the old product   786A3773E54FFC03
+   this product      83672F841B0B187
+   ```
+
+   So a package we sign is not merely unwanted by an old copy — it is
+   unverifiable, and refused before it is installed. This is the barrier that
+   holds when somebody writes the wrong thing into the wrong file.
+
+**Never write a current version into `latest.json` anyway.** Barrier 3 turns
+that mistake into a failed update rather than a broken installation, which is a
+better outcome and still not a good one. This file is read-only history.
 
 ## Signing the updates
 

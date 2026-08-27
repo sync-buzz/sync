@@ -64,6 +64,30 @@ launch is the new version, and the menu bar item offers a restart to anybody who
 would rather not wait. Nothing about that flow is reachable from the window's
 content.
 
+### If you came here looking for the old Sync
+
+A different application used to live at this address. It is preserved,
+unmaintained, at **[sync-buzz/sync-legacy](https://github.com/sync-buzz/sync-legacy)**,
+and its releases are still downloadable there.
+
+**This is not a new version of it.** It is a different application with a
+different data format, and there is no migration — nothing here reads what that
+one wrote. If you are using it, it goes on working exactly as it does today:
+copies in the field will **not** be updated to this, deliberately and by three
+independent mechanisms. The two were signed with different keys, so a build from
+this repository is not merely unwanted by an old copy but unverifiable by it.
+The reasoning is in [docs/releasing.md](docs/releasing.md).
+
+**They do not share settings or data.** The two bundles carry different
+identifiers — `buzz.sync` here, `chat.sync.desktop` there — so macOS treats them
+as separate applications and neither reads the other's configuration directory.
+
+**They do want the same name in `/Applications`.** Both bundle as `Sync.app`, so
+installing this one over the old one replaces the application. What that
+replaces is the application only: the old one's data sits under its own
+identifier and is untouched. To keep both, rename one of them in Finder before
+installing the other.
+
 ## What that looks like in practice
 
 **Four freshness states, and the engine derives every one.** `fresh`,
