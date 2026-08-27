@@ -7848,7 +7848,7 @@ dependencies = [
 
 [[package]]
 name = "sync"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "acp-client",
  "agent-bridge",
