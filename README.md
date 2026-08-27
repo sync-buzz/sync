@@ -1,22 +1,47 @@
 # Sync
 
-**A desktop application that gives a project a memory — and tells you when that
-memory has gone out of date.**
+### Project memory that knows when it has gone stale
 
-Every project accumulates things that are true but written nowhere the code can
-hold them: why this was chosen over that, what must never be done here, what
-somebody found out the hard way, what nobody has settled yet. They live in chat
-logs, in issue comments, in one person's head. Sync keeps them in the project's
-own Git repository, beside the code they are about, and reconciles them against
-the code's history — so a claim the code has moved out from under is **marked as
-stale rather than quietly believed**.
+Your agents have memory now — a `CLAUDE.md`, a rules file, a vector store, a
+wiki page somebody wrote in March. That is not the hard part. The hard part is
+that **none of it can tell you when it stopped being true.**
 
-Agents read the same memory over MCP. That is the point of keeping it this way:
-what you write down once is what your agents know.
+A note that says *sessions live in Redis* survives the migration to Postgres.
+It reads exactly as confidently on the day it is right and the day it is wrong,
+and the agent that acts on it is fast, certain and mistaken. You find out in
+review, or you don't.
 
-> **Pre-1.0 and under active development.** It is used daily on the machine it
-> is built on, and it is not finished. What is here works; what is absent is
-> absent rather than stubbed. See [Where it stands](#where-it-stands).
+**Sync binds each thing a project knows to the files it is about.** When those
+files change, the claim is marked `stale` — not by a review date somebody set
+and forgot, but by reconciling the record against the repository's own history,
+every time it is read. The memory does not have to be maintained to stay
+honest. It tells you where it has rotted.
+
+Everything lives in your repository's own Git objects, so it branches, merges,
+travels to your colleagues and belongs to you. There is no account, no server of
+ours, and nothing leaves the machine except through the remote you chose.
+
+The other three things it does differently, each because the first one made it
+necessary:
+
+- **A record is typed, not a paragraph.** A decision, a constraint, an
+  observation, a task — each with its own fields, its own relations and its own
+  rules, so a claim can say what it is scoped to. Free text cannot be reconciled
+  against anything.
+- **It merges like code.** A fetch is a three-way merge, member by member.
+  Where you and a colleague both moved, **yours is kept and the member is
+  named** — nothing is silently absorbed, and nothing is destroyed.
+- **Search says when it found nothing.** Words are matched first, meaning
+  second, and each hit says which it was. When nothing matched by words it says
+  so instead of handing you the nearest record with a confident face.
+
+Agents read it over MCP, and you can drive one *from* Sync over ACP without
+leaving the window. What you write down once is what your agents know — and
+what they are told to distrust.
+
+> **Pre-1.0 and under active development.** Used daily on the machine it is
+> built on, and not finished. What is here works; what is absent is absent
+> rather than stubbed. See [Where it stands](#where-it-stands).
 
 ## Install
 
@@ -39,54 +64,42 @@ launch is the new version, and the menu bar item offers a restart to anybody who
 would rather not wait. Nothing about that flow is reachable from the window's
 content.
 
-## What it gives you
+## What that looks like in practice
 
-**Knowledge that lives in the repository.** A project's memory is written to Git
-objects under `refs/memory/*`. It travels with the repository, versions itself,
-pushes to the same remote and puts nothing in the working tree. Clone the
-project somewhere else and it is the same project, with the same memory. There
-is no account and no server of ours between you and it.
+**Four freshness states, and the engine derives every one.** `fresh`,
+`unverified`, `stale`, `invalid` — never typed in, never a field somebody
+maintains. `stale` means the paths a record named have moved since it was
+written. The navigator counts them, so a project can be read by how much of what
+it knows is still load-bearing.
 
-**Records that know when they have rotted.** A record can name the paths its
-claim is about. The engine reconciles those paths against the repository's
-history and answers `fresh`, `unverified`, `stale` or `invalid` — and `stale`
-means the code moved under the claim. It is derived, never typed in. This is the
-one thing a wiki cannot do.
+**A record opens as the text it is.** No edit mode, no form: the caret goes
+where you clicked and typing changes the record, title included. Markdown is the
+format, so Markdown decides the feature set — and a body that would not survive
+the round trip is shown read-only with the reason, rather than silently mangled.
 
-**Types you declare, not types we chose.** A decision, a constraint, an
-observation, a question, a task, a routine — each is a type with its own fields,
-its own relationships and its own rules, published into the project. The window
-knows nothing about what a field means: an enumeration draws a picker, a flag
-draws a checkbox, and the control comes from the declaration.
+**The schema is the project's, published at runtime.** The window knows nothing
+about what a field means: an enumeration draws a picker, a flag draws a
+checkbox, a relation offers exactly the targets the type declares. Add a type
+and the interface follows without a line changing here.
 
-**Documents, not form fields.** A record opens as the text it is, with no edit
-mode — the caret goes where you clicked. Markdown is the format, so Markdown
-decides the feature set, and a body that would not survive the round trip is
-shown read-only with the reason rather than silently mangled.
+**Removing has two meanings and both are offered.** Archive is reversible and
+keeps every link. Delete first says what holds on to the record, in two numbers
+— what links to it, and what mentions it in prose — because a record that named
+this one is somebody's reasoning, and taking it silently would take the
+reasoning with the conclusion.
 
-**Search that admits what it did not find.** Words are matched first, meaning
-second, and each hit says which it was. When nothing matched by words the
-palette says so — *"No words matched. Nearest by meaning:"* — instead of
-presenting the nearest record as an answer. There is no relevance threshold,
-because measurement showed no threshold separates the relevant from the
-irrelevant.
-
-**Agents, from both directions.** Connect Claude Code, Codex, Gemini CLI, Grok
-or OpenCode to Sync over MCP with one control in settings, and they can read the
-project's memory. Or drive one *from* Sync over ACP, in the window, with its
+**Connect an agent with one control.** Claude Code, Codex, Gemini CLI, Grok and
+OpenCode. Sync writes exactly one server entry into that agent's own
+configuration and touches nothing else in the file; disconnecting takes exactly
+that entry back out. Or drive one *from* Sync over ACP, in the window, with its
 plan, its tool calls and its permission prompts drawn as part of the interface.
 
-**Memory merges like code.** `refs/memory/main` fetches and pushes on a remote of
-its own. A fetch is a three-way merge, member by member: where only the other
-side moved, theirs is taken; where both moved and disagree, **yours is kept and
-the member is named**. Nothing is silently absorbed, nothing is destroyed, and
-`memory_rewind` puts memory back where a fetch found it.
-
 **It talks to nothing else.** No account, no telemetry, no analytics, no crash
-reporting — absent, not merely off by default. The two outward requests the
-application makes on its own are the update check and the extension registry,
-both to GitHub, both in Rust with the reachable hosts compiled in. The webview
-is granted no `connect-src` at all.
+reporting — absent, not off by default. The application makes two kinds of
+outward request on its own: the update check, and the extension registry when
+you open the catalogue. Both go to GitHub, both are made in Rust with the
+reachable hosts compiled into the binary, and the webview is granted no
+`connect-src` at all.
 
 ## How a project works
 
