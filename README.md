@@ -82,11 +82,21 @@ The reasoning is in [docs/releasing.md](docs/releasing.md).
 identifiers — `buzz.sync` here, `chat.sync.desktop` there — so macOS treats them
 as separate applications and neither reads the other's configuration directory.
 
-**They do want the same name in `/Applications`.** Both bundle as `Sync.app`, so
-installing this one over the old one replaces the application. What that
-replaces is the application only: the old one's data sits under its own
-identifier and is untouched. To keep both, rename one of them in Finder before
-installing the other.
+**Installing this one replaces that one.** Both bundle as `Sync.app` and want
+the same path in `/Applications`, so there is no side-by-side unless you rename
+one in Finder first. What gets replaced is the application; the old one's data
+sits under its own identifier and is untouched, though nothing here can read it.
+
+**One thing does break, and it is worth knowing before you install.** If you
+connected an agent to the old Sync, that agent's configuration names a program
+inside the bundle — `Sync.app/Contents/MacOS/git-sync` — and replacing the
+bundle takes it away. From the agent's side the server simply stops starting.
+This build serves the same purpose from a different program in the same place,
+`sync-mcp`, and it will **not** quietly rewrite the entry: an entry under Sync's
+name that points somewhere else is reported to you rather than overwritten,
+because somebody else's configuration file is not ours to tidy. Open
+**Settings → Agents** after installing and connect again; it is one control per
+agent.
 
 ## What that looks like in practice
 
