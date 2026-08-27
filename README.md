@@ -155,12 +155,15 @@ it; ACP conversations with five agent CLIs; the extension format, loader,
 registry, marketplace and updates; background service modules and their clocks;
 the system speech synthesiser; self-updating releases.
 
-**Genuinely absent**, and not stubbed anywhere in the interface: a code editor,
-review, a terminal, graphs, and anything that could be called Community.
+**Nothing in the interface is a stub.** There are no disabled controls, no
+cards that say "soon" and no sections that open onto an explanation of what will
+one day be there. What you can see, you can use; what a project cannot do yet is
+a package nobody has written.
 
-**Known rough edges** are the ones a first release has: the Linux and Windows
-builds are unproven, the extension catalogue is small, and the memory engine is
-a young dependency on its own release cadence.
+**Known rough edges** are the ones a first release has: the extension catalogue
+is small, packages are not yet signed — the format and the verification are
+there, the key is not — and the memory engine is a young dependency on its own
+release cadence.
 
 ## Building it
 

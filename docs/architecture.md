@@ -114,11 +114,9 @@ What the shell keeps for itself is what a project cannot choose to be without: t
 
 What does *not* get a card is a feature that does not exist. There is no entry for a section nobody can install, because a card for something a person cannot choose is a way of saying no to a question they asked in good faith, and this is exactly where they are asking it. What is coming belongs in release notes.
 
-## What is genuinely absent
+## Two absences worth stating
 
-A code editor, review, a terminal, graphs, and anything that could be called Community. None of them is a stub, a disabled control or a card that says "soon".
-
-Two absences are deliberate rather than merely unbuilt, and are worth stating plainly because a reader will otherwise look for them:
+Not a list of what is unbuilt — that belongs in release notes, and a document that kept one would be a roadmap pretending to be a description. These two are properties of the application rather than gaps in it, and a reader will otherwise go looking for them:
 
 - **No account, and nothing to sign in to.** Sync has no server of its own. There is no identity, no session and no licence check, and a project's memory never leaves the machine except through the Git remote its owner chose.
 - **No telemetry, no analytics, no crash reporting.** Not disabled by default — absent. The application makes exactly one kind of outward request on its own: the update check, and the extension registry when somebody opens the catalogue. Both go to GitHub, both are in Rust with the reachable hosts compiled in, and the webview is granted no `connect-src` at all.

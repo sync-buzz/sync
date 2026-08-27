@@ -60,7 +60,6 @@ is `voice` and the functions are `voice.*`.
 | --- | --- | --- |
 | **Engine** | What turns text into sound: the system's synthesiser, or a model on this disk. | backend, provider, driver |
 | **Voice** | One speaker an engine offers, with a language and a name a person recognises. | speaker, persona |
-| **Model** | An engine's downloaded weights, when it has any. The system engine has none, and says so. | checkpoint, weights |
 | **Utterance** | One request to say one piece of text. | message, job |
 
 *Voice* is the word in the window because it is what a person is choosing — the
@@ -75,7 +74,7 @@ second one. Until then the page says one thing.
 
 ---
 
-## 3. Two engines behind one interface, and the system's goes first
+## 3. One interface, and the system's engine behind it
 
 ```rust
 trait Engine {
@@ -84,8 +83,6 @@ trait Engine {
     fn stop(&self);
 }
 ```
-
-### 3.1 The system engine
 
 `AVSpeechSynthesizer`, through `objc2-avf-audio` — `objc2`, `objc2-foundation`
 and `objc2-app-kit` are already in the tree for the Dock menu, so this is one
@@ -98,9 +95,10 @@ Settings without Sync being involved. The system plays the sound, so there is no
 audio device to open, no sample format to negotiate and no `rodio` in the
 dependency tree.
 
-It goes first for a reason that has nothing to do with quality: it is the engine
-that can be **heard the same day**, which is what tells us whether the shape in
-§4 and §5 is right before anybody pays for an ONNX runtime.
+It is the platform's own, so there is nothing to download, nothing to choose
+before a person can hear anything, and no audio stack of ours to get wrong. That
+`Engine` is a trait with one implementation is deliberate: what a build offers
+is answered by `engines()` rather than by a list somebody has to keep true.
 
 **It owns a thread, and that replaces what this section first said.** The design
 assumed speaking had to hop to the main thread through `app.run_on_main_thread`,
@@ -117,40 +115,6 @@ threads (the window's, the clock's, and a handler's blocking one). One thread
 owning the object answers all of that, and it means nothing here asserts
 anything about `AVFoundation`'s own thread safety: the object is made on that
 thread and never leaves it.
-
-### 3.2 The model engine
-
-The second slot, and it is what the request meant by *choose which model*. A
-neural voice — Kokoro, or Piper where a language needs it — run through ONNX,
-with `rodio` for the output the system engine did not need.
-
-**There is no model engine in this version, and no model to download.** What
-exists is the shape that would hold one: `Engine` is a trait with one
-implementation, and `engines()` answers with what this build and this platform
-can actually offer rather than with a list somebody has to keep true. The point
-of writing the second slot down is that its absence is a missing implementation
-rather than a redesign — see §6.
-
-### 3.3 A model arrives the way an extension does
-
-**No new library, and this is the whole of why the download is cheap.**
-`sync-extensions` already fetches a remote artefact, verifies its `sha256`,
-unpacks it into a content-addressed directory under the app data directory and
-resolves an id to whichever artefact serves it now (`store.rs`, `registry.rs`).
-A model is that, minus the archive: fetch, hash, keep under `voices/<sha256>/`.
-
-One difference is stated rather than glossed. An extension we publish carries a
-**minisign** signature of ours; a third-party model does not and never will. So
-the guarantee is the `sha256` in a catalogue **compiled into the build**, next
-to the hosts that catalogue may name — the same rule the registry already
-follows, where what can be reached is a property of the binary rather than of a
-file somebody edited.
-
-**A model is the machine's, never the project's.** It sits beside the extension
-artefacts for the same reason they do: two projects wanting the same voice cost
-one copy, and removing a project takes nothing away from another.
-
----
 
 ## 4. Where a person chooses, and what changes in the window
 
@@ -254,8 +218,8 @@ for; `interrupt: true` clears what is waiting and stops what is speaking.
 and no priority — a product where two packages compete for the speakers is a
 product where the important sentence is the one that happened to be second.
 
-**A refusal is a sentence, not silence.** No engine, no voice for that language,
-a model that is not downloaded — each answers with a reason. Speech that quietly
+**A refusal is a sentence, not silence.** No engine on this platform, no voice
+for that language, a voice that has been removed — each answers with a reason. Speech that quietly
 does not happen is indistinguishable from speech nobody heard.
 
 ---
@@ -266,9 +230,10 @@ Named so they are not re-proposed.
 
 - **A Voice extension.** §1. The package would own nothing; the settings window
   owns the choice and the crate owns the mechanism.
-- **A model engine.** §3.2. The system's synthesiser is the only one, and a
-  neural voice run through ONNX is a second implementation of `Engine` that
-  nobody has written. Nothing about the first one assumes it is alone.
+- **A second engine.** The system's synthesiser is the only one there is.
+  Nothing about it assumes it is alone — `Engine` is a trait and `engines()`
+  answers with what this build and platform actually offer — but a build with
+  one implementation is what this is.
 - **One extension handing another text to speak.** A package asks the host, and
   the host is the only speaker. Nothing here needs a package-to-package path.
 - **Speech as a notification channel.** A banner is gated by three conditions
@@ -281,59 +246,9 @@ Named so they are not re-proposed.
 - **Listening.** §2.
 - **A volume control.** §4.
 - **Per-project voices.** §4.
-- ~~**Speaking as an agent tool over MCP.**~~ **Built 2026-08-25**, on the
-  owner's decision, and §5 is what it became. What this line was guarding
-  against is answered by the switch rather than by the absence: an agent that
-  can make the machine talk at three in the morning is one somebody switched on,
-  and the same page switches it off.
+An agent speaking is **not** on this list, and was nearly put there. What the
+absence would have guarded against — a machine that talks at three in the
+morning — is answered better by the switch in §5, which starts off: an agent
+that can speak is one somebody turned on, and the same page turns it off.
 
 ---
-
-## 7. The order it gets built in
-
-Each step is usable before the next exists, and each is refutable on its own.
-
-1. **The crate and the system engine.** *Built.* `sync-voice` with the `Engine`
-   trait, the macOS implementation, `voice.json` in the configuration directory
-   beside `mcp-server.json`, and four commands — `voice_status`, `voice_choose`,
-   `voice_speak`, `voice_stop`. Five was the estimate; reading the preference
-   and reading the voices are one question a page asks once, so `voice_status`
-   answers both, the way `server_status` does.
-
-   **Heard, not just tested**, which for this step is the only proof there is:
-   `cargo test -p sync-voice -- --ignored` speaks a Russian sentence in Milena
-   and the machine said it. That settled the one thing the design could not
-   settle by argument — whether `AVSpeechSynthesizer` speaks from a thread that
-   is not the main one and has no run loop. It does, which is what lets the
-   engine own a thread of its own and be reachable from the clock's.
-2. **The settings page.** *Built.* The fifth section, three controls and the
-   try field.
-3. **The capability, and the agent's tool.** *Half built.* The agent's half is
-   `sync_speak` (§5), which is what the first real case — a routine that reads a
-   mailbox on a clock — actually needed: the package orders the work and the
-   agent, which is the only one of the three that knows whether there was
-   anything worth saying, decides whether to say it. The package's own half is
-   `voice` in `SYNC_CAPABILITIES`, `voice.speak` in
-   `OFFERED` and on the service surface, the surface bumped to **2.7.0** — a
-   minor, an addition, and every package stating `^2.0` goes on installing. A
-   capability arrives with the machinery that honours it, which is the rule
-   steps 2 and 3 of `background.md` were both held to.
-4. **The model engine.** The catalogue, the download over the existing store,
-   the ONNX implementation, and the engine control on the page gaining its
-   second entry.
-
----
-
-## 8. Open
-
-1. **Which model, and which catalogue.** Kokoro has the best voices per
-   megabyte and no Russian; Piper has Russian and more files per voice. The
-   answer is a list in the build, and it is chosen when step 4 starts rather
-   than now.
-2. ~~**Whether an agent may speak.**~~ **Answered 2026-08-25: yes, behind a
-   switch that starts off.** §5.
-3. **What happens to a queue when the application quits.** Today's answer is
-   that it stops, which is the only one that does not surprise anybody.
-4. **Whether a sentence is ever repeated.** Nothing here re-says anything, and
-   whether a person who missed it can ask for it again is a window question with
-   no window to ask it in.

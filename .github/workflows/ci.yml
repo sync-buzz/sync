@@ -29,6 +29,15 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Lint
         run: pnpm lint
+      # Before the type-check, and that order is load-bearing rather than
+      # tidy. `next build` generates `.next/types/**`, which `tsconfig.json`
+      # includes and which declares the globals the app's own files use —
+      # `LayoutProps` in `src/app/layout.tsx` is one. On a developer's machine
+      # those types are left over from the last build, so a type-check passes
+      # there whatever the order; on a clean checkout it fails with a name that
+      # looks like a typo and is not.
+      - name: Static export
+        run: pnpm build
       - name: Type-check
         run: pnpm exec tsc --noEmit
       # What an extension is allowed to see, and the number it is promised
@@ -44,8 +53,6 @@ jobs:
                 && format('origin/{0}', github.base_ref)
                 || 'HEAD' }}
         run: pnpm api:check
-      - name: Static export
-        run: pnpm build
 
   rust:
     name: rust
@@ -61,6 +68,15 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+      # `lance-encoding`, under the memory engine, compiles protobuf in its
+      # build script and reports a missing `protoc` as a build failure with no
+      # mention of what asked for it. The release workflow installs it for the
+      # same reason.
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          version: "25.1"
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Lint
@@ -156,6 +172,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          version: "25.1"
 
       # Built from this workspace, not copied from anywhere. The bundled sidecar
       # *is* `sync-mcp` with the engine linked inside it, so staging a
