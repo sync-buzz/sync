@@ -1,43 +1,39 @@
 # Sync
 
-### Project memory that knows when it has gone stale
+### A desktop environment where agents do the work
 
-Your agents have memory now — a `CLAUDE.md`, a rules file, a vector store, a
-wiki page somebody wrote in March. That is not the hard part. The hard part is
-that **none of it can tell you when it stopped being true.**
+**What kind of work is up to you.** Sync is a shell. It holds what every kind of
+work needs — projects, the agents that act on them, the permissions those agents
+run under, a clock that keeps going when the window is closed, and a store of
+what the project knows that says when it has gone out of date. What a project is
+*about* comes entirely from the packages installed into it.
 
-A note that says *sessions live in Redis* survives the migration to Postgres.
-It reads exactly as confidently on the day it is right and the day it is wrong,
-and the agent that acts on it is fast, certain and mistaken. You find out in
-review, or you don't.
+**No package is privileged.** The three Sync ships with arrived the way yours
+will: built outside this repository, declared in a manifest, installed into a
+project that asked for them. There is no `src/extensions/` directory here and CI
+fails the build if one appears, so the shell cannot name a section in a type or
+a constant even by accident. That rule is the whole design — it is what makes
+the environment yours to shape rather than ours to extend on your behalf.
 
-**Sync binds each thing a project knows to the files it is about.** When those
-files change, the claim is marked `stale` — not by a review date somebody set
-and forgot, but by reconciling the record against the repository's own history,
-every time it is read. The memory does not have to be maintained to stay
-honest. It tells you where it has rotted.
+**What the shell guarantees, so a package does not have to:**
 
-Everything lives in your repository's own Git objects, so it branches, merges,
-travels to your colleagues and belongs to you. There is no account, no server of
-ours, and nothing leaves the machine except through the remote you chose.
+- **A project is a repository**, and everything it knows is written to that
+  repository's own Git objects. It branches, merges, travels to whoever clones
+  it, and belongs to you. No account, no server of ours.
+- **What it knows says when it has rotted.** A record names the files its claim
+  is about; the engine reconciles them against the repository's history and
+  marks the claim `stale` when they move. Not a review date somebody set and
+  forgot — derived, every time it is read.
+- **Agents, in both directions.** Connect Claude Code, Codex, Gemini CLI, Grok
+  or OpenCode over MCP and they work against the project. Or drive one *from*
+  the window over ACP, with its plan, its tool calls and its permission prompts
+  drawn as part of the interface.
+- **Work outlives the window.** A package can declare handlers on a clock and
+  order work that runs with nothing open, under permissions it declared and a
+  person approved, attributed to whoever asked for it.
 
-The other three things it does differently, each because the first one made it
-necessary:
-
-- **A record is typed, not a paragraph.** A decision, a constraint, an
-  observation, a task — each with its own fields, its own relations and its own
-  rules, so a claim can say what it is scoped to. Free text cannot be reconciled
-  against anything.
-- **It merges like code.** A fetch is a three-way merge, member by member.
-  Where you and a colleague both moved, **yours is kept and the member is
-  named** — nothing is silently absorbed, and nothing is destroyed.
-- **Search says when it found nothing.** Words are matched first, meaning
-  second, and each hit says which it was. When nothing matched by words it says
-  so instead of handing you the nearest record with a confident face.
-
-Agents read it over MCP, and you can drive one *from* Sync over ACP without
-leaving the window. What you write down once is what your agents know — and
-what they are told to distrust.
+Structured knowledge that stays honest, agents that act on it, and an
+environment you assemble rather than accept.
 
 > **Pre-1.0 and under active development.** Used daily on the machine it is
 > built on, and not finished. What is here works; what is absent is absent

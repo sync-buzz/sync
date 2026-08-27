@@ -6,12 +6,18 @@ not a roadmap.
 
 ## Product character
 
-Sync is a professional macOS application for software development, project
-knowledge and review. It is not a website, a SaaS dashboard, an IDE clone or a
-chat client. The eventual product connects documentation, research,
-requirements, code changes, verification and review, so the shell has to feel
-capable of holding that depth while staying calm enough that a person can read
-its structure without being taught.
+Sync is a professional macOS environment for work a person directs and agents
+carry out. It is not a website, a SaaS dashboard, an IDE clone or a chat client.
+
+**What kind of work is not the shell's business, and that is a design
+constraint rather than a modesty.** A project is a repository and the packages
+installed into it; what those hold — documentation, research, requirements,
+changes, verification, review, or something nobody here has thought of — is
+theirs to decide. So the shell has to feel capable of holding that depth
+whatever the depth turns out to be, while staying calm enough that a person can
+read its structure without being taught. A composition that assumed one subject
+would be a composition that fought the second one, and the second one is not
+ours to predict.
 
 The reference points are macOS productivity applications: native window
 composition, desktop density, system typography, clear sidebars and toolbars,

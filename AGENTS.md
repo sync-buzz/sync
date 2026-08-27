@@ -1,10 +1,16 @@
 # Working in this repository
 
-Sync is a macOS desktop application: a Tauri shell around a statically exported
-Next.js frontend, with the domain in Rust crates under `src-tauri/crates/`. It
-gives a project a memory kept in that project's own Git repository, publishes it
-to agents over MCP, and hosts agent conversations over ACP. Everything a project
-can *do* is an extension package installed into it.
+Sync is a macOS desktop environment: a Tauri shell around a statically exported
+Next.js frontend, with the domain in Rust crates under `src-tauri/crates/`. The
+shell holds projects, the agents that act on them (ACP inbound, MCP outbound),
+the permissions they run under, a clock that ticks with no window open, and a
+store of what a project knows that derives its own staleness.
+
+**Everything a project is *about* comes from packages.** The shell is
+deliberately empty of subject matter: it names no language, no file type and no
+section. Whatever you are adding, ask first whether it belongs in a package
+rather than here — the answer is usually yes, and the rules below are mostly
+there to keep it that way.
 
 ## Read before you write
 
