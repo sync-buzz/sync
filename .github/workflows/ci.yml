@@ -60,6 +60,21 @@ jobs:
     defaults:
       run:
         working-directory: src-tauri
+    env:
+      # This job lints and tests; it does not bundle. Saying so is what lets it
+      # run at all: `tauri-build` resolves `externalBin` while the build script
+      # runs, and `binaries/sync-mcp-<triple>` is a build artefact of
+      # `scripts/prepare-sidecar.sh` that no checkout carries — so without this
+      # the `sync` crate fails to build here with a message about a missing
+      # resource path and nothing about why.
+      #
+      # An empty list rather than a placeholder file, and the difference
+      # matters: the suites find their sidecar by looking in `binaries/` first,
+      # so a stub put there to satisfy the bundler would be taken for a working
+      # engine and every engine test would fail instead of skipping. With
+      # nothing there they skip by name, and `memory / bundled sidecar contract`
+      # is where they run for real, against a sidecar it builds.
+      TAURI_CONFIG: '{"bundle":{"externalBin":[]}}'
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
