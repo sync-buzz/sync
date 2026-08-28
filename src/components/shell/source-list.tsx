@@ -56,12 +56,16 @@ export interface SourceListItem {
   readonly label: string;
   readonly icon: LucideIcon;
   /**
-   * A word about the row itself, trailing and muted. Not a count and not a
-   * state of what the row holds — those belong to whatever the row is about.
+   * What the row is for, in a sentence, shown under the pointer and nowhere
+   * else. Not a count and not a state of what the row holds — those belong to
+   * whatever the row is about.
    *
-   * There is one today: a section brought by a package somebody is writing says
-   * *Development*, because unsigned code running out of a working tree should
-   * be visible from the column rather than only from the catalogue.
+   * **It is never drawn beside the label.** A column this narrow has room for
+   * one of the two, and the one a person navigates by is the name: a
+   * description set on the row takes the width the label needed and abbreviates
+   * it, so the list ends up hiding exactly what it exists to show. Hover is
+   * where the longer answer goes, which is where [`SourceTree`] already puts
+   * the same thing.
    */
   readonly note?: string;
   /**
@@ -170,10 +174,15 @@ function SourceListRow({
       // and the line below says where it is going.
       data-dragging={move === undefined ? undefined : move.isDragging}
       aria-current={isActive ? "true" : undefined}
-      // A rail row has no text at all, and a row with a badge has a number
-      // beside its label that a screen reader would read as a second word. In
-      // both cases the whole of what the row says is said here instead.
-      aria-label={rail || badge !== null ? spoken(item, badge) : undefined}
+      // A rail row has no text at all, a row with a badge has a number beside
+      // its label that a screen reader would read as a second word, and a
+      // description is not in the row at all. In each case the whole of what
+      // the row says is said here instead — a hover is not a reading.
+      aria-label={
+        rail || badge !== null || item.note !== undefined
+          ? spoken(item, badge)
+          : undefined
+      }
       tabIndex={tabIndex}
       onClick={onSelect}
       className={cn(
@@ -212,18 +221,10 @@ function SourceListRow({
       {rail ? null : (
         <>
           <span className="truncate">{item.label}</span>
-          {item.note === undefined ? null : (
-            <span className="ml-auto shrink-0 text-xs text-fg-tertiary">
-              {item.note}
-            </span>
-          )}
           {item.badge === undefined ? null : (
             <span
               aria-hidden
-              className={cn(
-                "shrink-0 text-xs text-fg-tertiary tabular-nums",
-                item.note === undefined ? "ml-auto" : "",
-              )}
+              className="ml-auto shrink-0 text-xs text-fg-tertiary tabular-nums"
             >
               {item.badge.kind === "count" ? (
                 badgeText(item.badge)
@@ -237,16 +238,27 @@ function SourceListRow({
     </button>
   );
 
-  // A number beside its own label explains itself, so the tooltip stays what it
-  // was: the rail's way of saying the word it had to drop. A dot is the one mark
-  // here that does not explain itself, so it is the one that earns a tooltip in
-  // a column wide enough to have needed none.
-  if (!rail && item.badge?.kind !== "dot") return row;
+  // Whatever the row has to say that it is not showing. On a rail that is
+  // everything, because the labels have left. In a column wide enough to read,
+  // it is the description — which is never in the row — and a dot, which is the
+  // one mark here that does not explain itself. A number beside its own label
+  // explains itself and earns nothing.
+  const unsaid = rail
+    ? spoken(item, badge)
+    : [item.note, item.badge?.kind === "dot" ? badge : null]
+        .filter((part): part is string => part !== undefined && part !== null)
+        .join(" — ");
+
+  if (unsaid === "") return row;
 
   return (
     <Tooltip>
       <TooltipTrigger asChild>{row}</TooltipTrigger>
-      <TooltipContent side="right">{spoken(item, badge)}</TooltipContent>
+      {/* Held to a readable measure: a description is a sentence, and a
+          tooltip as wide as the window is one nobody finishes. */}
+      <TooltipContent side="right" className="max-w-[40ch]">
+        {unsaid}
+      </TooltipContent>
     </Tooltip>
   );
 }

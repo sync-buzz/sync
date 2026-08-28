@@ -131,7 +131,7 @@ impl<R: Runtime> Host for ProjectMemory<R> {
                     .and_then(Value::as_str)
                     .ok_or_else(|| said("a key"))?;
                 sessions
-                    .with_session(&self.app, &self.project, |client| client.get_record(key))
+                    .with_session_here(&self.app, &self.project, |client| client.get_record(key))
                     .map(|mut view| {
                         view.record = view.record.map(envelope_of);
                         serde_json::to_value(view).unwrap_or(Value::Null)
@@ -139,7 +139,7 @@ impl<R: Runtime> Host for ProjectMemory<R> {
                     .map_err(|error| error.message)
             }
             "memory.list" => sessions
-                .with_session(&self.app, &self.project, |client| {
+                .with_session_here(&self.app, &self.project, |client| {
                     client.list_records(&arguments)
                 })
                 .map(|listing| serde_json::to_value(listing).unwrap_or(Value::Null))
@@ -150,7 +150,7 @@ impl<R: Runtime> Host for ProjectMemory<R> {
                     .and_then(Value::as_str)
                     .ok_or_else(|| said("a key"))?;
                 sessions
-                    .with_session(&self.app, &self.project, |client| client.read_content(key))
+                    .with_session_here(&self.app, &self.project, |client| client.read_content(key))
                     .map(|view| serde_json::to_value(view).unwrap_or(Value::Null))
                     .map_err(|error| error.message)
             }

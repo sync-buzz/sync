@@ -6,8 +6,8 @@
 //! answer — live in that crate, which compiles and runs without Tauri.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::Mutex;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -50,9 +50,21 @@ pub(crate) const BINARY_OVERRIDE: &str = "SYNC_MCP_BINARY";
 /// no application around them — a session is a process of its own instead, and
 /// that is the one arrangement where an engine per project is right: a test's
 /// corpus is nobody else's.
+///
+/// **Two locks, and the shape is the point.** The outer one guards the map and
+/// is held for the length of a lookup; the inner one guards a connection and is
+/// held for the length of a call. A single lock over the map would have to be
+/// the second — a call needs the client for as long as it runs — and then every
+/// project waits behind whichever one is busy, which is a person watching a
+/// list redraw because a different project is being written to.
+///
+/// The connection is `Option` so that opening one happens under its own lock
+/// rather than the map's. Connecting starts a process and greets it; doing that
+/// while holding the map would stop every project for as long as it takes, in
+/// the one moment the window is least able to spare it.
 #[derive(Default)]
 pub struct MemorySessions {
-    sessions: Mutex<HashMap<PathBuf, MemoryClient>>,
+    sessions: Mutex<HashMap<PathBuf, Arc<Mutex<Option<MemoryClient>>>>>,
 }
 
 /// A failure, in the shape the frontend branches on.
@@ -124,32 +136,111 @@ pub struct EngineSummary {
 
 pub use sync_memory::EntityInput;
 
+/// One project's connection, opened on first use and shared by everything
+/// that asks for that project.
+type Session = Arc<Mutex<Option<MemoryClient>>>;
+
 impl MemorySessions {
     /// Run an operation against a project's session, opening one if needed.
+    ///
+    /// **The waiting happens on a thread that exists to wait.** Tauri runs a
+    /// command as an ordinary task on its async runtime, which has one worker
+    /// per core, and every call here blocks until the engine answers — so a
+    /// handful of slow calls would occupy every worker and stop commands that
+    /// have nothing to do with memory: loading a package, opening a project,
+    /// a clock coming round. Moving the blocking part to the blocking pool
+    /// keeps those workers free, whatever memory is doing.
     ///
     /// `pub(crate)` because opening a folder as a project has to read and write
     /// one record before any screen exists to do it from — see
     /// [`crate::project`]. Nothing outside this crate gets a session.
-    pub(crate) fn with_session<T, R: Runtime>(
+    ///
+    /// Two projects run at once; two calls to one project queue, because a
+    /// session is one connection and its answers arrive in the order they were
+    /// asked for. What this rules out is a call to *another* project waiting on
+    /// that queue, which is what the window notices: a folder being deleted no
+    /// longer holds up every other project's lists.
+    pub(crate) async fn with_session<T, R: Runtime>(
+        &self,
+        app: &AppHandle<R>,
+        project: &str,
+        operation: impl FnOnce(&mut MemoryClient) -> Result<T, MemoryError> + Send + 'static,
+    ) -> CommandResult<T>
+    where
+        T: Send + 'static,
+    {
+        let path = PathBuf::from(project);
+        let session = self.session(&path)?;
+        let app = app.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            run(session, || launch_config(&app, path), operation)
+        })
+        .await
+        .map_err(|error| CommandError {
+            kind: "protocol".to_owned(),
+            message: format!("the memory call did not finish: {error}"),
+            data: Value::Null,
+        })?
+    }
+
+    /// The same call, made on the thread that asks for it.
+    ///
+    /// For a caller that cannot wait on a future: an extension handler answers
+    /// inside a synchronous host call, and the isolate on the other side of it
+    /// is waiting for the value rather than for a promise.
+    pub(crate) fn with_session_here<T, R: Runtime>(
         &self,
         app: &AppHandle<R>,
         project: &str,
         operation: impl FnOnce(&mut MemoryClient) -> Result<T, MemoryError>,
     ) -> CommandResult<T> {
-        let project = PathBuf::from(project);
+        let path = PathBuf::from(project);
+        let session = self.session(&path)?;
+        run(session, || launch_config(app, path), operation)
+    }
+
+    /// Find or make room for a project's session, holding the map no longer
+    /// than the lookup.
+    fn session(&self, project: &Path) -> CommandResult<Session> {
         let mut sessions = self.sessions.lock().map_err(|_| CommandError {
             kind: "protocol".to_owned(),
             message: "the memory session registry is poisoned".to_owned(),
             data: Value::Null,
         })?;
-        let client = match sessions.entry(project.clone()) {
-            std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
-            std::collections::hash_map::Entry::Vacant(entry) => {
-                entry.insert(MemoryClient::connect(launch_config(app, project)?)?)
-            }
-        };
-        operation(client).map_err(CommandError::from)
+        Ok(Arc::clone(
+            sessions.entry(project.to_path_buf()).or_default(),
+        ))
     }
+}
+
+/// Hold one project's connection for the length of one call, opening it first
+/// where this is the call that found it closed.
+///
+/// Where the engine lives is asked for rather than passed, because asking costs
+/// an environment variable, the path of this executable and the log directory —
+/// and a session that is already open needs none of them. Reading them anyway
+/// would put three ways to fail in front of every call to a connection that is
+/// working.
+fn run<T>(
+    session: Session,
+    config: impl FnOnce() -> CommandResult<LaunchConfig>,
+    operation: impl FnOnce(&mut MemoryClient) -> Result<T, MemoryError>,
+) -> CommandResult<T> {
+    let mut session = session.lock().map_err(|_| CommandError {
+        kind: "protocol".to_owned(),
+        message: "the memory session for this project is poisoned".to_owned(),
+        data: Value::Null,
+    })?;
+    // A connection that failed to open leaves the slot empty rather than
+    // remembering the failure, so the next call tries again. An engine that
+    // was not installed yet is the ordinary case for that.
+    if session.is_none() {
+        *session = Some(MemoryClient::connect(config()?)?);
+    }
+    let client = session
+        .as_mut()
+        .expect("the session was opened above or the call returned");
+    operation(client).map_err(CommandError::from)
 }
 
 /// Where the engine and its log live for this installation.
@@ -199,39 +290,41 @@ fn launch_config<R: Runtime>(app: &AppHandle<R>, project: PathBuf) -> CommandRes
 
 /// Open a project's memory and describe the engine serving it.
 ///
-/// Every command here is `#[tauri::command(async)]`. Tauri runs a plain
-/// `#[tauri::command]` on the main thread, and these calls block: a search may
-/// rebuild the index, a fetch talks to a network, and either would freeze the
-/// window for as long as it takes. Marking a synchronous function `async` moves
-/// it to Tauri's thread pool, which is what a blocking call needs.
+/// Every command here is an `async fn` that awaits
+/// [`MemorySessions::with_session`], and the waiting it does is the point: a
+/// search may rebuild the index and a fetch talks to a network, so the call
+/// that blocks belongs on a thread kept for blocking rather than on one of the
+/// few the runtime schedules everything else with.
 ///
 /// The type corpus is brought up to date on open: the engine runs a strict
 /// schema, so a record whose kind has no `__type__` definition is rejected at
 /// write time. `publish_types` writes only when the store's corpus differs from
 /// this build's, so opening the same project twice is a read both times.
-#[tauri::command(async)]
-pub fn memory_open<R: Runtime>(
+#[tauri::command]
+pub async fn memory_open<R: Runtime>(
     app: AppHandle<R>,
     sessions: State<'_, MemorySessions>,
     project: String,
 ) -> CommandResult<EngineSummary> {
-    sessions.with_session(&app, &project, |client| {
-        client.publish_types()?;
-        let info = client.info();
-        Ok(EngineSummary {
-            binary: info.binary.to_string_lossy().into_owned(),
-            source: match info.source {
-                sync_memory::BinarySource::Override => "override".to_owned(),
-                sync_memory::BinarySource::Bundled => "bundled".to_owned(),
-            },
-            version: info.version.clone(),
-            project_id: info.handshake.project_id.clone(),
-            revision: client.revision().to_owned(),
-            records_backend: info.handshake.backend.clone(),
-            records_are_git: info.handshake.records_are_git(),
-            model_fingerprint: info.handshake.model_fingerprint.clone(),
+    sessions
+        .with_session(&app, &project, move |client| {
+            client.publish_types()?;
+            let info = client.info();
+            Ok(EngineSummary {
+                binary: info.binary.to_string_lossy().into_owned(),
+                source: match info.source {
+                    sync_memory::BinarySource::Override => "override".to_owned(),
+                    sync_memory::BinarySource::Bundled => "bundled".to_owned(),
+                },
+                version: info.version.clone(),
+                project_id: info.handshake.project_id.clone(),
+                revision: client.revision().to_owned(),
+                records_backend: info.handshake.backend.clone(),
+                records_are_git: info.handshake.records_are_git(),
+                model_fingerprint: info.handshake.model_fingerprint.clone(),
+            })
         })
-    })
+        .await
 }
 
 /// The states the UI has to render: lock, search mode, remote.
@@ -246,23 +339,25 @@ pub struct MemoryStatus {
 }
 
 /// Read the states the UI renders, in one round trip.
-#[tauri::command(async)]
-pub fn memory_status<R: Runtime>(
+#[tauri::command]
+pub async fn memory_status<R: Runtime>(
     app: AppHandle<R>,
     sessions: State<'_, MemorySessions>,
     project: String,
 ) -> CommandResult<MemoryStatus> {
-    sessions.with_session(&app, &project, |client| {
-        let reconnecting = !client.engine_is_alive();
-        let model = client.model_status()?;
-        let transport = client.transport_status()?;
-        Ok(MemoryStatus {
-            revision: client.revision().to_owned(),
-            reconnecting,
-            model: serde_json::to_value(model).unwrap_or(Value::Null),
-            transport: serde_json::to_value(transport).unwrap_or(Value::Null),
+    sessions
+        .with_session(&app, &project, move |client| {
+            let reconnecting = !client.engine_is_alive();
+            let model = client.model_status()?;
+            let transport = client.transport_status()?;
+            Ok(MemoryStatus {
+                revision: client.revision().to_owned(),
+                reconnecting,
+                model: serde_json::to_value(model).unwrap_or(Value::Null),
+                transport: serde_json::to_value(transport).unwrap_or(Value::Null),
+            })
         })
-    })
+        .await
 }
 
 /// The types the project holds, in the order the navigator lists them.
@@ -270,13 +365,15 @@ pub fn memory_status<R: Runtime>(
 /// Read from the project's own corpus, marks included. Sync publishes one type
 /// — `project`, without which the project's own record could not be written —
 /// and everything else on this list is the project's own.
-#[tauri::command(async)]
-pub fn memory_types<R: Runtime>(
+#[tauri::command]
+pub async fn memory_types<R: Runtime>(
     app: AppHandle<R>,
     sessions: State<'_, MemorySessions>,
     project: String,
 ) -> CommandResult<Vec<RecordType>> {
-    sessions.with_session(&app, &project, MemoryClient::list_types)
+    sessions
+        .with_session(&app, &project, MemoryClient::list_types)
+        .await
 }
 
 /// Add a type to the project's corpus.
@@ -285,8 +382,8 @@ pub fn memory_types<R: Runtime>(
 /// `title` is what the window calls it; `icon` is the name of the mark it is
 /// drawn with. The last two are kept inside the definition because no build can
 /// know a type somebody invented here.
-#[tauri::command(async)]
-pub fn memory_type_create<R: Runtime>(
+#[tauri::command]
+pub async fn memory_type_create<R: Runtime>(
     app: AppHandle<R>,
     sessions: State<'_, MemorySessions>,
     project: String,
@@ -295,10 +392,12 @@ pub fn memory_type_create<R: Runtime>(
     description: String,
     icon: String,
 ) -> CommandResult<Vec<RecordType>> {
-    sessions.with_session(&app, &project, |client| {
-        client.create_type(&kind, &title, &description, &icon)?;
-        client.list_types()
-    })
+    sessions
+        .with_session(&app, &project, move |client| {
+            client.create_type(&kind, &title, &description, &icon)?;
+            client.list_types()
+        })
+        .await
 }
 
 /// Publish the types an extension brings, as one transaction.
@@ -312,18 +411,20 @@ pub fn memory_type_create<R: Runtime>(
 /// The definitions come from the caller because the catalogue is the window's,
 /// not the engine's. What the engine enforces is the schema: a definition it
 /// refuses is an extension that must not count as installed.
-#[tauri::command(async)]
-pub fn memory_extension_types_publish<R: Runtime>(
+#[tauri::command]
+pub async fn memory_extension_types_publish<R: Runtime>(
     app: AppHandle<R>,
     sessions: State<'_, MemorySessions>,
     project: String,
     types: Vec<ExtensionTypeInput>,
 ) -> CommandResult<Vec<RecordType>> {
     let types = serde_json::to_value(&types).unwrap_or(Value::Null);
-    sessions.with_session(&app, &project, |client| {
-        client.publish_extension_types(&types)?;
-        client.list_types()
-    })
+    sessions
+        .with_session(&app, &project, move |client| {
+            client.publish_extension_types(&types)?;
+            client.list_types()
+        })
+        .await
 }
 
 /// One type an extension publishes, as the catalogue states it.
@@ -362,8 +463,8 @@ pub struct ExtensionTypeInput {
 /// identifier every record of the type carries, and the store has no rename.
 /// What travels is the same three answers the type was named with, so one form
 /// asks them both times.
-#[tauri::command(async)]
-pub fn memory_type_update<R: Runtime>(
+#[tauri::command]
+pub async fn memory_type_update<R: Runtime>(
     app: AppHandle<R>,
     sessions: State<'_, MemorySessions>,
     project: String,
@@ -372,10 +473,12 @@ pub fn memory_type_update<R: Runtime>(
     description: String,
     icon: String,
 ) -> CommandResult<Vec<RecordType>> {
-    sessions.with_session(&app, &project, |client| {
-        client.update_type(&kind, &title, &description, &icon)?;
-        client.list_types()
-    })
+    sessions
+        .with_session(&app, &project, move |client| {
+            client.update_type(&kind, &title, &description, &icon)?;
+            client.list_types()
+        })
+        .await
 }
 
 /// What removing a type took with it.
@@ -398,20 +501,22 @@ pub struct TypeRemoval {
 /// Both halves or neither: a record whose kind has no definition is one the
 /// engine's strict schema will not let anybody read or rewrite, so a definition
 /// deleted on its own would strand everything written as it.
-#[tauri::command(async)]
-pub fn memory_type_delete<R: Runtime>(
+#[tauri::command]
+pub async fn memory_type_delete<R: Runtime>(
     app: AppHandle<R>,
     sessions: State<'_, MemorySessions>,
     project: String,
     kind: String,
 ) -> CommandResult<TypeRemoval> {
-    sessions.with_session(&app, &project, |client| {
-        let removed = client.delete_type(&kind)?;
-        Ok(TypeRemoval {
-            types: client.list_types()?,
-            removed,
+    sessions
+        .with_session(&app, &project, move |client| {
+            let removed = client.delete_type(&kind)?;
+            Ok(TypeRemoval {
+                types: client.list_types()?,
+                removed,
+            })
         })
-    })
+        .await
 }
 
 /// What attaching a folder produced: the corpus's types, and what the first
@@ -453,26 +558,28 @@ pub struct FolderAttachmentInput {
 /// Nothing is written into the folder. That is the engine's promise and the
 /// reason the whole arrangement is worth having, so the window states it before
 /// running this rather than leaving it to be discovered.
-#[tauri::command(async)]
-pub fn memory_folder_attach<R: Runtime>(
+#[tauri::command]
+pub async fn memory_folder_attach<R: Runtime>(
     app: AppHandle<R>,
     sessions: State<'_, MemorySessions>,
     project: String,
     attachment: FolderAttachmentInput,
 ) -> CommandResult<FolderAttachment> {
-    sessions.with_session(&app, &project, |client| {
-        let scan = client.attach_folder(
-            &attachment.kind,
-            &attachment.title,
-            &attachment.description,
-            &attachment.icon,
-            &attachment.folder,
-        )?;
-        Ok(FolderAttachment {
-            types: client.list_types()?,
-            scan,
+    sessions
+        .with_session(&app, &project, move |client| {
+            let scan = client.attach_folder(
+                &attachment.kind,
+                &attachment.title,
+                &attachment.description,
+                &attachment.icon,
+                &attachment.folder,
+            )?;
+            Ok(FolderAttachment {
+                types: client.list_types()?,
+                scan,
+            })
         })
-    })
+        .await
 }
 
 /// The project's folders, from the records and from the working tree at once.
@@ -484,8 +591,8 @@ pub fn memory_folder_attach<R: Runtime>(
 /// Read live and never cached here: an empty directory is a fact about one
 /// working tree, and a remembered list would raise on one machine a folder that
 /// does not exist on another.
-#[tauri::command(async)]
-pub fn memory_folders<R: Runtime>(
+#[tauri::command]
+pub async fn memory_folders<R: Runtime>(
     app: AppHandle<R>,
     sessions: State<'_, MemorySessions>,
     project: String,
@@ -493,9 +600,11 @@ pub fn memory_folders<R: Runtime>(
     subtree: Option<bool>,
     kind: Option<String>,
 ) -> CommandResult<Vec<FolderEntry>> {
-    sessions.with_session(&app, &project, |client| {
-        client.folders(folder.as_deref(), subtree.unwrap_or(false), kind.as_deref())
-    })
+    sessions
+        .with_session(&app, &project, move |client| {
+            client.folders(folder.as_deref(), subtree.unwrap_or(false), kind.as_deref())
+        })
+        .await
 }
 
 /// Make a folder that nothing is in yet, under the type named by `kind`.
@@ -503,44 +612,50 @@ pub fn memory_folders<R: Runtime>(
 /// What a folder is differs by where that type keeps its documents, and the
 /// engine decides it from the kind — this door does not branch, so the window
 /// does not have to either.
-#[tauri::command(async)]
-pub fn memory_folder_create<R: Runtime>(
+#[tauri::command]
+pub async fn memory_folder_create<R: Runtime>(
     app: AppHandle<R>,
     sessions: State<'_, MemorySessions>,
     project: String,
     folder: String,
     kind: String,
 ) -> CommandResult<TransactionResult> {
-    sessions.with_session(&app, &project, |client| {
-        client.create_folder(&folder, &kind)
-    })
+    sessions
+        .with_session(&app, &project, move |client| {
+            client.create_folder(&folder, &kind)
+        })
+        .await
 }
 
 /// Take a folder and everything filed under it, and say how many went.
 ///
 /// Everything, whatever its type: a folder exists while something is in it, so
 /// sparing one type's records would empty it rather than delete it.
-#[tauri::command(async)]
-pub fn memory_folder_delete<R: Runtime>(
+#[tauri::command]
+pub async fn memory_folder_delete<R: Runtime>(
     app: AppHandle<R>,
     sessions: State<'_, MemorySessions>,
     project: String,
     folder: String,
 ) -> CommandResult<usize> {
-    sessions.with_session(&app, &project, |client| client.delete_folder(&folder))
+    sessions
+        .with_session(&app, &project, move |client| client.delete_folder(&folder))
+        .await
 }
 
 /// How many records a folder holds, at any depth and whatever their type.
 ///
 /// What a confirmation asks before naming a number it is about to destroy.
-#[tauri::command(async)]
-pub fn memory_folder_toll<R: Runtime>(
+#[tauri::command]
+pub async fn memory_folder_toll<R: Runtime>(
     app: AppHandle<R>,
     sessions: State<'_, MemorySessions>,
     project: String,
     folder: String,
 ) -> CommandResult<usize> {
-    sessions.with_session(&app, &project, |client| client.folder_toll(&folder))
+    sessions
+        .with_session(&app, &project, move |client| client.folder_toll(&folder))
+        .await
 }
 
 /// Rename a folder, moving every record filed under it in one transaction.
@@ -548,15 +663,19 @@ pub fn memory_folder_toll<R: Runtime>(
 /// Where the documents are files the directory is renamed too, and the locators
 /// follow it. A type's own storage root is refused: moving that is a change to
 /// the type rather than a rename.
-#[tauri::command(async)]
-pub fn memory_folder_rename<R: Runtime>(
+#[tauri::command]
+pub async fn memory_folder_rename<R: Runtime>(
     app: AppHandle<R>,
     sessions: State<'_, MemorySessions>,
     project: String,
     from: String,
     to: String,
 ) -> CommandResult<TransactionResult> {
-    sessions.with_session(&app, &project, |client| client.rename_folder(&from, &to))
+    sessions
+        .with_session(&app, &project, move |client| {
+            client.rename_folder(&from, &to)
+        })
+        .await
 }
 
 /// File one record in another folder. `""` is the root.
@@ -564,28 +683,34 @@ pub fn memory_folder_rename<R: Runtime>(
 /// Whether a file moves with it is the engine's business, not this door's: a
 /// record whose body is a repository file has a folder that *is* that file's
 /// directory, and the engine moves both or neither.
-#[tauri::command(async)]
-pub fn memory_document_move<R: Runtime>(
+#[tauri::command]
+pub async fn memory_document_move<R: Runtime>(
     app: AppHandle<R>,
     sessions: State<'_, MemorySessions>,
     project: String,
     key: String,
     folder: String,
 ) -> CommandResult<TransactionResult> {
-    sessions.with_session(&app, &project, |client| client.move_document(&key, &folder))
+    sessions
+        .with_session(&app, &project, move |client| {
+            client.move_document(&key, &folder)
+        })
+        .await
 }
 
 /// Reconcile every attached folder with the records, and report what moved.
 ///
 /// When to call it is decided in `sync-memory`, which owns the reasoning; this
 /// is the door.
-#[tauri::command(async)]
-pub fn memory_scan<R: Runtime>(
+#[tauri::command]
+pub async fn memory_scan<R: Runtime>(
     app: AppHandle<R>,
     sessions: State<'_, MemorySessions>,
     project: String,
 ) -> CommandResult<ScanOutcome> {
-    sessions.with_session(&app, &project, MemoryClient::scan)
+    sessions
+        .with_session(&app, &project, MemoryClient::scan)
+        .await
 }
 
 /// Settle a file the scan could not attribute to a record.
@@ -594,8 +719,8 @@ pub fn memory_scan<R: Runtime>(
 /// file is a document in its own right. `contentHash` travels from the scan
 /// report rather than being recomputed, because nothing between the window and
 /// the engine reads the working tree.
-#[tauri::command(async)]
-pub fn memory_unmatched_resolve<R: Runtime>(
+#[tauri::command]
+pub async fn memory_unmatched_resolve<R: Runtime>(
     app: AppHandle<R>,
     sessions: State<'_, MemorySessions>,
     project: String,
@@ -604,14 +729,16 @@ pub fn memory_unmatched_resolve<R: Runtime>(
     kind: String,
     adopt: Option<String>,
 ) -> CommandResult<ScanOutcome> {
-    sessions.with_session(&app, &project, |client| {
-        client.resolve_unmatched(&locator, &content_hash, &kind, adopt.as_deref())?;
-        // The answer is the corpus as it now stands: adopting one file may
-        // settle another — the record it was competing with is no longer a
-        // candidate — and a window redrawing from the old report would show a
-        // question that has stopped being one.
-        client.scan()
-    })
+    sessions
+        .with_session(&app, &project, move |client| {
+            client.resolve_unmatched(&locator, &content_hash, &kind, adopt.as_deref())?;
+            // The answer is the corpus as it now stands: adopting one file may
+            // settle another — the record it was competing with is no longer a
+            // candidate — and a window redrawing from the old report would show a
+            // question that has stopped being one.
+            client.scan()
+        })
+        .await
 }
 
 /// What the Records column shows: counts over the whole corpus, and one page
@@ -620,28 +747,34 @@ pub fn memory_unmatched_resolve<R: Runtime>(
 /// `selection` is a listing query — `kind`, `freshness`, `limit`, `offset` —
 /// and `hidden` names the kinds this window is not showing. The schema records
 /// and the hidden kinds are excluded from both halves by the crate.
-#[tauri::command(async)]
-pub fn memory_records<R: Runtime>(
+#[tauri::command]
+pub async fn memory_records<R: Runtime>(
     app: AppHandle<R>,
     sessions: State<'_, MemorySessions>,
     project: String,
     selection: Value,
     hidden: Vec<String>,
 ) -> CommandResult<RecordsPage> {
-    sessions.with_session(&app, &project, |client| client.records(&selection, &hidden))
+    sessions
+        .with_session(&app, &project, move |client| {
+            client.records(&selection, &hidden)
+        })
+        .await
 }
 
 /// One record, whole: its Markdown body, its metadata and its product fields.
 ///
 /// `null` when the key does not exist at the current revision.
-#[tauri::command(async)]
-pub fn memory_document<R: Runtime>(
+#[tauri::command]
+pub async fn memory_document<R: Runtime>(
     app: AppHandle<R>,
     sessions: State<'_, MemorySessions>,
     project: String,
     key: String,
 ) -> CommandResult<Option<Document>> {
-    sessions.with_session(&app, &project, |client| client.document(&key))
+    sessions
+        .with_session(&app, &project, move |client| client.document(&key))
+        .await
 }
 
 /// Put a file into a type's storage, and answer with the record that names it.
@@ -655,8 +788,8 @@ pub fn memory_document<R: Runtime>(
 /// pictures is the project's arrangement, and an application that quietly
 /// created an `assets/` folder would be making that arrangement on the team's
 /// behalf, in their repository and in their diff.
-#[tauri::command(async)]
-pub fn memory_file_create<R: Runtime>(
+#[tauri::command]
+pub async fn memory_file_create<R: Runtime>(
     app: AppHandle<R>,
     sessions: State<'_, MemorySessions>,
     project: String,
@@ -664,9 +797,11 @@ pub fn memory_file_create<R: Runtime>(
     name: String,
     content: String,
 ) -> CommandResult<Document> {
-    sessions.with_session(&app, &project, |client| {
-        client.create_file_document(&kind, &name, &content)
-    })
+    sessions
+        .with_session(&app, &project, move |client| {
+            client.create_file_document(&kind, &name, &content)
+        })
+        .await
 }
 
 /// The bytes of a record whose content is a file, as the engine reports them.
@@ -680,14 +815,16 @@ pub fn memory_file_create<R: Runtime>(
 /// The answer says how to read itself: `utf-8`, `base64`, or `none` for a body
 /// the engine did not fetch. Branching on that is not optional — a caller that
 /// ignores it renders a picture as a page of base64.
-#[tauri::command(async)]
-pub fn memory_content<R: Runtime>(
+#[tauri::command]
+pub async fn memory_content<R: Runtime>(
     app: AppHandle<R>,
     sessions: State<'_, MemorySessions>,
     project: String,
     key: String,
 ) -> CommandResult<ContentView> {
-    sessions.with_session(&app, &project, |client| client.read_content(&key))
+    sessions
+        .with_session(&app, &project, move |client| client.read_content(&key))
+        .await
 }
 
 /// Change what a patch names in one record, and answer with the record as
@@ -701,18 +838,20 @@ pub fn memory_content<R: Runtime>(
 /// sent: the window shows what the store holds, and the two differ the moment
 /// the engine normalises anything. `null` would mean the record left the store
 /// between the write and the read, which is an answer rather than a failure.
-#[tauri::command(async)]
-pub fn memory_document_update<R: Runtime>(
+#[tauri::command]
+pub async fn memory_document_update<R: Runtime>(
     app: AppHandle<R>,
     sessions: State<'_, MemorySessions>,
     project: String,
     key: String,
     edits: DocumentEdits,
 ) -> CommandResult<Option<Document>> {
-    sessions.with_session(&app, &project, |client| {
-        client.update_document(&key, &edits)?;
-        client.document(&key)
-    })
+    sessions
+        .with_session(&app, &project, move |client| {
+            client.update_document(&key, &edits)?;
+            client.document(&key)
+        })
+        .await
 }
 
 /// Create an empty record of one of the project's types, and answer with it.
@@ -721,8 +860,8 @@ pub fn memory_document_update<R: Runtime>(
 /// project published decides what those are — so nothing about the shape of a
 /// new record is this build's to choose. What travels is the kind and the title
 /// somebody is about to type over.
-#[tauri::command(async)]
-pub fn memory_document_create<R: Runtime>(
+#[tauri::command]
+pub async fn memory_document_create<R: Runtime>(
     app: AppHandle<R>,
     sessions: State<'_, MemorySessions>,
     project: String,
@@ -733,9 +872,11 @@ pub fn memory_document_create<R: Runtime>(
     // records.
     folder: Option<String>,
 ) -> CommandResult<Document> {
-    sessions.with_session(&app, &project, |client| {
-        client.create_document(&kind, &title, folder.as_deref())
-    })
+    sessions
+        .with_session(&app, &project, move |client| {
+            client.create_document(&kind, &title, folder.as_deref())
+        })
+        .await
 }
 
 /// The document that *is* a folder: opened if it exists, written if it does not.
@@ -744,17 +885,19 @@ pub fn memory_document_create<R: Runtime>(
 /// an ordinary record of an ordinary type, so its content is indexed and found
 /// by search like any other document — nothing in the engine treats it
 /// specially, which is exactly why it works.
-#[tauri::command(async)]
-pub fn memory_folder_describe<R: Runtime>(
+#[tauri::command]
+pub async fn memory_folder_describe<R: Runtime>(
     app: AppHandle<R>,
     sessions: State<'_, MemorySessions>,
     project: String,
     folder: String,
     kind: String,
 ) -> CommandResult<Document> {
-    sessions.with_session(&app, &project, |client| {
-        client.describe_folder(&folder, &kind)
-    })
+    sessions
+        .with_session(&app, &project, move |client| {
+            client.describe_folder(&folder, &kind)
+        })
+        .await
 }
 
 /// Delete records by key, all of them or none.
@@ -762,17 +905,19 @@ pub fn memory_folder_describe<R: Runtime>(
 /// One transaction, because a record deleted together with the ones that depend
 /// on it is one decision: half of it applied is a corpus in a state nobody
 /// chose.
-#[tauri::command(async)]
-pub fn memory_document_delete<R: Runtime>(
+#[tauri::command]
+pub async fn memory_document_delete<R: Runtime>(
     app: AppHandle<R>,
     sessions: State<'_, MemorySessions>,
     project: String,
     keys: Vec<String>,
 ) -> CommandResult<Value> {
-    sessions.with_session(&app, &project, |client| {
-        let result = client.delete_documents(&keys)?;
-        Ok(serde_json::to_value(result).unwrap_or(Value::Null))
-    })
+    sessions
+        .with_session(&app, &project, move |client| {
+            let result = client.delete_documents(&keys)?;
+            Ok(serde_json::to_value(result).unwrap_or(Value::Null))
+        })
+        .await
 }
 
 /// What holds on to a record: the records that link to it, and the ones that
@@ -781,70 +926,80 @@ pub fn memory_document_delete<R: Runtime>(
 /// Two lists rather than one count, because deleting the first kind leaves a
 /// link pointing at nothing while deleting the second would remove a sentence
 /// about the record — and only the person deciding can weigh those.
-#[tauri::command(async)]
-pub fn memory_document_dependents<R: Runtime>(
+#[tauri::command]
+pub async fn memory_document_dependents<R: Runtime>(
     app: AppHandle<R>,
     sessions: State<'_, MemorySessions>,
     project: String,
     key: String,
 ) -> CommandResult<Dependents> {
-    sessions.with_session(&app, &project, |client| client.dependents(&key))
+    sessions
+        .with_session(&app, &project, move |client| client.dependents(&key))
+        .await
 }
 
 /// List records with filters, sorting and paging.
-#[tauri::command(async)]
-pub fn memory_list<R: Runtime>(
+#[tauri::command]
+pub async fn memory_list<R: Runtime>(
     app: AppHandle<R>,
     sessions: State<'_, MemorySessions>,
     project: String,
     query: Value,
 ) -> CommandResult<Value> {
-    sessions.with_session(&app, &project, |client| {
-        let listing = client.list_records(&query)?;
-        Ok(serde_json::to_value(listing).unwrap_or(Value::Null))
-    })
+    sessions
+        .with_session(&app, &project, move |client| {
+            let listing = client.list_records(&query)?;
+            Ok(serde_json::to_value(listing).unwrap_or(Value::Null))
+        })
+        .await
 }
 
 /// Search, reporting whether the answer came from FTS alone.
-#[tauri::command(async)]
-pub fn memory_search<R: Runtime>(
+#[tauri::command]
+pub async fn memory_search<R: Runtime>(
     app: AppHandle<R>,
     sessions: State<'_, MemorySessions>,
     project: String,
     query: Value,
 ) -> CommandResult<Value> {
-    sessions.with_session(&app, &project, |client| {
-        let outcome = client.search(&query)?;
-        Ok(serde_json::to_value(outcome).unwrap_or(Value::Null))
-    })
+    sessions
+        .with_session(&app, &project, move |client| {
+            let outcome = client.search(&query)?;
+            Ok(serde_json::to_value(outcome).unwrap_or(Value::Null))
+        })
+        .await
 }
 
 /// Read one record by key.
-#[tauri::command(async)]
-pub fn memory_get<R: Runtime>(
+#[tauri::command]
+pub async fn memory_get<R: Runtime>(
     app: AppHandle<R>,
     sessions: State<'_, MemorySessions>,
     project: String,
     key: String,
 ) -> CommandResult<Value> {
-    sessions.with_session(&app, &project, |client| {
-        let view = client.get_record(&key)?;
-        Ok(serde_json::to_value(view).unwrap_or(Value::Null))
-    })
+    sessions
+        .with_session(&app, &project, move |client| {
+            let view = client.get_record(&key)?;
+            Ok(serde_json::to_value(view).unwrap_or(Value::Null))
+        })
+        .await
 }
 
 /// Create or update entities in one transaction.
-#[tauri::command(async)]
-pub fn memory_save<R: Runtime>(
+#[tauri::command]
+pub async fn memory_save<R: Runtime>(
     app: AppHandle<R>,
     sessions: State<'_, MemorySessions>,
     project: String,
     entities: Vec<EntityInput>,
 ) -> CommandResult<Value> {
-    sessions.with_session(&app, &project, |client| {
-        let result = client.save_entities(&entities)?;
-        Ok(serde_json::to_value(result).unwrap_or(Value::Null))
-    })
+    sessions
+        .with_session(&app, &project, move |client| {
+            let result = client.save_entities(&entities)?;
+            Ok(serde_json::to_value(result).unwrap_or(Value::Null))
+        })
+        .await
 }
 
 /// Delete entities by key, in one transaction.
@@ -853,17 +1008,19 @@ pub fn memory_save<R: Runtime>(
 /// beside it. A second delete that skipped the checks — a type definition goes
 /// with its type, the project's own record is what the project is opened by —
 /// would be a way for the window to do quietly what it refuses to do plainly.
-#[tauri::command(async)]
-pub fn memory_delete<R: Runtime>(
+#[tauri::command]
+pub async fn memory_delete<R: Runtime>(
     app: AppHandle<R>,
     sessions: State<'_, MemorySessions>,
     project: String,
     keys: Vec<String>,
 ) -> CommandResult<Value> {
-    sessions.with_session(&app, &project, |client| {
-        let result = client.delete_documents(&keys)?;
-        Ok(serde_json::to_value(result).unwrap_or(Value::Null))
-    })
+    sessions
+        .with_session(&app, &project, move |client| {
+            let result = client.delete_documents(&keys)?;
+            Ok(serde_json::to_value(result).unwrap_or(Value::Null))
+        })
+        .await
 }
 
 /// Whether the project's memory is in step with its remote.
@@ -871,14 +1028,16 @@ pub fn memory_delete<R: Runtime>(
 /// `ask_remote` is what decides whether opening a project waits on a network
 /// call. The count of unpublished records is computed locally, so the header
 /// has something true to say before anybody has been asked anything.
-#[tauri::command(async)]
-pub fn memory_sync_state<R: Runtime>(
+#[tauri::command]
+pub async fn memory_sync_state<R: Runtime>(
     app: AppHandle<R>,
     sessions: State<'_, MemorySessions>,
     project: String,
     ask_remote: bool,
 ) -> CommandResult<SyncState> {
-    sessions.with_session(&app, &project, |client| client.sync_state(ask_remote))
+    sessions
+        .with_session(&app, &project, move |client| client.sync_state(ask_remote))
+        .await
 }
 
 /// Whether this repository's memory is here, still on a remote, or nowhere.
@@ -887,47 +1046,55 @@ pub fn memory_sync_state<R: Runtime>(
 /// an empty corpus is what a fresh clone and a brand-new project have in
 /// common, and describing the first of them writes a `project` record that
 /// will never merge with the one already on the remote.
-#[tauri::command(async)]
-pub fn memory_presence<R: Runtime>(
+#[tauri::command]
+pub async fn memory_presence<R: Runtime>(
     app: AppHandle<R>,
     sessions: State<'_, MemorySessions>,
     project: String,
 ) -> CommandResult<MemoryPresence> {
-    sessions.with_session(&app, &project, MemoryClient::presence)
+    sessions
+        .with_session(&app, &project, MemoryClient::presence)
+        .await
 }
 
 /// Configure the memory remote, which is separate from the code `origin`.
-#[tauri::command(async)]
-pub fn memory_remote_set<R: Runtime>(
+#[tauri::command]
+pub async fn memory_remote_set<R: Runtime>(
     app: AppHandle<R>,
     sessions: State<'_, MemorySessions>,
     project: String,
     url: String,
     refspec: Option<String>,
 ) -> CommandResult<TransportStatus> {
-    sessions.with_session(&app, &project, |client| {
-        client.set_remote(&url, refspec.as_deref())
-    })
+    sessions
+        .with_session(&app, &project, move |client| {
+            client.set_remote(&url, refspec.as_deref())
+        })
+        .await
 }
 
 /// Forget the memory remote.
-#[tauri::command(async)]
-pub fn memory_remote_remove<R: Runtime>(
+#[tauri::command]
+pub async fn memory_remote_remove<R: Runtime>(
     app: AppHandle<R>,
     sessions: State<'_, MemorySessions>,
     project: String,
 ) -> CommandResult<TransportStatus> {
-    sessions.with_session(&app, &project, MemoryClient::remove_remote)
+    sessions
+        .with_session(&app, &project, MemoryClient::remove_remote)
+        .await
 }
 
 /// Fetch memory from the remote and merge it.
-#[tauri::command(async)]
-pub fn memory_fetch<R: Runtime>(
+#[tauri::command]
+pub async fn memory_fetch<R: Runtime>(
     app: AppHandle<R>,
     sessions: State<'_, MemorySessions>,
     project: String,
 ) -> CommandResult<FetchOutcome> {
-    sessions.with_session(&app, &project, MemoryClient::fetch)
+    sessions
+        .with_session(&app, &project, MemoryClient::fetch)
+        .await
 }
 
 /// Put memory back where it stood, undoing what has happened since.
@@ -936,36 +1103,44 @@ pub fn memory_fetch<R: Runtime>(
 /// `localRevisionBefore` that fetch reported. Backwards along memory's own
 /// history and nowhere else — a revision this project never passed through is
 /// refused rather than reached.
-#[tauri::command(async)]
-pub fn memory_rewind<R: Runtime>(
+#[tauri::command]
+pub async fn memory_rewind<R: Runtime>(
     app: AppHandle<R>,
     sessions: State<'_, MemorySessions>,
     project: String,
     revision: String,
     expected: String,
 ) -> CommandResult<()> {
-    sessions.with_session(&app, &project, |client| client.rewind(&revision, &expected))
+    sessions
+        .with_session(&app, &project, move |client| {
+            client.rewind(&revision, &expected)
+        })
+        .await
 }
 
 /// Push memory to the remote.
-#[tauri::command(async)]
-pub fn memory_push<R: Runtime>(
+#[tauri::command]
+pub async fn memory_push<R: Runtime>(
     app: AppHandle<R>,
     sessions: State<'_, MemorySessions>,
     project: String,
     force: bool,
 ) -> CommandResult<Value> {
-    sessions.with_session(&app, &project, |client| client.push(force))
+    sessions
+        .with_session(&app, &project, move |client| client.push(force))
+        .await
 }
 
 /// Rebuild the search index.
-#[tauri::command(async)]
-pub fn memory_reindex<R: Runtime>(
+#[tauri::command]
+pub async fn memory_reindex<R: Runtime>(
     app: AppHandle<R>,
     sessions: State<'_, MemorySessions>,
     project: String,
 ) -> CommandResult<Value> {
-    sessions.with_session(&app, &project, MemoryClient::reindex)
+    sessions
+        .with_session(&app, &project, MemoryClient::reindex)
+        .await
 }
 
 /// Catch memory up with code history, rebuilding after it was rewritten.
@@ -977,12 +1152,14 @@ pub fn memory_reindex<R: Runtime>(
 /// say that the new history is the real one, which is why `full_rebuild` is
 /// asked for rather than assumed — it marks every record unverified, and a
 /// claim last checked against a history that is gone has not been checked.
-#[tauri::command(async)]
-pub fn memory_reconcile<R: Runtime>(
+#[tauri::command]
+pub async fn memory_reconcile<R: Runtime>(
     app: AppHandle<R>,
     sessions: State<'_, MemorySessions>,
     project: String,
     full_rebuild: bool,
 ) -> CommandResult<Value> {
-    sessions.with_session(&app, &project, |client| client.reconcile(full_rebuild))
+    sessions
+        .with_session(&app, &project, move |client| client.reconcile(full_rebuild))
+        .await
 }

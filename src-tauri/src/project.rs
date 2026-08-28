@@ -377,9 +377,11 @@ pub fn project_probe(path: String) -> Result<FolderProbe, ProjectError> {
 
 /// Make a folder a Git repository, then describe it again.
 ///
-/// Both commands here are `#[tauri::command(async)]` for the same reason the
-/// memory commands are: they wait on a child process, and a plain
-/// `#[tauri::command]` would do that on the main thread and freeze the window.
+/// Both commands here are `#[tauri::command(async)]` because they wait on a
+/// child process, and a plain `#[tauri::command]` would do that on the main
+/// thread and freeze the window. They wait for as long as `git` takes, which is
+/// a moment — the calls that can wait far longer are the memory ones, and they
+/// go to the blocking pool instead.
 #[tauri::command(async)]
 pub fn project_initialize_repository(path: String) -> Result<FolderProbe, ProjectError> {
     let path = Path::new(&path);
@@ -509,13 +511,21 @@ fn git_message(output: &Output, fallback: &str) -> String {
 /// repository whose memory already carries a project record has been opened
 /// before, and re-asking would be the application forgetting rather than the
 /// person changing their mind.
-#[tauri::command(async)]
-pub fn project_settings_load<R: Runtime>(
+#[tauri::command]
+pub async fn project_settings_load<R: Runtime>(
     app: AppHandle<R>,
-    sessions: State<'_, MemorySessions>,
     project: String,
 ) -> ProjectSettingsProbe {
-    match sessions.with_session(&app, &project, MemoryClient::project_settings) {
+    // The registry is taken from the handle rather than declared as an
+    // argument: a probe answers with its failure inside the value — the window
+    // needs to tell "no record yet" from "the engine would not say" — and Tauri
+    // will only let an async command borrow an argument if it returns a
+    // `Result`. Reaching for the state here keeps the shape of the answer.
+    let sessions = app.state::<MemorySessions>();
+    match sessions
+        .with_session(&app, &project, MemoryClient::project_settings)
+        .await
+    {
         Ok(settings) => ProjectSettingsProbe {
             settings,
             memory_error: None,
@@ -539,8 +549,8 @@ pub fn project_settings_load<R: Runtime>(
 /// Nothing else is published. A new project knows what it is called and nothing
 /// about what it may say; the types it works in are created in the window or by
 /// an agent, when there is something to say in them.
-#[tauri::command(async)]
-pub fn project_settings_save<R: Runtime>(
+#[tauri::command]
+pub async fn project_settings_save<R: Runtime>(
     app: AppHandle<R>,
     sessions: State<'_, MemorySessions>,
     project: String,
@@ -562,7 +572,10 @@ pub fn project_settings_save<R: Runtime>(
         ));
     }
     sessions
-        .with_session(&app, &project, |client| client.update_project(&settings))
+        .with_session(&app, &project, move |client| {
+            client.update_project(&settings)
+        })
+        .await
         .map_err(|error| ProjectError::new("memory_failed", error.message))?;
     Ok(())
 }
