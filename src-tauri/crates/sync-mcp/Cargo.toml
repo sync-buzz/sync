@@ -11,8 +11,8 @@ publish = false
 # The engine, as a library. Nothing here speaks a protocol to it: `memory-hub-mcp`
 # owns the tool catalogue and the dispatch, and `Session::call` is the whole of
 # running one — reconciliation and index synchronisation included.
-memory-hub-mcp = { git = "https://github.com/sync-buzz/memory-hub", tag = "v0.2.2" }
-memory-hub-service = { git = "https://github.com/sync-buzz/memory-hub", tag = "v0.2.2" }
+memory-hub-mcp = { git = "https://github.com/sync-buzz/memory-hub", tag = "v0.2.3" }
+memory-hub-service = { git = "https://github.com/sync-buzz/memory-hub", tag = "v0.2.3" }
 # Shared with the window: the error vocabulary, the product DTOs and the
 # JSON-RPC framing both sides of the host channel speak. A light crate — serde
 # and hashing — so depending on it costs the daemon nothing.
