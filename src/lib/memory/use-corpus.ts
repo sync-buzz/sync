@@ -403,7 +403,7 @@ export function useCorpus(
 
   // Attached folders are reconciled when the project opens and whenever this
   // window comes back to the front. The second is the one that matters in
-  // practice: somebody editing `docs/setup.md` in their editor and switching
+  // practice: somebody editing `setup.md` in their editor and switching
   // back expects Sync to have noticed, and `HEAD` moving is not what happened.
   //
   // Deliberately not on every read. The engine says so, and a scan walks a

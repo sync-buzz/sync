@@ -20,9 +20,9 @@ import { createContext, useContext, useEffect, useMemo, type ReactNode } from "r
  * mark that means none is a mark that means nothing.
  *
  * **Reporting nothing is not a report.** The declared count goes on showing
- * through it, which is what lets a section have both: Chat declares how many
- * conversations there are, so the row says so before a line of Chat has run and
- * goes on saying so while nobody is talking to an agent. What the area reports
+ * through it, which is what lets a section have both: a section that declares a
+ * count over the corpus has its row saying so before a line of its code has run
+ * and going on saying so while nothing is happening. What the area reports
  * takes over only while there is something it alone could know — a reply that
  * arrived while somebody was in another section, which is nowhere in the corpus
  * and cannot be counted from it. Composing the two is the area's own business:

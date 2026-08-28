@@ -1311,12 +1311,12 @@ fn opening_value(declaration: &Value) -> Option<Value> {
 
 /// A key for a new record: the kind it is, then six hex of a digest.
 ///
-/// `decision-3ad25f`, `observation-bb8cb8`. The kind is spelled out rather than
-/// abbreviated to its first letter, because that letter answered the question
-/// only by accident: `decision` and `doc` share one, and every kind an
-/// extension publishes shares whatever letter the extension's name starts with
-/// — `project-memory.decision` and `project-memory.question` would both be
-/// `p-`, which names the extension in a place nobody is asking about it.
+/// `decision-` and `observation-`, each with six hex after it. The kind is
+/// spelled out rather than abbreviated to its first letter, because that letter
+/// answered the question only by accident: `decision` and `doc` share one, and
+/// every kind an extension publishes shares whatever letter the extension's
+/// name starts with — two kinds from one package would both be `p-`, which
+/// names the package in a place nobody is asking about it.
 ///
 /// What names the record is the last segment of the kind, for the same reason:
 /// the namespace in front of it is identical on every record that extension

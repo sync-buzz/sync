@@ -59,8 +59,8 @@ import { cn } from "@/lib/utils";
  * been visited, and where the columns are. What is *in* the columns is the
  * area's, and this file cannot name a single thing an area shows — no type, no
  * record, no catalogue entry. An area arriving from an extension is one this
- * file has never heard of, so anything it knew about Records would be a thing
- * the next area could not have.
+ * file has never heard of, so anything it knew about one of them would be a
+ * thing the next one could not have.
  *
  * **An area is never unmounted.** It is mounted the first time it is selected
  * and hidden from then on. That is what makes leaving and coming back cost
@@ -492,7 +492,7 @@ const CATALOGUE: MountedArea = {
   // Nothing to count. What this section holds is packages rather than records,
   // so there is no question about the corpus to ask on its behalf — and the one
   // mark it is going to want is the update the registry has, which is a
-  // different thing arriving with §7.
+  // different thing arriving with `docs/extensions.md` §7.
   badge: null,
   module: EXTENSIONS_AREA_MODULE,
 };

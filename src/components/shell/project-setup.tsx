@@ -7,11 +7,8 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Check, ChevronDown, Folder } from "lucide-react";
+import { ChevronDown, Folder } from "lucide-react";
 
-import { KindGlyph } from "@/components/shell/entity-marks";
-import type { InstalledExtension } from "@/lib/extension-host/client";
-import { usePackagesState } from "@/lib/extension-host/packages";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -69,7 +66,14 @@ import {
  *    be reunited with its own memory.
  * 4. **What is it?** Name, an optional description, and the language it writes
  *    its knowledge in — asked once, for a project that has never existed.
- * 5. **What can it do?** The extension marketplace.
+ *
+ * What it can *do* is not asked here at all. There was a fifth screen with the
+ * catalogue on it, and it broke on the machines it was meant for: past a
+ * handful of packages the grid outgrew the sheet and pushed the sheet's own
+ * buttons off the bottom, so the more a person had installed the less they
+ * could finish. The question did not need a screen — a project that declares
+ * nothing opens on the catalogue, which is the same list in a window that can
+ * hold it.
  *
  * The answers are written to the project's own memory. Opening a repository
  * that has never held any declares where that memory goes — `refs`, the Git
@@ -88,7 +92,6 @@ type Stage =
   | "repository"
   | "memory"
   | "details"
-  | "extensions"
   | "collision";
 
 /** A project being described. It is an `OpenProject` that is not open yet. */
@@ -136,27 +139,11 @@ export interface ProjectSetup {
   readonly initialize: () => void;
   /** Bring the memory that is on the remote here, and open what arrives. */
   readonly fetchExisting: () => void;
+  /**
+   * Take the answers, write them, and open. The last thing the flow asks, so
+   * pressing it is the whole of the decision rather than a step towards it.
+   */
   readonly submitDetails: (draft: Draft) => void;
-  readonly backToDetails: () => void;
-  /**
-   * Add or remove one extension from what the project will be composed of.
-   *
-   * Nothing is chosen for a person here. A tick they did not put there is a
-   * decision made on the fourth screen of a product they have not used yet;
-   * the catalogue marks what we would pick and leaves the picking to them.
-   */
-  readonly toggleExtension: (id: string) => void;
-  /**
-   * The packages this machine can offer, which is the whole of what a new
-   * project may be composed of.
-   *
-   * There is no registry yet, so a fresh machine has nothing here and the step
-   * says so. That is the honest state rather than a defect: everything a
-   * project can do arrives as a package, and until one is unpacked there is
-   * nothing to choose between.
-   */
-  readonly available: readonly InstalledExtension[];
-  readonly finish: () => void;
   /**
    * The project that could not be registered, and the one holding the name it
    * wanted. Present only at the `collision` stage.
@@ -182,10 +169,6 @@ export function useProjectSetup({
   const [stage, setStage] = useState<Stage>("closed");
   const [probe, setProbe] = useState<FolderProbe | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
-  // Read here rather than in the step, because the toggle needs it too: what a
-  // project declares is `{id, version, integrity, source}`, and every one of
-  // those comes off the package rather than out of this build.
-  const packages = usePackagesState();
   const [memoryError, setMemoryError] = useState<string | null>(null);
   const [saveFailed, setSaveFailed] = useState(false);
   const [presence, setPresence] = useState<MemoryPresence | null>(null);
@@ -426,13 +409,6 @@ export function useProjectSetup({
     })();
   }, [draft, fetchFailed, openProject, presence]);
 
-  const submitDetails = useCallback((next: Draft) => {
-    setDraft(next);
-    setStage("extensions");
-  }, []);
-
-  const backToDetails = useCallback(() => setStage("details"), []);
-
   /**
    * Write what was asked, then open.
    *
@@ -440,68 +416,41 @@ export function useProjectSetup({
    * time, which is worth saying before it happens rather than after. So the
    * first failure reports itself and stops; pressing the button a second time
    * opens the project anyway, which is a decision rather than a silent
-   * fallback.
+   * fallback. The step keeps its fields while that is decided, so the second
+   * press writes whatever is on the screen rather than what was there when the
+   * first one failed.
    */
-  const toggleExtension = useCallback((id: string) => {
-    setDraft((current) => {
-      if (!current) return current;
-      const chosen = current.installed.some((entry) => entry.id === id);
-      if (chosen) {
-        return {
-          ...current,
-          installed: current.installed.filter((entry) => entry.id !== id),
-        };
+  const submitDetails = useCallback(
+    (next: Draft) => {
+      setDraft(next);
+
+      if (saveFailed) {
+        attempt(() => openProject(next));
+        return;
       }
-      // Read off the package at the moment of choosing: what gets declared is
-      // what this machine actually holds, down to the digest — not a version
-      // number this build happens to know.
-      const packaged = packages.byId(id);
-      if (packaged === null) return current;
-      return {
-        ...current,
-        installed: [
-          ...current.installed,
-          {
-            id,
-            version: packaged.manifest.version,
-            prompt: packaged.prompt ?? undefined,
-            integrity: packaged.pointer.integrity ?? undefined,
-            source: packaged.pointer.source,
-          },
-        ],
-      };
-    });
-  }, [packages]);
 
-  const finish = useCallback(() => {
-    if (!draft) return;
-    const project = draft;
-
-    if (saveFailed) {
-      attempt(() => openProject(project));
-      return;
-    }
-
-    setError(null);
-    setIsBusy(true);
-    void (async () => {
-      try {
-        await saveProjectSettings(project.path, {
-          name: project.name,
-          identifier: project.identifier,
-          description: project.description,
-          language: project.language,
-          installed: project.installed,
-        });
-        await openProject(project);
-      } catch (failure) {
-        setSaveFailed(true);
-        setError(messageOf(failure));
-      } finally {
-        setIsBusy(false);
-      }
-    })();
-  }, [attempt, draft, openProject, saveFailed]);
+      setError(null);
+      setIsBusy(true);
+      void (async () => {
+        try {
+          await saveProjectSettings(next.path, {
+            name: next.name,
+            identifier: next.identifier,
+            description: next.description,
+            language: next.language,
+            installed: next.installed,
+          });
+          await openProject(next);
+        } catch (failure) {
+          setSaveFailed(true);
+          setError(messageOf(failure));
+        } finally {
+          setIsBusy(false);
+        }
+      })();
+    },
+    [attempt, openProject, saveFailed],
+  );
 
   return {
     stage,
@@ -520,10 +469,6 @@ export function useProjectSetup({
     initialize,
     fetchExisting,
     submitDetails,
-    backToDetails,
-    toggleExtension,
-    available: packages.all,
-    finish,
     collision,
     settleCollision,
     forget,
@@ -562,9 +507,6 @@ export function ProjectSetupSheet({ setup }: { setup: ProjectSetup }) {
         ) : null}
         {setup.stage === "details" && setup.draft ? (
           <DetailsStep setup={setup} draft={setup.draft} />
-        ) : null}
-        {setup.stage === "extensions" && setup.draft ? (
-          <ExtensionsStep setup={setup} draft={setup.draft} />
         ) : null}
       </SheetContent>
     </Sheet>
@@ -851,7 +793,7 @@ function DetailsStep({
   const trimmedName = name.trim();
 
   function submit() {
-    if (!trimmedName || !identifier) return;
+    if (!trimmedName || !identifier || setup.isBusy) return;
     setup.submitDetails({
       path: draft.path,
       name: trimmedName,
@@ -976,84 +918,18 @@ function DetailsStep({
 
       <SheetFooter>
         <div className="min-w-0 flex-1" />
-        <Button variant="outline" onClick={setup.cancel}>
-          Cancel
-        </Button>
-        <Button onClick={submit} disabled={!trimmedName}>
-          Continue
-        </Button>
-      </SheetFooter>
-    </>
-  );
-}
-
-/**
- * The marketplace, at the size it currently is.
- *
- * Only what can be installed is listed, which now means only what is unpacked
- * on this machine. A card for something a person cannot choose is a way of
- * saying no to a question they asked in good faith, and this is the screen
- * where they are asking it.
- *
- * A machine with nothing unpacked shows nothing to pick, and says so in a
- * sentence rather than with an empty grid. That is where everybody starts until
- * the registry exists, and a project composed of nothing is a real project —
- * it opens on the catalogue, which is where the packages are added.
- */
-function ExtensionsStep({
-  setup,
-  draft,
-}: {
-  setup: ProjectSetup;
-  draft: Draft;
-}) {
-  return (
-    <>
-      <StepBody>
-        <SheetDescription id="project-setup-lead">
-          Extensions decide what Sync can do in {draft.name}. Nothing is
-          chosen for you — a project with none opens on this list, and anything
-          here can be added later.
-        </SheetDescription>
-
-        {setup.available.length === 0 ? (
-          <p className="text-sm leading-5 text-fg-tertiary">
-            Nothing is unpacked yet, so there is nothing to choose
-            between. Open the project and add a package from a file or a folder
-            in Extensions — the project is composed there just as well as here.
-          </p>
-        ) : (
-          <ul className="grid grid-cols-2 gap-2">
-            {setup.available.map((packaged) => (
-              <ExtensionCard
-                key={packaged.manifest.id}
-                packaged={packaged}
-                chosen={draft.installed.some(
-                  (entry) => entry.id === packaged.manifest.id,
-                )}
-                onToggle={() => setup.toggleExtension(packaged.manifest.id)}
-              />
-            ))}
-          </ul>
-        )}
-
-        <ErrorNote message={setup.error} />
-      </StepBody>
-
-      <SheetFooter>
-        <div className="min-w-0 flex-1" />
         <Button
           variant="outline"
-          onClick={setup.backToDetails}
+          onClick={setup.cancel}
           disabled={setup.isBusy}
         >
-          Back
+          Cancel
         </Button>
         {/* Three labels, one width. Wide enough for "Open Anyway", which is the
-            longest of them, so pressing the button never moves "Back". */}
+            longest of them, so pressing the button never moves "Cancel". */}
         <Button
-          onClick={setup.finish}
-          disabled={setup.isBusy}
+          onClick={submit}
+          disabled={!trimmedName || setup.isBusy}
           className="min-w-32"
         >
           {setup.isBusy
@@ -1064,72 +940,6 @@ function ExtensionsStep({
         </Button>
       </SheetFooter>
     </>
-  );
-}
-
-/**
- * One extension, as a choice rather than as a report.
- *
- * The whole card is the control: a tick box beside a card that is also
- * clickable gives two targets for one decision, and on a grid of cards the
- * second one is the one people miss.
- *
- * Nothing is chosen in advance, and nothing is recommended any more. The shell
- * used to mark three cards `Recommended`, which it could do because it had
- * written all three; it cannot recommend a package it has never seen, and a
- * mark that only ever appeared on our own extensions would be the catalogue
- * saying which authors it trusts.
- */
-function ExtensionCard({
-  packaged,
-  chosen,
-  onToggle,
-}: {
-  packaged: InstalledExtension;
-  chosen: boolean;
-  onToggle: () => void;
-}) {
-  const development = packaged.pointer.source === "folder";
-
-  return (
-    <li className="min-w-0">
-      <button
-        type="button"
-        aria-pressed={chosen}
-        onClick={onToggle}
-        data-chosen={chosen}
-        className="flex h-full w-full flex-col gap-2 rounded-(--radius-surface) border border-separator bg-panel/60 p-3 text-left transition-colors duration-(--motion-duration-fast) ease-shell hover:bg-panel data-[chosen=false]:opacity-70 data-[chosen=true]:border-separator-strong data-[chosen=true]:bg-panel data-[chosen=true]:opacity-100"
-      >
-        <div className="flex items-start gap-2">
-          <span
-            aria-hidden="true"
-            className="flex size-7 shrink-0 items-center justify-center rounded-(--radius-control) bg-hover text-fg-secondary"
-          >
-            <KindGlyph icon={packaged.manifest.icon} className="size-4" />
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-base font-medium text-fg">
-              {packaged.manifest.name}
-            </p>
-            <p className="flex items-center gap-1 text-xs text-fg-tertiary">
-              {chosen ? (
-                <>
-                  <Check aria-hidden="true" className="size-3 shrink-0" />
-                  Chosen
-                </>
-              ) : development ? (
-                "Development"
-              ) : (
-                "Not chosen"
-              )}
-            </p>
-          </div>
-        </div>
-        <p className="text-xs leading-4 text-fg-tertiary">
-          {packaged.manifest.summary}
-        </p>
-      </button>
-    </li>
   );
 }
 

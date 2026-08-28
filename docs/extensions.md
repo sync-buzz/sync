@@ -111,12 +111,21 @@ two ways to reach one object is how one of them goes stale.
 **`lucide-react` is bundled into the extension**, which reverses the earlier
 "marked external so there is one copy". One copy matters where identity does:
 React, because of the dispatcher, and the component library, because of portals
-and focus traps. An icon is a pure SVG component with neither, so the six an
-extension uses cost a couple of kilobytes — while serving the library from the
-host would mean the application bundling fifteen hundred icon modules so that an
-extension can pick six. What the host does resolve is the icon *names* a
-manifest gives — `"icon": "book-marked"` — against its own curated table, with a
-neutral mark for a name it does not have.
+and focus traps. An icon is a pure SVG component with neither, so the handful an
+extension draws itself cost a couple of kilobytes, and it draws them from its
+own copy.
+
+The icon *names* are a different question, and they are the host's. A manifest
+gives a name — `"icon": "book-marked"` — and the window resolves it against
+`lucide-react`, **the whole library**: every name at
+[lucide.dev/icons](https://lucide.dev/icons) is a name a package may use, and a
+name outside it is drawn with the neutral mark. Carrying the library for that
+costs the application about 600 KB, measured, which buys the one property this
+has to have — a mark is a *name*, so it keeps resolving after the package that
+chose it has been removed, which a file inside that package could not do. The
+type sheet offers a shortlist of those names rather than all of them, because a
+person naming a kind is choosing from a vocabulary and not searching a
+catalogue; the shortlist decides what is offered, never what can be drawn.
 
 This is why the component library is **not** extracted into a package of its
 own. A package would be a second copy of every portal, focus trap and scroll
@@ -217,7 +226,7 @@ manifest.json           id, version, syncApi range, capabilities, areas, types, 
 types/*.json            __type__ definitions, one per file
 ui/index.js             the built ESM bundle; host runtime external — and optional
 ui/index.css            the rules its own markup uses; no values — and optional
-service/index.js        the handlers, for what happens with no screen — planned, and optional
+service/index.js        the handlers, for what happens with no screen — optional
 prompt/instructions.md  served to agents as topic extension:<id>
 META/hashes.json        path -> sha256 for every file above
 META/signature          minisign over the canonical hashes.json
@@ -373,7 +382,8 @@ module and the sections it fills, and one that needs something fetched says so:
 ```
 
 `icon` is a name rather than a component, so the host resolves it against
-`lucide-react` at load. `opens.projectTypes` is the field that retires
+`lucide-react` at load — any name in that library, spelled as that library
+spells it. `opens.projectTypes` is the field that retires
 `PROJECT_TYPES`; `dependencies.npm` is the field that retires
 `FETCHES_DEPENDENCIES`.
 
@@ -851,20 +861,17 @@ one needs a Sync this machine does not have.
 whose shape is decided by whatever is installed has as many shapes as it has
 extensions, and no rule left to enforce against the next one.*
 
-| Point | What it is | State |
-| --- | --- | --- |
-| **Area** | A section in the sidebar, drawn in one of four frames | built |
-| **Badge** | A count or a dot on that section's row | built, both halves |
-| **Types** | A vocabulary published into the project's memory | built |
-| **Prompt** | What a connected agent is told, as `extension:<id>` | built |
-| **Opener** | Which kinds it can show, and whether it shows the project's own types | in the manifest |
-| **Menu commands** | What File offers while its area is selected | built |
-| **Markdown plugin** | Replacing how one block of stored prose is drawn | built |
-| **Native menu** | Secondary click, through the host's own menu | built |
-| **Handler** | A function the host calls with no screen mounted — at install, and on a clock | built, §5a |
-| **Settings page** | A section of the settings window, for what belongs to the machine | planned |
-| **Palette commands** | Entries in ⌘K that open an area with an intent | planned |
-| **System notification** | A macOS banner, gated — see below | planned |
+| Point | What it is |
+| --- | --- |
+| **Area** | A section in the sidebar, drawn in one of four frames |
+| **Badge** | A count or a dot on that section's row, declared or live |
+| **Types** | A vocabulary published into the project's memory |
+| **Prompt** | What a connected agent is told, as `extension:<id>` |
+| **Opener** | Which kinds it can show, and whether it shows the project's own types |
+| **Menu commands** | What File offers while its area is selected |
+| **Markdown plugin** | Replacing how one block of stored prose is drawn |
+| **Native menu** | Secondary click, through the host's own menu |
+| **Handler** | A function the host calls with no screen mounted — at install, and on a clock (§5a) |
 
 **Not open, and each for its own reason.** The record inspector: it is drawn by
 whichever extension shows records, so contributing to it would be a protocol
@@ -887,12 +894,12 @@ never arrives.
 
 There are two sources, and both are needed because of how areas live:
 
-- **Declared.** *Built 2026-08-24.* The manifest carries a query over the corpus
+- **Declared.** The manifest carries a query over the corpus
   and the host counts. **No code runs**, which is what makes this work for a
   section nobody has opened yet: an area is mounted on first visit, so a
   runtime-only badge is silent in exactly the case a person most needs it — the
   first launch after opening a project.
-- **Live.** *Built 2026-08-24.* A mounted area calls `useBadge`, and what it
+- **Live.** A mounted area calls `useBadge`, and what it
   reports wins over the declared count for as long as it is mounted. This is the
   one an agent's reply needs: "the agent answered while you were elsewhere" is
   not in the corpus and cannot be counted from it.
@@ -974,15 +981,6 @@ Where a figure stops being read, what a dot looks like, and which of the two
 survives the column being folded are the window's business — an extension that
 could choose would be an extension that could shout. See rule 11 in
 `design-foundation.md`.
-
-### A system notification is a banner, and banners are gated
-
-Three conditions, all of them: the extension declares the `notifications`
-capability, the person has allowed it for that extension, and the window is not
-frontmost. A banner is the same event as the badge, said louder — never a
-different event, and never one the badge did not already carry. An extension
-that notified without a badge would be telling somebody about a place they
-cannot go and look.
 
 ## 10. The catalogue
 
@@ -1096,3 +1094,9 @@ to poll an issue. The measurements that decided it: QuickJS through `rquickjs` a
 gate. A sandboxed tier for unsigned UI; the signature format is what lets that
 arrive without a redesign. Paid extensions, ratings, and anything else that
 makes the registry a storefront rather than an index.
+
+Three more places a package might have appeared, closed for the reason the set
+in §9a is closed at all: a page of the settings window, entries in ⌘K, and a
+system notification. The last has a rule of its own worth stating so it is not
+re-proposed as a small thing — a banner is the badge said louder, and an
+extension that could send one is an extension that could shout.

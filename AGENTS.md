@@ -29,7 +29,8 @@ there to keep it that way.
 ## Three rules the compiler cannot hold
 
 CI holds them instead, which means breaking one is a red build rather than a
-defect discovered months later.
+defect discovered months later. A fourth job, `citations`, holds what it can of
+the prose rules at the foot of this file.
 
 1. **No extension lives in this repository.** There is no `src/extensions/`, and
    nothing may resolve a path into one. Extensions are built elsewhere and
@@ -46,7 +47,7 @@ defect discovered months later.
 ## Verify with these, and read the exit code
 
 ```sh
-pnpm lint && pnpm typecheck && pnpm api:check && pnpm build
+pnpm lint && pnpm typecheck && pnpm api:check && pnpm prose:check && pnpm build
 cd src-tauri
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
@@ -108,9 +109,52 @@ read well as worked examples. Start from
 
 Comments and documents here explain *why*, name what was rejected, and say what
 goes wrong when a rule is broken. They do not restate what the code already
-says. Match that when you add to them — and do not cite anything a reader cannot
-open: no internal record keys, no private branches, no paths from somebody's
-machine.
+says. Match that when you add to them.
+
+Five rules past that, and one failure behind all five: prose is written by
+somebody looking at their own work and read by somebody looking at the product.
+
+1. **Do not cite what is not in this repository.** Not a record key, not a
+   decision numbered in a document kept somewhere else, not a branch, not a path
+   off somebody's machine. Give the reasoning here or leave it out — a footnote
+   into a database the reader has no copy of tells them only that understanding
+   this code is locked away from them.
+2. **A reference to a section has to resolve.** `docs/<file>.md §N` means the
+   file is here and the section is in it; a bare `§N` means the document was
+   named above it. This is the only one of the five that breaks on its own:
+   sections get renumbered and the references stay where they were.
+3. **Documentation describes the version that exists.** No `Planned`, no
+   `*Built*`, no *not yet*, and no mechanics that are not written. What is
+   absent is named in *Deliberately absent* in one line, so it is not proposed
+   again, and the reasoning behind it goes to the project's memory. A document
+   that promises is read as a document that describes, and somebody builds
+   against a thing that was never there.
+4. **A comment in the shell does not name an extension** — not by its name and
+   not by describing it. This is the rule the code already keeps: the shell
+   names no language, no file type and no section. A comment naming a package
+   breaks it in prose, and if the package is unreleased it announces the package
+   before anybody announced it. A line added to a shared table for one package
+   is explained by what it means, never by who asked for it.
+5. **A comment describes the present, not the edit that produced it.** *It used
+   to be broken, now it is fixed* is a commit message. A reader sees the current
+   state and takes the comment for it, so a comment about a defect that is gone
+   is a lie with a delay on it.
+
+**What CI holds, and what it does not.** `pnpm prose:check` — the `citations`
+job — holds rules 1, 2 and 3 in full. Rule 4 it holds by halves: `slang`,
+`routines` and `project-memory` are never anything else here and always fail,
+while `issues`, `chat`, `records` and `tasks` fail only where capitalisation or
+a neighbouring noun makes them a name. The lower-case words are ordinary
+English, and a check that failed on every *this repository has no issues* would
+be switched off in its first week. A description carrying no name at all — *the
+section that reads a tracker* — is caught by nobody, and neither is rule 5.
+Those two are held in review. A job believed to hold everything is worse than no
+job at all, which is why this paragraph is here rather than in a commit message.
+
+The check self-tests on known-bad lines every run. A check that silently stopped
+matching would report a clean tree for ever, which is the failure it was written
+to avoid: `git grep -E` does not understand `\b`, finds nothing, and a check
+built on it is green from the day it is merged.
 
 <!-- BEGIN:nextjs-agent-rules -->
 

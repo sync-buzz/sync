@@ -1,41 +1,11 @@
 import type { LucideIcon } from "lucide-react";
+import * as lucide from "lucide-react";
 import {
-  AlarmClock,
-  BookMarked,
-  BookOpen,
-  Braces,
-  Bug,
-  Calendar,
   CircleAlert,
   CircleCheck,
   CircleDashed,
-  CircleDot,
-  CircleHelp,
   CircleX,
-  ClipboardList,
-  Compass,
-  Eye,
-  FileText,
-  Flag,
-  FlaskConical,
-  FolderGit2,
-  GitBranch,
-  Lightbulb,
-  Link,
-  ListChecks,
-  Lock,
-  MessageSquare,
-  Package,
-  Ruler,
-  Scale,
   Shapes,
-  Shield,
-  Signpost,
-  Star,
-  Target,
-  Users,
-  Wrench,
-  Zap,
 } from "lucide-react";
 import type { Freshness } from "@/lib/memory/types";
 import { cn } from "@/lib/utils";
@@ -64,48 +34,77 @@ import { cn } from "@/lib/utils";
  */
 
 /**
- * The marks a type can be given, by name.
+ * A mark name, and the drawing it resolves to.
  *
- * This is the vocabulary of the picker as much as the lookup table for drawing:
- * a type carries the *name* of its mark, and a name this build cannot draw is
- * shown neutrally rather than guessed at. Adding to this list adds a choice; it
- * never changes what an existing type is drawn with.
+ * The vocabulary is Lucide's, whole: a name is converted to the library's own
+ * spelling and looked up. It used to be a table of thirty-three names written
+ * here, which made every other name resolve to the neutral mark with no error
+ * on either side — the package author saw a green build, the window saw a
+ * string it could not draw and had decided, by design, not to guess.
+ *
+ * The name is checked before it is used as a key. It arrives from a manifest
+ * this application did not write, and it is about to select something that
+ * gets rendered as a component; `icon` is refused because the library exports
+ * that name for the generic component that takes a drawing as a prop.
  */
-export const KIND_ICON: Record<string, LucideIcon> = {
-  "folder-git-2": FolderGit2,
-  target: Target,
-  flag: Flag,
-  ruler: Ruler,
-  signpost: Signpost,
-  lock: Lock,
-  eye: Eye,
-  "circle-help": CircleHelp,
-  "circle-dot": CircleDot,
-  "circle-check": CircleCheck,
-  package: Package,
-  "file-text": FileText,
-  "message-square": MessageSquare,
-  lightbulb: Lightbulb,
-  "flask-conical": FlaskConical,
-  bug: Bug,
-  shield: Shield,
-  "book-open": BookOpen,
-  "book-marked": BookMarked,
-  "clipboard-list": ClipboardList,
-  "list-checks": ListChecks,
-  "alarm-clock": AlarmClock,
-  braces: Braces,
-  "git-branch": GitBranch,
-  users: Users,
-  calendar: Calendar,
-  link: Link,
-  star: Star,
-  zap: Zap,
-  compass: Compass,
-  scale: Scale,
-  wrench: Wrench,
-  shapes: Shapes,
-};
+const MARK_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+function markComponent(name: string): LucideIcon | null {
+  if (name === "icon" || !MARK_NAME.test(name)) return null;
+
+  const spelling = name.replace(/(^|-)([a-z0-9])/g, (_match, _dash, first: string) =>
+    first.toUpperCase(),
+  );
+  const found = (lucide as unknown as Record<string, LucideIcon | undefined>)[
+    spelling
+  ];
+
+  return found ?? null;
+}
+
+/**
+ * The marks the type sheet offers, in the order they are worth reading.
+ *
+ * A shortlist rather than the library: this is what a person is shown while
+ * naming a kind of their own, and two thousand tiles is a catalogue to be
+ * searched, not a vocabulary to be chosen from. Every name here resolves like
+ * any other — the list decides what is offered, never what can be drawn.
+ */
+export const MARK_CHOICES: readonly string[] = [
+  "folder-git-2",
+  "target",
+  "flag",
+  "ruler",
+  "signpost",
+  "lock",
+  "eye",
+  "circle-help",
+  "circle-dot",
+  "circle-check",
+  "package",
+  "file-text",
+  "message-square",
+  "lightbulb",
+  "flask-conical",
+  "bug",
+  "shield",
+  "book-open",
+  "book-marked",
+  "clipboard-list",
+  "list-checks",
+  "alarm-clock",
+  "braces",
+  "git-branch",
+  "users",
+  "calendar",
+  "link",
+  "star",
+  "zap",
+  "compass",
+  "scale",
+  "wrench",
+  "shapes",
+];
 
 /** The mark a type gets when nobody has chosen one. */
 export const DEFAULT_ICON = "shapes";
@@ -116,7 +115,7 @@ export const DEFAULT_ICON = "shapes";
  * rows it filters.
  */
 export function kindIcon(icon: string | null | undefined): LucideIcon {
-  return (icon && KIND_ICON[icon]) || Shapes;
+  return (icon && markComponent(icon)) || Shapes;
 }
 
 /**
@@ -135,7 +134,10 @@ export function KindGlyph({
   icon: string | null | undefined;
   className?: string;
 }) {
-  const Icon = (icon && KIND_ICON[icon]) || Shapes;
+  // A lookup, not a factory: one name always answers with the same module
+  // export, so the identity the rule below guards is stable already.
+  const Icon = (icon && markComponent(icon)) || Shapes;
+  // eslint-disable-next-line react-hooks/static-components
   return <Icon aria-hidden="true" className={className} />;
 }
 
@@ -151,8 +153,6 @@ export function KindMark({
   icon: string | null | undefined;
   className?: string;
 }) {
-  const Icon = (icon && KIND_ICON[icon]) || Shapes;
-
   return (
     <span
       aria-hidden="true"
@@ -161,7 +161,7 @@ export function KindMark({
         className,
       )}
     >
-      <Icon className="size-3.5" />
+      <KindGlyph icon={icon} className="size-3.5" />
     </span>
   );
 }

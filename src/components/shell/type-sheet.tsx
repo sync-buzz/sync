@@ -3,7 +3,11 @@
 import { useState, type KeyboardEvent } from "react";
 import { Database, FolderOpen, type LucideIcon } from "lucide-react";
 
-import { DEFAULT_ICON, KIND_ICON } from "@/components/shell/entity-marks";
+import {
+  DEFAULT_ICON,
+  KindGlyph,
+  MARK_CHOICES,
+} from "@/components/shell/entity-marks";
 import { ErrorNote } from "@/components/shell/project-setup";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -346,7 +350,7 @@ function TypeForm({
                   Mark
                 </legend>
                 <div className="flex flex-wrap gap-1">
-                  {Object.entries(KIND_ICON).map(([markName, Icon]) => (
+                  {MARK_CHOICES.map((markName) => (
                     <button
                       key={markName}
                       type="button"
@@ -358,7 +362,7 @@ function TypeForm({
                         icon === markName && "bg-selected text-fg",
                       )}
                     >
-                      <Icon className="size-4" aria-hidden="true" />
+                      <KindGlyph icon={markName} className="size-4" />
                     </button>
                   ))}
                 </div>

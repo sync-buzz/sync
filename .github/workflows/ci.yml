@@ -171,6 +171,34 @@ jobs:
             echo "$leaks" >&2
             exit 1
           fi
+  # Prose that cites what a reader cannot open, describes what is not here, or
+  # names a package the shell is not allowed to know about. All of it was found
+  # by hand once, and every line of it was added by somebody who thought they
+  # were doing the reader a favour — which is why hands are the wrong tool for
+  # it. The rules, and the half of them a machine cannot hold, are at the foot
+  # of `AGENTS.md`.
+  #
+  # A script rather than a `grep` line, for two reasons that both cost time
+  # already. `git grep -E` does not understand `\b`: it matches nothing, and a
+  # check written with it is green from the day it merges. And prose is not the
+  # file — `"key": "d-3ad25f"` in a test is a fixture and stays, while the same
+  # six characters in the comment above it is a footnote into a database nobody
+  # outside this machine can open. Telling those apart needs to know where the
+  # comments are, so the script reads for comments and skips string literals.
+  #
+  # It self-tests before it reports, over lines known to be bad. A check that
+  # quietly stopped matching would say the tree is clean and go on saying it.
+  citations:
+    name: prose / everything it cites can be opened
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Nothing cited that a reader cannot open
+        run: node scripts/prose-check.mjs
+
   # The memory engine is a separate repository on its own release cadence, and
   # Sync links it: the bundled sidecar is `sync-mcp` with the engine inside it,
   # not the engine itself. The manifest pins the engine to a tag, so what this

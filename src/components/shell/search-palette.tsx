@@ -30,7 +30,7 @@ import { cn } from "@/lib/utils";
  * **It opens nothing itself.** A result is a record of some kind, the kind
  * decides which area owns it, and that area is what opens it — the palette
  * hands over an intent and closes. That is the whole of the arrangement: this
- * file has no idea what Records does with a key, and an area from an
+ * file has no idea what the owning area does with a key, and an area from an
  * extension this build has never seen would be handed exactly the same object.
  *
  * When nothing owns the kind, that is said rather than worked around. A record

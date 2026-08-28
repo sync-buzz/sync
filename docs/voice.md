@@ -173,13 +173,7 @@ with no list to find it in is not a voice, it is a string.
 `voice` capability. A card says *this extension can speak*, before it is
 installed, which is the whole purpose of the capability list.
 
-**A package's handler.** `voice.speak` joins `OFFERED` in `handlers.rs`, behind
-the same capability, enforced **at the call** the way `work.agent` is: whether
-JavaScript calls a function is not visible in a manifest, and the refusal has to
-name what was missing so an author can catch it. *Unbuilt.*
-
-**An agent.** *Built 2026-08-25*, and it turned out to be the door the first
-real case needed. `sync_speak` is a tool on Sync's own MCP surface, beside
+**An agent.** The door the first real case needed. `sync_speak` is a tool on Sync's own MCP surface, beside
 `sync_apply`: one string to say, an optional `interrupt`, and no `project` —
 speakers belong to a machine rather than to a repository, so it is the second
 tool after `sync_projects` that takes none.
@@ -243,6 +237,10 @@ Named so they are not re-proposed.
 - **Reading a record aloud from the window.** A control on a record that reads
   it out is a feature of the reader, not of the speaker, and it is a separate
   decision about the record page. The mechanism does not prejudge it.
+- **A handler that speaks.** A screen may ask and an agent may ask; a function
+  running with no screen mounted has no occasion that needs a voice, and the
+  capability would have to be enforced at the call rather than read off the
+  manifest.
 - **Listening.** §2.
 - **A volume control.** §4.
 - **Per-project voices.** §4.

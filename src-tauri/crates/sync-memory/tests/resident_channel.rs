@@ -6,7 +6,7 @@
 //! is the arrangement a test wants and the one the product no longer has: Sync
 //! runs a single `sync-mcp` for the machine and the window connects to it, so a
 //! machine with four projects open holds four connections rather than four
-//! engines (`decision-7f2b16`).
+//! engines.
 //!
 //! That path had no coverage at all when it was written. These tests are it,
 //! and the thing they are really for is the claim the whole arrangement rests

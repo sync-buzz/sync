@@ -44,10 +44,10 @@ export interface AvailableUpdate {
   /**
    * Why this build may not run the new version, or `null` when it may.
    *
-   * The gate §9 asks for, and it is why an update is a state rather than a
-   * button: a version whose `syncApi` range this build is below is one the card
-   * names a Sync for, instead of offering a button that would fail after a
-   * download. The extension is left exactly where it is.
+   * The gate `docs/extensions.md` §9 asks for, and it is why an update is a
+   * state rather than a button: a version whose `syncApi` range this build is
+   * below is one the card names a Sync for, instead of offering a button that
+   * would fail after a download. The extension is left exactly where it is.
    */
   readonly refusal: string | null;
 }
@@ -111,11 +111,12 @@ export function updatesFor(
 /**
  * What the last fetch left on the disk, read once when a project opens.
  *
- * This is the half of §9 that had nowhere to live: the mark on the pinned
- * Extensions row is for the person who has *not* opened the catalogue, and the
- * catalogue is where the index was being fetched. Reading the cache is what
- * squares those — a machine that has fetched an index knows what it knows, and
- * a machine that never has says nothing, which is the honest state of it.
+ * This is the half of `docs/extensions.md` §9 that had nowhere to live: the
+ * mark on the pinned Extensions row is for the person who has *not* opened the
+ * catalogue, and the catalogue is where the index was being fetched. Reading
+ * the cache is what squares those — a machine that has fetched an index knows
+ * what it knows, and a machine that never has says nothing, which is the honest
+ * state of it.
  *
  * Deliberately not a fetch. `useMarketplace` dials out because somebody opened
  * the marketplace and asked what exists; a window doing it at every launch

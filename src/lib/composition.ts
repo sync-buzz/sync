@@ -158,8 +158,9 @@ function resolvedOf(packaged: InstalledExtension): Resolved {
  *
  * Installing is a statement about the project, written into its record; whether
  * a package could be fetched is a fact about this machine and this minute. A
- * project that declared Chat while the machine was offline has still declared
- * it, and refusing the declaration would make the record depend on the network.
+ * project that declared a package while the machine was offline has still
+ * declared it, and refusing the declaration would make the record depend on the
+ * network.
  * The cost of the download not having happened is one slow first conversation —
  * the session layer checks before it raises an agent — which is exactly what
  * every conversation cost before any of this existed.

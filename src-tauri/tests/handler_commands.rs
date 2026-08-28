@@ -575,8 +575,9 @@ fn a_title_of_nothing_at_all_is_refused_like_a_missing_one() {
 }
 
 /// An order with no choice about interruption is not an order. There is no
-/// default because neither answer is right for both cases (§6.4), so the
-/// refusal has to arrive rather than a guess.
+/// default because neither answer is right for both cases
+/// (`docs/background.md` §6.4), so the refusal has to arrive rather than a
+/// guess.
 #[test]
 fn an_order_that_does_not_say_what_to_do_if_it_is_interrupted_is_refused() {
     let folder = tempfile::tempdir().expect("a directory");

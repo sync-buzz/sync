@@ -45,7 +45,7 @@ export type EntityKind =
 export type Freshness = "fresh" | "unverified" | "stale" | "invalid" | (string & {});
 
 /**
- * A type the project holds, as the Records column lists it.
+ * A type the project holds, as the column that lists them shows it.
  *
  * All of it comes from the project's own corpus, the mark included: a type
  * created in the window is one no build has heard of. Where a definition names
@@ -479,7 +479,7 @@ export interface MemoryCounts {
 }
 
 /**
- * The Records column's payload.
+ * What a column listing the project's own types is given.
  *
  * The counts describe the whole corpus and the records describe the current
  * selection, because the navigator lists every type while the workspace shows

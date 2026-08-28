@@ -46,10 +46,10 @@ import { satisfies, valid, validRange } from "semver";
  * An export added, so a minor.
  *
  * It exists because a section that reads a forge had nowhere to get its
- * subject. The first shape of Issues asked a person to type `owner/name` into
- * its own column, which is the interface asking for something the machine
- * already knows — and worse, letting one project be pointed at another
- * project's issues by a typo nobody would notice.
+ * subject. Its first shape asked a person to type `owner/name` into its own
+ * column, which is the interface asking for something the machine already
+ * knows — and worse, letting one project be pointed at another project's forge
+ * by a typo nobody would notice.
  *
  * A call rather than a member of `OpenProject`, which is where it was first
  * put. Three things decided it: the shell never needs the value, so every
@@ -126,8 +126,8 @@ import { satisfies, valid, validRange } from "semver";
  * anything new by accident.
  *
  * Optional on the row, and it had to be: a package builds a `MemoryRecord` of
- * its own for a row that is not in the corpus — Records does, for the sheet
- * that asks what holds on to a record — and a required member would have made
+ * its own for a row that is not in the corpus — for a sheet that asks what
+ * holds on to a record, say — and a required member would have made
  * every one of those a compile error over a fact it has no answer to. That
  * would have been a major, over a member nobody had asked for. Absent rather
  * than empty on the wire as well, so the shape a caller reads is the shape a
@@ -222,8 +222,9 @@ import { satisfies, valid, validRange } from "semver";
  * the order is written down, a key comes back, and the handler is finished long
  * before the agent has been raised. The capability arrives with the machinery
  * that honours it, as `schedule` did, and it is named separately from
- * `background` for the reason §5 gives: this is the one that spends somebody's
- * tokens while they are asleep, and the card is where they agree to that.
+ * `background` for the reason `docs/background.md` §5 gives: this is the one
+ * that spends somebody's tokens while they are asleep, and the card is where
+ * they agree to that.
  *
  * It is also the first capability enforced when the call is made rather than
  * when the manifest is read. `background` and `schedule` are visible in the

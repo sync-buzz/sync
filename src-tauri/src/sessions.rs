@@ -602,10 +602,10 @@ pub async fn session_resume<R: Runtime>(
         held.agent_id.clone(),
         spec.display_name.replace('`', ""),
         cwd.clone(),
-        // Carried by the pointer this resume was read from, which is what makes
-        // §6.3 true across a restart: the session that was raised for this
-        // conversation held its source in memory, and that memory ended with
-        // the process.
+        // Carried by the pointer this resume was read from, which is what
+        // makes `docs/background.md` §6.3 true across a restart: the session
+        // that was raised for this conversation held its source in memory, and
+        // that memory ended with the process.
         held.source.clone(),
     );
     // The name it already had. Nothing the agent replays carries one, and a

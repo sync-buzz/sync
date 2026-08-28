@@ -2,7 +2,7 @@
 //!
 //! An engine turns text into sound. There are two kinds in the design and one
 //! here: the system's synthesiser, which is the platform's and needs nothing
-//! downloaded, and — later — a model on this disk (`docs/voice.md` §3.2). They
+//! downloaded, and — later — a model on this disk (`docs/voice.md` §3). They
 //! meet at [`Engine`], and the crate answers [`engines`] with what this build
 //! and this platform can actually offer, so a caller never has to ask what
 //! operating system it is on.
@@ -144,7 +144,7 @@ impl Utterance {
 ///
 /// Three questions and no state: what voices are there, say this, stop. Where
 /// an engine keeps a thread, a model or a device is its own business — which is
-/// what lets the model engine of `docs/voice.md` §3.2 arrive as another
+/// what lets the model engine of `docs/voice.md` §3 arrive as another
 /// implementation rather than as a second shape.
 pub trait Engine: Send + Sync {
     /// Which engine this is, as a preference writes it down.
