@@ -37,8 +37,8 @@ pub use client::{EngineInfo, MemoryClient};
 pub use dto::{
     ContentView, Counts, EntityInput, FetchOutcome, FolderEntry, Handshake, InstalledExtension,
     LinkInput, Listing, MemoryPresence, ModelStatus, Overlap, ProjectSettings, RecordView,
-    RemoteCheck, ScanOutcome, SearchOutcome, SyncState, TransactionResult, TransportStatus,
-    Version,
+    RemoteCheck, ScanOutcome, SearchOutcome, SyncState, ToolDeclaration, TransactionResult,
+    TransportStatus, Version,
 };
 pub use error::{MemoryError, MemoryErrorKind, Result};
 /// The environment variable the MCP server's bearer token travels in.
@@ -55,5 +55,6 @@ pub use mapping::{
 };
 pub use process::{BinarySource, EngineBinary, LaunchConfig, resolve_binary};
 pub use protocol::{
-    ATTACH, Connection, METHODS, PROJECT_RESOURCE, REVISION_RESOURCE, Transport, tool_result,
+    ATTACH, ATTEND, Connection, METHODS, PROJECT_RESOURCE, REVISION_RESOURCE, TOOL_CALL, Transport,
+    tool_result,
 };

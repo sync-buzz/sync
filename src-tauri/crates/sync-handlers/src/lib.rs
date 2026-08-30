@@ -45,6 +45,8 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 use std::cell::RefCell;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use rquickjs::{CatchResultExt, Context, Ctx, Function, Module, Object, Runtime, Value};
@@ -106,8 +108,19 @@ const CONSOLE_LEVELS: [&str; 4] = ["log", "info", "warn", "error"];
 pub struct Limits {
     /// The isolate's ceiling. Allocating past it fails the call.
     pub memory_bytes: usize,
-    /// How long one call may run before it is interrupted, whatever it is
-    /// doing. A loop that never yields is stopped by this and by nothing else.
+    /// How long a handler's **own code** may run before it is interrupted.
+    ///
+    /// This is a guarantee against a loop in JavaScript and against nothing
+    /// else. The interpreter asks whether to stop between two bytecode
+    /// instructions, so while the thread is inside a host function it is not
+    /// asked at all — a handler waiting twenty seconds for somebody's API is
+    /// bounded by that door's own timeout, and not by this.
+    ///
+    /// So the time spent inside [`Host::call`] does not spend this budget: it
+    /// is measured and given back (see [`Clock`]). Otherwise a handler that
+    /// waited for an answer would be stopped on the first instruction after
+    /// receiving it — the answer arriving and the call failing anyway, which is
+    /// the shape of failure this repository pays for most.
     pub wall_clock: Duration,
 }
 
@@ -120,6 +133,69 @@ impl Default for Limits {
             memory_bytes: 16 * 1024 * 1024,
             wall_clock: Duration::from_secs(5),
         }
+    }
+}
+
+/// How much of its budget one call has left, and why that can move.
+///
+/// A plain `Instant` was enough while every host function answered from memory.
+/// The moment one of them dials out, it is not: the interpreter is asked
+/// whether to stop only between two bytecode instructions, so a call that sat
+/// twenty seconds inside `Host::call` comes back to an instant that passed
+/// nineteen seconds ago and is stopped on the next instruction it runs. The
+/// answer arrived and the handler failed anyway.
+///
+/// So waiting on the host is not spent from the budget. [`Self::waiting`] wraps
+/// every host call, measures it and hands the same amount back, which leaves
+/// [`Limits::wall_clock`] meaning what it says: how long a handler's own code
+/// may run.
+///
+/// **This bounds JavaScript and not the wall.** A handler making a hundred
+/// requests is bounded by a hundred network timeouts and by nothing here. What
+/// that costs — one handler at a time on this machine — is the slot's question
+/// rather than this type's.
+///
+/// Nanoseconds in an atomic rather than an `Instant` behind a lock, because the
+/// interrupt handler reads this between bytecode instructions and a lock there
+/// is a cost on every one of them. `Relaxed` because there is one writer, the
+/// same thread that runs the isolate, and nothing is ordered against it.
+#[derive(Clone)]
+struct Clock {
+    started: Instant,
+    limit: Duration,
+    waited: Arc<AtomicU64>,
+}
+
+impl Clock {
+    fn new(limit: Duration) -> Self {
+        Self {
+            started: Instant::now(),
+            limit,
+            waited: Arc::new(AtomicU64::new(0)),
+        }
+    }
+
+    /// When this call runs out, as things stand.
+    fn deadline(&self) -> Instant {
+        self.started + self.limit + Duration::from_nanos(self.waited.load(Ordering::Relaxed))
+    }
+
+    /// Whether it already has.
+    fn expired(&self) -> bool {
+        Instant::now() >= self.deadline()
+    }
+
+    /// Does one thing on the host's side of the bridge, off the clock.
+    ///
+    /// Saturating, because the alternative to a budget that stops growing is
+    /// one that wraps to nothing and interrupts a handler that had just
+    /// started. Reaching it takes five hundred years of waiting.
+    fn waiting<T>(&self, work: impl FnOnce() -> T) -> T {
+        let began = Instant::now();
+        let answer = work();
+        let waited = u64::try_from(began.elapsed().as_nanos()).unwrap_or(u64::MAX);
+        self.waited.fetch_add(waited, Ordering::Relaxed);
+        answer
     }
 }
 
@@ -250,7 +326,7 @@ pub fn call(
     limits: Limits,
     host: impl Host + 'static,
 ) -> Result<Json, HandlerError> {
-    in_isolate(limits, handler, host, |ctx, deadline| {
+    in_isolate(limits, handler, host, |ctx, clock| {
         let table = register(&ctx, source)?;
         let function: Function = match table.get::<_, Value>(handler) {
             Ok(value) if value.is_function() => value
@@ -282,7 +358,7 @@ pub fn call(
         let answered: Value = function
             .call((argument,))
             .catch(&ctx)
-            .map_err(|error| threw(handler, &error.to_string(), deadline, limits))?;
+            .map_err(|error| threw(handler, &error.to_string(), clock, limits))?;
         let settled = match answered.as_promise() {
             // `finish` turns the isolate's job queue until the promise settles,
             // and answers `WouldBlock` when the queue runs dry with it still
@@ -304,7 +380,7 @@ pub fn call(
                 }
                 finished
                     .catch(&ctx)
-                    .map_err(|error| threw(handler, &error.to_string(), deadline, limits))?
+                    .map_err(|error| threw(handler, &error.to_string(), clock, limits))?
             }
             None => answered.clone(),
         };
@@ -321,23 +397,24 @@ fn in_isolate<T>(
     limits: Limits,
     named: &str,
     host: impl Host + 'static,
-    body: impl FnOnce(Ctx<'_>, Instant) -> Result<T, HandlerError>,
+    body: impl FnOnce(Ctx<'_>, &Clock) -> Result<T, HandlerError>,
 ) -> Result<T, HandlerError> {
     let runtime = Runtime::new().map_err(|error| HandlerError::Evaluation(error.to_string()))?;
     runtime.set_memory_limit(limits.memory_bytes);
-    let deadline = Instant::now() + limits.wall_clock;
-    runtime.set_interrupt_handler(Some(Box::new(move || Instant::now() >= deadline)));
+    let clock = Clock::new(limits.wall_clock);
+    let interrupt = clock.clone();
+    runtime.set_interrupt_handler(Some(Box::new(move || interrupt.expired())));
 
     let context =
         Context::full(&runtime).map_err(|error| HandlerError::Evaluation(error.to_string()))?;
     context.with(|ctx| {
-        install_host(&ctx, host)?;
+        install_host(&ctx, host, clock.clone())?;
         install_console(&ctx)?;
-        match body(ctx.clone(), deadline) {
+        match body(ctx.clone(), &clock) {
             Ok(answer) => Ok(answer),
             // Anything that failed *after* the clock ran out failed because of
             // it, whatever the interpreter called the failure on the way up.
-            Err(_) if Instant::now() >= deadline => Err(HandlerError::Interrupted {
+            Err(_) if clock.expired() => Err(HandlerError::Interrupted {
                 handler: named.to_owned(),
                 limit: limits.wall_clock,
             }),
@@ -349,7 +426,11 @@ fn in_isolate<T>(
 /// Puts [`HOST_GLOBAL`] in place. Takes and answers JSON strings, because a
 /// string is the one shape that crosses without this crate learning the
 /// vocabulary on either side of it.
-fn install_host(ctx: &Ctx<'_>, host: impl Host + 'static) -> Result<(), HandlerError> {
+fn install_host(
+    ctx: &Ctx<'_>,
+    host: impl Host + 'static,
+    clock: Clock,
+) -> Result<(), HandlerError> {
     // The host is owned by the bridge, which is owned by the isolate, which is
     // taken down before the call returns. A handler cannot outlive what it was
     // allowed to reach, because both die together.
@@ -358,7 +439,11 @@ fn install_host(ctx: &Ctx<'_>, host: impl Host + 'static) -> Result<(), HandlerE
         ctx.clone(),
         move |ctx: Ctx<'_>, function: String, arguments: String| -> rquickjs::Result<String> {
             let parsed: Json = serde_json::from_str(&arguments).unwrap_or(Json::Null);
-            match held.borrow_mut().call(&function, parsed) {
+            // Off the clock: what the host does here is not the handler's own
+            // code, and a door that waits must not spend the budget that bounds
+            // a loop. See [`Clock`].
+            let answered = clock.waiting(|| held.borrow_mut().call(&function, parsed));
+            match answered {
                 Ok(answer) => Ok(answer.to_string()),
                 Err(refusal) => {
                     Err(ctx.throw(rquickjs::String::from_str(ctx.clone(), &refusal)?.into()))
@@ -443,8 +528,8 @@ fn from_js<'js>(ctx: &Ctx<'js>, value: Value<'js>) -> Result<Json, HandlerError>
 
 /// Tells apart the three ways a call ends badly, which read identically to the
 /// interpreter and differently to a person.
-fn threw(handler: &str, message: &str, deadline: Instant, limits: Limits) -> HandlerError {
-    if Instant::now() >= deadline {
+fn threw(handler: &str, message: &str, clock: &Clock, limits: Limits) -> HandlerError {
+    if clock.expired() {
         return HandlerError::Interrupted {
             handler: handler.to_owned(),
             limit: limits.wall_clock,
@@ -490,7 +575,7 @@ mod tests {
             "hello.installed": (payload) => ({ greeted: payload.name, at: "install" }),
             "hello.reads": (payload) => JSON.parse(__syncHost__("memory.read", JSON.stringify(payload))),
             "hello.refused": () => {
-              try { __syncHost__("net.fetch", "{}"); return { caught: false }; }
+              try { __syncHost__("filesystem.read", "{}"); return { caught: false }; }
               catch (error) { return { caught: true, said: String(error) }; }
             },
             "hello.throws": () => { throw new Error("the issue tracker said no"); },
@@ -614,6 +699,82 @@ mod tests {
                 ..Limits::default()
             },
             spy(),
+        )
+        .expect_err("it never returns");
+        assert!(matches!(error, HandlerError::Interrupted { .. }), "{error}");
+    }
+
+    /// A handler that waited on the host answers, however long the wait was.
+    ///
+    /// The defect this is against has no error in it: the request succeeds, the
+    /// value comes back into JavaScript, and the handler is stopped on the next
+    /// instruction because the budget ran out while the thread sat in Rust. The
+    /// author sees a handler that timed out and an API that was answered — and
+    /// no amount of reading their own code explains it.
+    #[test]
+    fn a_handler_that_waited_on_the_host_is_not_charged_for_the_wait() {
+        /// A door that takes its time, as a network one does.
+        struct Slow;
+
+        impl Host for Slow {
+            fn call(&mut self, _function: &str, _arguments: Json) -> Result<Json, String> {
+                std::thread::sleep(Duration::from_millis(200));
+                Ok(json!({ "title": "an answer worth waiting for" }))
+            }
+        }
+
+        let answer = call(
+            MODULE,
+            "hello.awaits",
+            &json!({ "key": "a-record" }),
+            Limits {
+                wall_clock: Duration::from_millis(50),
+                ..Limits::default()
+            },
+            Slow,
+        )
+        .expect("the wait is the host's, not the handler's");
+
+        assert_eq!(answer["title"], json!("an answer worth waiting for"));
+    }
+
+    /// And the budget it gets back buys nothing for its own code.
+    ///
+    /// The wait is given back and no more, so a handler that waits and then
+    /// loops is stopped by the same clock as one that only loops. Otherwise a
+    /// package could buy itself unlimited execution by calling a slow door
+    /// first, which is a ceiling an extension raises for itself.
+    #[test]
+    fn waiting_does_not_buy_a_handler_time_to_run_in() {
+        const WAITS_THEN_LOOPS: &str = r#"
+            export default function register() {
+              return {
+                "hello.after": () => {
+                  __syncHost__("memory.read", "{}");
+                  while (true) {}
+                },
+              };
+            }
+        "#;
+
+        struct Slow;
+
+        impl Host for Slow {
+            fn call(&mut self, _function: &str, _arguments: Json) -> Result<Json, String> {
+                std::thread::sleep(Duration::from_millis(200));
+                Ok(Json::Null)
+            }
+        }
+
+        let error = call(
+            WAITS_THEN_LOOPS,
+            "hello.after",
+            &json!({}),
+            Limits {
+                wall_clock: Duration::from_millis(50),
+                ..Limits::default()
+            },
+            Slow,
         )
         .expect_err("it never returns");
         assert!(matches!(error, HandlerError::Interrupted { .. }), "{error}");

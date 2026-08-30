@@ -7,17 +7,31 @@
 //! and that implementation is here, beside the session registry, where the
 //! project is known.
 //!
-//! # Questions, and one instruction
+//! # Questions, instructions, and the two doors that leave the machine
 //!
-//! Three of the four functions are questions: a handler can read a record, list
-//! them and read a body — enough to decide something, which is what a handler
-//! is for. The fourth orders work, and it is the first thing here that changes
-//! anything. It arrives with the capability that gates it, by the rule every
-//! one of them follows (`docs/background.md` §5), and it is the first capability
-//! this build enforces *here* rather than when the manifest is read: whether a
-//! handler calls it is inside the JavaScript, and no reader of a manifest can
-//! see that. Writing to the corpus and the network are still absent, and adding
-//! either before its capability would be granting it.
+//! Three functions are questions: a handler can read a record, list them and
+//! read a body — enough to decide something, which is what a handler is for.
+//! The rest change something or leave: it orders work, it reaches the keychain,
+//! and it dials out. Each arrives with the capability that gates it, by the
+//! rule every one of them follows (`docs/background.md` §5), and each is
+//! enforced *here* rather than when the manifest is read: whether a handler
+//! calls it is inside the JavaScript, and no reader of a manifest can see that.
+//! Writing to the corpus is still absent, and adding it before its capability
+//! would be granting it.
+//!
+//! # The keychain and the network are one implementation, not two
+//!
+//! Both doors exist already for the half of an extension that has a screen, and
+//! this is the same door reached from the other side: [`crate::vault`] and
+//! [`crate::extensions`] hold the one implementation and both halves call it.
+//! A handler that runs for an agent has no window, so a second implementation
+//! here is what would let the two halves come to disagree about what a package
+//! may reach — and the disagreement would be *which hosts* and *whose secrets*.
+//!
+//! What a package does with a secret once it holds one is not something this
+//! file can enforce, and the rule is stated where an author reads:
+//! `docs/background.md` §3.3. What it *can* do is keep a value the handler read
+//! out of the host's log, which is [`ProjectMemory::redacted`].
 //!
 //! # The occasion is a string
 //!
@@ -28,12 +42,13 @@
 //! name is what gets called.
 
 use serde_json::Value;
-use sync_extensions::Manifest;
+use sync_extensions::{Manifest, NET_CAPABILITY, NetRequest};
 use sync_handlers::{HandlerError, Host, Limits};
 use tauri::{AppHandle, Manager, Runtime};
 
-use crate::extensions::store;
+use crate::extensions::{asked_for, fetch_now, store};
 use crate::memory::MemorySessions;
+use crate::vault::{VAULT_CAPABILITY, address, for_package_now};
 
 /// What a handler may not exceed on this build.
 ///
@@ -63,6 +78,10 @@ const OFFERED: &[&str] = &[
     "memory.list",
     "memory.content",
     "work.order",
+    "vault.read",
+    "vault.write",
+    "vault.forget",
+    "net.fetch",
 ];
 
 /// What a package must ask for before it may spend somebody's tokens.
@@ -100,12 +119,30 @@ struct ProjectMemory<R: Runtime> {
     /// more: work ordered from here records who ordered it, and half of that
     /// answer is the handler's name (`docs/background.md` §6.3).
     handler: String,
-    /// Whether the package asked for [`WORK_AGENT_CAPABILITY`].
+    /// What the package asked for, and where it is allowed to reach.
     ///
-    /// Decided once, where the manifest is in hand, rather than re-read on
-    /// every call. A bool named for the question rather than the list of
-    /// capabilities, because a list invites being consulted for something else.
-    may_order_work: bool,
+    /// **Read once, when the call began, and never from the caller.** Every
+    /// permission this host answers to is in here — the capabilities, and the
+    /// hosts the network door is checked against — so an argument arriving from
+    /// the isolate cannot widen any of them.
+    ///
+    /// The whole manifest rather than the two or three answers taken off it,
+    /// because it was in hand where the isolate was built: taking a snapshot of
+    /// each answer instead would mean a second reading of the same file per
+    /// call, which can come back different halfway through a handler.
+    manifest: Manifest,
+    /// Secret values this call has read, so that a line it writes cannot carry
+    /// one.
+    ///
+    /// `console` goes to the host's log and a log outlives everything around
+    /// it. An author who logs a token while working something out does not
+    /// abuse anything — they forget — and no review catches what is only in one
+    /// developer's terminal. The host knows every value it handed over, so it
+    /// takes them back out of what it prints.
+    ///
+    /// This is not secrecy from the package: it holds the value and may send it
+    /// anywhere its manifest allows. It is one accident, closed.
+    redacted: Vec<String>,
 }
 
 impl<R: Runtime> Host for ProjectMemory<R> {
@@ -120,8 +157,11 @@ impl<R: Runtime> Host for ProjectMemory<R> {
             // `console` of its own — is what keeps this the only place that
             // would have to change, with nothing in any package changing.
             _ if function.starts_with("console.") => {
-                let said = arguments["said"].as_str().unwrap_or_default();
                 let level = function.trim_start_matches("console.");
+                let said = without_secrets(
+                    &self.redacted,
+                    arguments["said"].as_str().unwrap_or_default(),
+                );
                 eprintln!("[{}] {level}: {said}", self.id);
                 Ok(Value::Null)
             }
@@ -160,7 +200,7 @@ impl<R: Runtime> Host for ProjectMemory<R> {
             // performs it (`docs/background.md` §2), and the host is what
             // outlives a handler.
             "work.order" => {
-                if !self.may_order_work {
+                if !self.manifest.asks_for(WORK_AGENT_CAPABILITY) {
                     return Err(format!(
                         "`{}` may not order work: its manifest does not ask for the \"{WORK_AGENT_CAPABILITY}\" capability. Ordering work spends somebody's tokens while they are asleep, and the card they install from has to say so first",
                         self.id
@@ -182,6 +222,56 @@ impl<R: Runtime> Host for ProjectMemory<R> {
                 )
                 .map(Value::String)
             }
+            // The keychain. One capability for all three, because the flow that
+            // needs any of them needs the others: a package that signs somebody
+            // in ends up holding a token nobody could have typed, and refreshes
+            // it before it expires. The owner half of the address is the id
+            // this host was built with, so a name is only ever a name.
+            "vault.read" => {
+                asked_for(&self.manifest, &self.id, VAULT_CAPABILITY)?;
+                let slot = addressed(&self.id, &arguments)?;
+                let secret = for_package_now(&slot, |vault, slot| vault.read(slot))?;
+                self.redacted.push(secret.clone());
+                Ok(Value::String(secret))
+            }
+            "vault.write" => {
+                asked_for(&self.manifest, &self.id, VAULT_CAPABILITY)?;
+                let slot = addressed(&self.id, &arguments)?;
+                let secret = arguments
+                    .get("secret")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| said("a secret to store"))?
+                    .to_owned();
+                // Written down before the call rather than after it, because a
+                // write that failed still had the value pass through here — and
+                // the line an author logs while working out why it failed is
+                // exactly the line this exists for.
+                self.redacted.push(secret.clone());
+                for_package_now(&slot, |vault, slot| vault.write(slot, &secret))?;
+                Ok(Value::Null)
+            }
+            "vault.forget" => {
+                asked_for(&self.manifest, &self.id, VAULT_CAPABILITY)?;
+                let slot = addressed(&self.id, &arguments)?;
+                for_package_now(&slot, |vault, slot| vault.forget(slot))?;
+                Ok(Value::Null)
+            }
+            // The network. The request is the package's; where it may go, and
+            // which secrets ride along in headers it never sees, come off the
+            // manifest — [`fetch_now`] is the same call the window makes.
+            //
+            // This one waits, and it is the first thing here that does: the
+            // thread of the isolate sits in Rust until the answer arrives or
+            // the door's own timeout stops it. That wait is not charged to the
+            // handler's wall clock, which is `Clock` in `sync-handlers`.
+            "net.fetch" => {
+                asked_for(&self.manifest, &self.id, NET_CAPABILITY)?;
+                let request: NetRequest = serde_json::from_value(arguments).map_err(|error| {
+                    format!("`{function}` was given a request it could not read: {error}")
+                })?;
+                fetch_now(&self.id, &self.manifest, &request)
+                    .map(|response| serde_json::to_value(response).unwrap_or(Value::Null))
+            }
             // Named rather than ignored, and named as a refusal rather than as a
             // missing function: a handler asking for something it has no
             // permission for should hear why, and its author should be able to
@@ -198,6 +288,53 @@ impl<R: Runtime> Host for ProjectMemory<R> {
         }
     }
 }
+
+/// Which entry a handler's keychain call is about.
+///
+/// **The owner is the package this host was built for, and there is no
+/// argument that can be the other half.** A call supplies a name; the id comes
+/// from the artefact the isolate was built from. So a name that reads like a
+/// way out of the namespace — a path, another package's id, a leading separator
+/// — addresses an entry of the caller's own with an odd name, and there is
+/// nothing to spell that would reach anybody else's.
+///
+/// # Errors
+///
+/// When the call named nothing, or named something the store cannot address.
+fn addressed(id: &str, arguments: &Value) -> Result<sync_vault::Slot, String> {
+    let name = arguments
+        .get("name")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "a keychain call needs the name of a secret".to_owned())?;
+    address(id, name)
+}
+
+/// One line, with every secret this call has read taken out of it.
+///
+/// A plain substring replacement, which is the right shape here: what is being
+/// caught is a value printed, formatted into a sentence or joined into a URL,
+/// and all three are substrings. A value the handler took apart before printing
+/// is not caught, and nothing pretends otherwise — the packages this is for log
+/// the token, not its halves.
+///
+/// An empty entry is skipped. Replacing it would put the marker between every
+/// pair of characters in the line, which turns a log into nothing at the one
+/// moment somebody is reading it.
+fn without_secrets(redacted: &[String], said: &str) -> String {
+    redacted
+        .iter()
+        .filter(|secret| !secret.is_empty())
+        .fold(said.to_owned(), |line, secret| {
+            line.replace(secret.as_str(), REDACTED)
+        })
+}
+
+/// What stands in a log where a secret was.
+///
+/// Says that something was taken out rather than leaving a gap: a line that
+/// silently lost a value reads as a bug in the handler, and the author goes
+/// looking for the wrong thing.
+const REDACTED: &str = "[a secret]";
 
 /// The envelope inside a stored record.
 ///
@@ -226,17 +363,6 @@ fn envelope_of(record: Value) -> Value {
             members.remove("envelope").unwrap_or(Value::Object(members))
         }
         other => other,
-    }
-}
-
-/// Which handler an occasion names, if any.
-///
-/// A package that declares nothing for an occasion is the ordinary case, not a
-/// failure: most extensions want none of them.
-fn named_for<'a>(manifest: &'a Manifest, occasion: &str) -> Option<&'a str> {
-    match occasion {
-        "installed" => manifest.lifecycle.installed.as_deref(),
-        _ => None,
     }
 }
 
@@ -282,7 +408,16 @@ pub async fn extension_handler_call<R: Runtime>(
             .map_err(|error| error.to_string())?
             .ok_or_else(|| format!("`{id}` is not installed on this machine"))?;
 
-        let Some(handler) = named_for(&installed.manifest, &occasion) else {
+        // Resolved by the manifest rather than here, and that is what keeps the
+        // occasions one thing: an install, a clock and a tool an agent named
+        // are three callers asking *which function is this*, and asking it in
+        // three places is how one of them quietly gets a different answer. What
+        // this layer decides is who may ask, which is the division the crate
+        // boundary already draws.
+        //
+        // A package that declares nothing for an occasion is the ordinary case
+        // rather than a failure: most extensions want none of them.
+        let Some(handler) = installed.manifest.handler_for(&occasion) else {
             return Ok(None);
         };
         run(&app, &installed, &project, handler, &payload).map(Some)
@@ -294,10 +429,11 @@ pub async fn extension_handler_call<R: Runtime>(
 /// Run one named handler of one package, for one project.
 ///
 /// The occasion is the caller's business and has already been resolved to a
-/// name by the time this is reached: the window resolves `installed` through
-/// [`named_for`], and the clock resolves an entry of the manifest's schedule.
-/// One evaluation path for both, so an occasion added later cannot quietly get
-/// a different runtime, different limits or a different host.
+/// name by the time this is reached: an install and a tool through
+/// [`sync_extensions::Manifest::handler_for`], and the clock through an entry
+/// of the manifest's schedule. One evaluation path for all of them, so an
+/// occasion added later cannot quietly get a different runtime, different
+/// limits or a different host.
 ///
 /// It takes the package already resolved rather than its id, because both
 /// callers have had to resolve it to know there was anything to call.
@@ -328,11 +464,8 @@ pub(crate) fn run<R: Runtime>(
         id: id.clone(),
         name: installed.manifest.name.clone(),
         handler: handler.to_owned(),
-        may_order_work: installed
-            .manifest
-            .capabilities
-            .iter()
-            .any(|capability| capability == WORK_AGENT_CAPABILITY),
+        manifest: installed.manifest.clone(),
+        redacted: Vec::new(),
     };
     match sync_handlers::call(&source, handler, payload, LIMITS, host) {
         Ok(answer) => Ok(answer),
@@ -381,6 +514,90 @@ mod tests {
         assert!(
             record.get("representation").is_none(),
             "the store's own format does not cross: {record}"
+        );
+    }
+
+    /// A keychain call reaches the calling package's namespace and no other.
+    ///
+    /// The owner is not something a call can carry: it is the id the isolate
+    /// was built for. So every way of spelling somebody else's is a name, and
+    /// what it addresses is an oddly-named entry of the caller's own.
+    #[test]
+    fn a_keychain_call_cannot_name_another_package() {
+        for arguments in [
+            json!({ "name": "token" }),
+            json!({ "name": "../another-package/token" }),
+            json!({ "name": "another-package/token" }),
+            json!({ "name": "/token" }),
+            // The one that would matter if the owner were ever taken from the
+            // call: a member that looks exactly like the missing half.
+            json!({ "name": "token", "owner": "another-package" }),
+            json!({ "name": "token", "id": "another-package" }),
+        ] {
+            let slot = addressed("a-package", &arguments).expect("a package addresses a secret");
+            assert_eq!(
+                slot.owner(),
+                "a-package",
+                "{arguments} addressed somebody else's namespace"
+            );
+        }
+    }
+
+    /// A call that names nothing is refused rather than addressed.
+    #[test]
+    fn a_keychain_call_with_no_name_is_refused_in_words() {
+        let refused = addressed("a-package", &json!({})).expect_err("there is nothing to address");
+        assert!(
+            refused.contains("name of a secret"),
+            "the refusal says what was missing: {refused}"
+        );
+    }
+
+    /// A secret a handler read does not reach the host's log.
+    ///
+    /// The author is not abusing anything: they print a token while working out
+    /// why somebody's API says no, and they forget. The log outlives the
+    /// afternoon, the window, and usually the debugging — so what the host
+    /// handed over, the host takes back out.
+    ///
+    /// Every shape a value is printed in, because a check that only caught a
+    /// bare value would pass while the interesting cases went through: a token
+    /// in a sentence, in a header, and in a query string.
+    #[test]
+    fn a_line_a_handler_wrote_does_not_carry_a_secret_it_read() {
+        let read = vec!["ghp_averyrealtoken".to_owned()];
+
+        for said in [
+            "ghp_averyrealtoken",
+            "the token is ghp_averyrealtoken, which should work",
+            "Authorization: Bearer ghp_averyrealtoken",
+            "https://api.example.com/things?access_token=ghp_averyrealtoken&page=2",
+        ] {
+            let logged = without_secrets(&read, said);
+            assert!(
+                !logged.contains("ghp_averyrealtoken"),
+                "the value went to the log: {logged}"
+            );
+            assert!(
+                logged.contains(REDACTED),
+                "and the line does not say something was taken out: {logged}"
+            );
+        }
+    }
+
+    /// A line with no secret in it is the line the author wrote.
+    ///
+    /// Including when the call read a secret that happens to be empty — an
+    /// entry somebody stored as nothing. Replacing that would put the marker
+    /// between every pair of characters, and a log nobody can read is the
+    /// failure this was written to avoid rather than one to introduce.
+    #[test]
+    fn an_ordinary_line_is_left_exactly_as_it_was() {
+        let read = vec![String::new(), "ghp_averyrealtoken".to_owned()];
+
+        assert_eq!(
+            without_secrets(&read, "asked the tracker for page 2"),
+            "asked the tracker for page 2"
         );
     }
 

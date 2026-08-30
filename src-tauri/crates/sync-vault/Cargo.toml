@@ -1,0 +1,36 @@
+[package]
+name = "sync-vault"
+description = "Sync's secrets: the system keychain, one service, one name per package"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.91"
+publish = false
+
+[dependencies]
+# `keyring-core` and one store, rather than the `keyring` wrapper over both. Its
+# own documentation says an application that decides for itself which stores it
+# uses should take the core and the stores it wants — the wrapper exists to pick
+# for a program that has no opinion, and this one does.
+keyring-core = "1"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+
+# The one store this build opens, and the only line in the tree that names a
+# platform's secure storage. `keychain` rather than `protected`: Protected Data
+# takes a provisioning profile and takes the entries out of Keychain Access,
+# which is where a person looks at what Sync is holding and deletes it by hand.
+#
+# The feature is stated because the store refuses to build without one — a
+# `compile_error!` rather than a silent fall back to something that stores
+# nothing, which is the failure worth having at compile time.
+[target.'cfg(target_os = "macos")'.dependencies]
+apple-native-keyring-store = { version = "1.0.2", features = ["keychain"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+expect_used = "warn"

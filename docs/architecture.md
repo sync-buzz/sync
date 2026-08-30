@@ -141,6 +141,18 @@ The type filter is the navigator's own control, mounted over the same stored pre
 
 The set travels to the engine as `kinds` in one request. Asking one kind at a time and fusing the answers is not open to a client — rank is only comparable inside a single answer — so the capability was added to `memory-hub` rather than approximated here: filtering a page the engine had already truncated would report a total that is not one.
 
+## A record is named by a link, and the write door says when it is not
+
+A record has two names and only one of them is a name. The key is an address — permanent, what every link resolves to, and unreadable: it says nothing about what it points at, and nobody reading a sentence can open it. The title is the name. Every answer that hands out a key hands out the title and the kind beside it, so a reference written as the key alone throws away the half a reader could use and keeps the half they cannot.
+
+The spelling is ordinary Markdown — `[the title](sync://<kind>/<key>)` — and it is the window's: `src/lib/record-link.ts` parses it and `src/components/shell/record-links.tsx` follows it. It works in a message an agent writes exactly as it works in a body it stored, because both are drawn by the same reading view. Double brackets are not this and never were: they carry no kind, nothing can route on one, and the reading view draws one as dead text, so the reader gets neither a name nor a way through.
+
+`src-tauri/crates/sync-mcp/src/link.rs` is the other half of that spelling, and it is deliberately written twice — the window reads it, the server writes it, and an escape set that is one character out is a link that silently names another record. The same module reads the spelling backwards, which is what makes the rule something other than a request: `sync_apply` is the one write an agent has, so it takes the two forms that unmistakably mean *I am naming a record* — a code span, and double brackets — and answers each in the way its ambiguity deserves.
+
+**One is refused, the other reported, and the difference is whether anything had to be guessed.** Double brackets mean nothing in Markdown, nothing in the corpus and nothing to the reading view, so there is no reading of `[[a-key]]` that was worth writing: the write is refused before it lands, in every text a record carries rather than only its body, and the refusal names the link to write instead. A key in a code span is not like that — `d-one` is a key in one body and a command in the next — so the store is asked, only what it answers for is reported, and the transaction stands. Half-applying somebody's work to make a point about their prose would cost more than the prose does; refusing what cannot be anything else costs a turn.
+
+**Deliberately not everything.** A key in running text is not caught, because plenty of any project's keys are ordinary words and a check that read every sentence containing the word *architecture* as a reference would be switched off in its first week. That half is held by the instructions the server publishes and by review — and saying which half a machine holds is the point, as it is for the prose rules in `AGENTS.md`.
+
 ## Folders are the engine's, and the window never touches a working tree
 
 A folder is a name a record is filed under, and what it *is* underneath differs by where the type keeps its documents: a directory for a type over an attached folder, and the record carrying `is_folder` for a type whose documents are its own records. **The window does not branch on that.** One command — `memory_folder_create`, `memory_folder_rename`, `memory_document_move` — and the engine decides from the kind. A window that asked where a type stores documents before offering "New Folder" would be a second place that decision is made, and a second place it can be made differently.
@@ -169,8 +181,23 @@ Three stores, and which one a fact belongs to follows from whose fact it is:
 | Recently opened projects                                    | `recent-projects.json` in the app config directory                  | It is this installation's, and no repository should carry it                                       |
 | Appearance and base colour                                  | The webview's own storage, read by `src/lib/settings/appearance.ts` | It has to be on the document before the first frame, and a value fetched over IPC arrives after it |
 | Panel widths, which area is selected, which project is open | React state                                                         | It is this run of the window's                                                                     |
+| A secret: a token for something outside this machine        | The system keychain, under one service, through `sync-vault`         | It has to be able to disappear, and neither something that travels nor a file every process can read can promise that |
 
 The first two are commands in `src-tauri/src/project.rs`; nothing in the frontend reads a path or a file itself.
+
+## A secret is the system's, and a build from source is not signed
+
+A secret is in none of the four stores above. It is in the system keychain, under one service for the whole application, and the item's name is composed of the package the secret belongs to and whatever that package calls it. The two halves are joined in Rust and neither the whole name nor the service is ever taken from a caller, which is what makes the second half a namespace rather than a convention.
+
+`sync-vault` is the only crate that opens a store and `src-tauri/src/vault.rs` is the only module that calls it, so *how* a secret is kept and *who may ask for one* stay two questions with two answers. That module answers two callers and tells them apart by whose entry it is: the settings window, which lists and edits entries belonging to any package and is never given a value, and a package asking for its own, which is given one — under a capability, and with the owner half of the name taken from what this machine has installed rather than from the call. What a package may then do with the value is the one thing neither half can hold, and it is stated where its author reads it: `docs/extensions.md` §4. Nothing is kept beside the keychain: what Sync is holding is answered by searching it under that one service, and an entry somebody deleted in Keychain Access is simply gone from the answer. The service is stated in that search and asked for again on the way back — a search without it matches every generic password the person has, which on the machine this was measured on is 126 of them, most of them their own.
+
+Not the project's memory, because that memory travels on a Git remote: what has left this machine cannot be called back, and a token that has been revoked has to be gone. Not the webview's storage, because that is a file every process running as this person can read.
+
+**A build from source asks for the password every time, and the packaged application does not.** macOS decides who may read a keychain item from the signature on the program asking, and the boundary is the signing team rather than one binary — so the window and the sidecar in a signed bundle read what Sync stored with no dialog, and rebuilding and re-signing does not break it. `cargo run`, `tauri dev` and a sidecar built from source carry no signature at all, so the system asks, every time, in a dialog. That is a property of an unsigned build rather than a defect in this code, and it is the thing here most likely to be mistaken for one.
+
+A dialog that comes up with nobody in front of it is a hang and not a refusal: the call waits for as long as the process lives, and an agent working at three in the morning waits with it. So every call into the keychain has a deadline of twenty seconds — the same number the network door holds a column for — after which the caller is told in words that the system is asking somebody a question. Being refused is something a caller can report; waiting is not.
+
+**Deliberately absent.** No export and no route between machines: a secret is put in again on the second Mac, because a copy of one is a copy that cannot be revoked. No second store to choose from, and no per-entry list of trusted programs — the signature already draws the line those would draw.
 
 ## Layout state is ephemeral and separate
 
@@ -209,6 +236,7 @@ src-tauri/
   src/schedule.rs           the clock that ticks with no window open
   src/connect.rs            writing Sync into an agent's own MCP configuration
   src/server.rs             the MCP interface other agents reach
+  src/vault.rs              who may ask the keychain, and for whose secret
   src/voice.rs              who may ask this machine to say something
   src/updates.rs            the update check, with no route in from the webview
   crates/sync-memory/       the engine client, independent of Tauri
@@ -217,6 +245,7 @@ src-tauri/
   crates/sync-handlers/     service modules in a QuickJS isolate
   crates/acp-client/        the agent protocol, checked against frames from real CLIs
   crates/agent-bridge/      Codex, which does not speak that protocol
+  crates/sync-vault/        the system keychain, and the only crate that opens one
   crates/sync-voice/        the system's speech synthesiser
   binaries/                 the bundled sidecar (a build artifact, not source)
 scripts/prepare-sidecar.sh  builds or stages that binary

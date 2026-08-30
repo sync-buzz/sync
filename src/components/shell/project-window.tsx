@@ -297,6 +297,20 @@ export function ProjectWindow({
         onOpenSync={() => setSyncOpen(true)}
       />
 
+      {/* Every panel below is clipped with `overflow-clip`, and none of them
+          with `overflow-hidden`. That is rule 4 of
+          `docs/design-foundation.md` §"Panel roles and priority" — each panel
+          owns its scrolling, the window itself never scrolls — held by the
+          platform rather than by everyone who draws into a column.
+
+          A `hidden` box is still a scrollport; it has only lost its bar. The
+          browser scrolls one on its own to reveal a caret, to reach whatever
+          was given `focus()`, and for any `scrollIntoView` under it — and a
+          column has to overflow its panel by a single frame for that offset to
+          become possible. Once it is taken there is no bar to see it in and
+          the wheel does not reach the box, so the whole column sits shifted
+          with its foot over empty panel until the window is reloaded. A `clip`
+          box is not a scrollport, so the offset cannot exist. */}
       <ResizablePanelGroup
         orientation="horizontal"
         groupRef={groupRef}
@@ -325,7 +339,7 @@ export function ProjectWindow({
           maxSize={PANEL_GEOMETRY.primarySidebar.maxWidth}
           groupResizeBehavior="preserve-pixel-size"
           onResize={(size) => reportPanelSize("primarySidebar", size.inPixels)}
-          className="overflow-hidden bg-sidebar"
+          className="overflow-clip bg-sidebar"
         >
           {collapsed.primarySidebar ? null : (
             <PrimarySidebar
@@ -352,7 +366,7 @@ export function ProjectWindow({
           maxSize={PANEL_GEOMETRY.contextNavigator.maxWidth}
           groupResizeBehavior="preserve-pixel-size"
           onResize={(size) => reportPanelSize("contextNavigator", size.inPixels)}
-          className="relative overflow-hidden bg-panel"
+          className="relative overflow-clip bg-panel"
         >
           <AreaSlot attach={slotRefs.Navigator} />
         </ResizablePanel>
@@ -362,7 +376,7 @@ export function ProjectWindow({
         <ResizablePanel
           id={PANEL_IDS.workspace}
           minSize={WORKSPACE_MIN_WIDTH}
-          className="relative overflow-hidden bg-workspace"
+          className="relative overflow-clip bg-workspace"
         >
           <AreaSlot attach={slotRefs.Workspace} />
         </ResizablePanel>
@@ -379,7 +393,7 @@ export function ProjectWindow({
           maxSize={PANEL_GEOMETRY.contextInspector.maxWidth}
           groupResizeBehavior="preserve-pixel-size"
           onResize={(size) => reportPanelSize("contextInspector", size.inPixels)}
-          className="relative overflow-hidden bg-panel"
+          className="relative overflow-clip bg-panel"
         >
           <AreaSlot attach={slotRefs.Inspector} />
         </ResizablePanel>

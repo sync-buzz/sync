@@ -356,6 +356,25 @@ export type Entry =
     readonly voice: "thought";
     readonly text: string;
 }
+/**
+* A picture the agent answered with.
+*
+* Its own block rather than something hung off the message beside it, and for
+* the same reason a tool call is: the agent went and made something, and the
+* text before it and the text after it are two different things to say. It
+* also has to fold identically live and on a replay — an agent sends the
+* picture in the same run of chunks either way — and a block that joined the
+* open message would put it in a different place depending on how fast the
+* chunk before it arrived.
+*/
+| {
+    readonly id: string;
+    readonly at: number;
+    readonly voice: "picture";
+    readonly imageId: string | null;
+    readonly mimeType: string;
+    readonly bytes: number;
+}
 /** A tool the agent ran. */
 | {
     readonly id: string;
@@ -400,11 +419,20 @@ export interface ExtensionHost {
     readonly id: string;
     // (undocumented)
     readonly net: ExtensionNet;
+    // (undocumented)
+    readonly vault: ExtensionVault;
 }
 
 // @public
 export interface ExtensionNet {
-    read(url: string): Promise<NetAnswer>;
+    fetch(request: NetRequest): Promise<NetResponse>;
+}
+
+// @public
+export interface ExtensionVault {
+    forget(name: string): Promise<void>;
+    read(name: string): Promise<string>;
+    write(name: string, secret: string): Promise<void>;
 }
 
 // @public
@@ -465,12 +493,16 @@ export type Freshness = "fresh" | "unverified" | "stale" | "invalid" | (string &
 export const FRESHNESS_STATES: readonly ["fresh", "unverified", "stale", "invalid"];
 
 // @public
+export function imageFileName(mimeType: string, called?: string): string;
+
+// @public
 export interface InstalledExtension {
     // (undocumented)
     readonly id: string;
     readonly integrity?: string;
     readonly prompt?: string;
     readonly source?: string;
+    readonly tools?: readonly ToolDeclaration[];
     readonly version: string;
 }
 
@@ -706,11 +738,26 @@ export interface NativeMenuItem {
 }
 
 // @public
-export interface NetAnswer {
+export type NetMethod = "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE";
+
+// @public
+export interface NetRequest {
+    readonly body?: string;
+    readonly headers?: Readonly<Record<string, string>>;
+    readonly method?: NetMethod;
+    // (undocumented)
+    readonly url: string;
+}
+
+// @public
+export interface NetResponse {
     // (undocumented)
     readonly body: string;
+    readonly headers: Readonly<Record<string, string>>;
+    readonly ok: boolean;
     // (undocumented)
     readonly status: number;
+    readonly url: string;
 }
 
 // @public
@@ -934,6 +981,7 @@ export interface RelationshipDeclaration {
 
 // @public
 export interface RememberedConversation {
+    readonly about?: SessionAbout;
     readonly acpSession: string;
     // (undocumented)
     readonly agentId: string;
@@ -971,6 +1019,9 @@ export function renameSession(key: string, title: string): Promise<void>;
 
 // @public
 export function resumeSession(project: string, acpSession: string): Promise<OpenedSession>;
+
+// @public
+export function saveSessionImage(key: string, id: string, suggestedName: string): Promise<boolean>;
 
 // @public
 export type SaveState = {
@@ -1031,6 +1082,25 @@ export function ScrollArea(input: React_2.ComponentProps<typeof ScrollArea_2.Roo
 
 // @public (undocumented)
 export function ScrollBar(input: React_2.ComponentProps<typeof ScrollArea_2.ScrollAreaScrollbar>): React_2.JSX.Element;
+
+// @public
+export interface SentImage {
+    readonly bytes: number;
+    // (undocumented)
+    readonly imageId: string | null;
+    // (undocumented)
+    readonly mimeType: string;
+}
+
+// @public
+export interface SessionAbout {
+    // (undocumented)
+    readonly key: string;
+    // (undocumented)
+    readonly kind: string;
+    // (undocumented)
+    readonly title: string;
+}
 
 // @public
 export function sessionBacklog(key: string): Promise<{
@@ -1149,6 +1219,7 @@ export interface SessionModeState {
 
 // @public
 export interface SessionRow {
+    readonly about?: SessionAbout;
     readonly acceptsImages: boolean;
     // (undocumented)
     readonly agentId: string;
@@ -1273,6 +1344,7 @@ export function startSession(args: {
     agentId: string;
     cwd: string;
     model?: string | null;
+    about?: SessionAbout | null;
 }): Promise<OpenedSession>;
 
 // @public
@@ -1288,10 +1360,10 @@ export function stopSession(key: string): Promise<void>;
 export function supportsApiRange(range: string): boolean;
 
 // @public
-export const SYNC_API_VERSION: "2.13.0";
+export const SYNC_API_VERSION: "3.2.0";
 
 // @public
-export const SYNC_CAPABILITIES: readonly ["records", "agents.acp", "markdown.plugins", "native-menu", "folders", "sheets", "net", "background", "schedule", "work.agent"];
+export const SYNC_CAPABILITIES: readonly ["records", "agents.acp", "markdown.plugins", "native-menu", "folders", "sheets", "net", "net.write", "vault", "background", "schedule", "work.agent", "agent.tools"];
 
 // @public (undocumented)
 export type SyncCapability = (typeof SYNC_CAPABILITIES)[number];
@@ -1316,6 +1388,13 @@ export interface TableCommands {
 
 // @public (undocumented)
 export const TableCommandsProvider: Provider<(commands: TableCommands | null) => void>;
+
+// @public
+export interface ToolDeclaration {
+    readonly description: string;
+    readonly input?: unknown;
+    readonly name: string;
+}
 
 // @public (undocumented)
 export function Tooltip(input: React_2.ComponentProps<typeof Tooltip_2.Root>): React_2.JSX.Element;
@@ -1477,6 +1556,12 @@ export function useLiveSessions(active?: boolean): {
     readonly sessions: readonly SessionRow[];
     readonly reload: () => void;
 };
+
+// @public
+export function useOpenRecord(): ((record: {
+    key: string;
+    kind: string;
+}) => void) | null;
 
 // @public (undocumented)
 export function useProjectView(projectPath: string): ProjectViewState;

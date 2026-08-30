@@ -22,6 +22,14 @@
     "reportFileName": "extension-api.api.md"
   },
 
+  // API Extractor writes CRLF by default, on every platform. Nothing here is
+  // written on Windows, and both files it emits are committed — the report in
+  // this repository and the rollup in the contract's — so the default put every
+  // one of their lines through Git's line-ending conversion and made `git add`
+  // announce it. Stated rather than normalised afterwards: a copy that fixed
+  // the endings on the way past would be a second place that decides them.
+  "newlineKind": "lf",
+
   // The rollup is what an extension compiles against. It is emitted into
   // `temp/`, which is not committed, and copied into the extensions repository
   // by `pnpm api:publish` — until `@sync/extension-api` is published from a

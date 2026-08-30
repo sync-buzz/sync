@@ -36,6 +36,16 @@ rmcp = { version = "3.1", default-features = false, features = [
 # writing a router to avoid depending on one.
 axum = "0.8"
 base64 = "0.22"
+# `encodeURIComponent`, as an escape set rather than as a hand-rolled table. The
+# window spells a record link with it and this side has to spell it identically
+# — see `src/link.rs` — and a set that is one character out is a link that
+# silently names another record.
+percent-encoding = "2.3"
+# The arguments a tool declares are checked against the schema its author
+# wrote, and this is the crate the engine already validates record schemas with
+# — same version, already in the lock. Hand-rolling "required and a type" would
+# be a subset that disagrees with the schema an agent was shown.
+jsonschema = "0.49"
 serde = { version = "1", features = ["derive"] }
 # `preserve_order`, because the project key is the first thing every tool's
 # schema states and the first thing a model reads. Without it a schema's

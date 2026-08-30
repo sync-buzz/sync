@@ -71,7 +71,24 @@ export interface Manifest {
    * crosses this boundary undeclared arrives as `undefined` without an error
    * anywhere, and this one decides whether a request leaves the machine.
    */
-  readonly net: { readonly hosts: readonly string[] };
+  readonly net: {
+    readonly hosts: readonly string[];
+    /**
+     * Which of this machine's secrets go where, and in which header.
+     *
+     * Mirrored because the card says it before anybody installs: a person
+     * agreeing to a package that sends one of their tokens somewhere is
+     * agreeing to that, and it is not a thing to find out afterwards. The value
+     * is never here and never in the window — it is read in Rust, put into the
+     * request there, and the package that declared it does not hold one.
+     */
+    readonly secrets: readonly {
+      readonly host: string;
+      readonly header: string;
+      readonly secret: string;
+      readonly scheme: string | null;
+    }[];
+  };
   readonly requires: { readonly extensions: readonly string[] };
   readonly areas: readonly ManifestArea[];
   /** Paths inside the package, each a type definition. */
@@ -101,6 +118,26 @@ export interface Manifest {
   readonly service: string | null;
   /** Handlers called because something happened to the package itself. */
   readonly lifecycle: { readonly installed: string | null };
+  /**
+   * What it offers an agent to call, and what an agent is told about each.
+   *
+   * Mirrored here because the window is what carries a declaration from the
+   * package into the project's record: the server an agent reaches has no view
+   * of the catalogue, so what it may call has to be written where the project
+   * keeps it. A member missing from this shape arrives as `undefined` with no
+   * error anywhere, which is how a tool comes to exist in a manifest and be
+   * offered to nobody.
+   *
+   * `handler` is here because the shape is the manifest's and this mirrors it
+   * whole; nothing in the window reads it, and it is not what travels into the
+   * record — it is the package's own name for one of its functions.
+   */
+  readonly tools: readonly {
+    readonly handler: string;
+    readonly name: string;
+    readonly description: string;
+    readonly input: unknown;
+  }[];
   /**
    * Handlers called because a clock struck, and how often.
    *

@@ -316,7 +316,10 @@ export type {
   AreaProviderProps,
   ExtensionHost,
   ExtensionNet,
-  NetAnswer,
+  ExtensionVault,
+  NetMethod,
+  NetRequest,
+  NetResponse,
 } from "@/lib/extension-api/contract";
 
 // ---------------------------------------------------------------------------
@@ -378,12 +381,14 @@ export {
 // `OpenProject` extends `ProjectSettings`, so the half of a project that is its
 // own description has to be nameable too — and with it the two things that
 // description is made of. `InstalledExtension` is what a project declares a
-// dependency as; an extension reading the composition it is part of holds one.
+// dependency as; an extension reading the composition it is part of holds one,
+// and `ToolDeclaration` is what one of those carries about the tools it offers.
 export type {
   OpenProject,
   ProjectSettings,
   ProjectLanguageId,
   InstalledExtension,
+  ToolDeclaration,
 } from "@/lib/project/types";
 // The list the id is drawn from, because the id is derived from it: a type
 // defined as "one of these" cannot be named without the these.
@@ -453,6 +458,8 @@ export {
   rememberedConversations,
   renameSession,
   resumeSession,
+  imageFileName,
+  saveSessionImage,
   sessionBacklog,
   sessionImage,
   type AdapterState,
@@ -468,9 +475,19 @@ export {
   type SessionMode,
   type SessionModeState,
   type SessionRow,
+  type SentImage,
+  type SessionAbout,
   type SessionSource,
   type SessionStatus,
 } from "@/lib/agent-sessions/client";
+/**
+ * Showing a record a section does not own.
+ *
+ * A section reads what a conversation is about, and what it is about is a
+ * record another section shows. Without this the only way to reach it is a link
+ * inside a body, which is not where a heading is.
+ */
+export { useOpenRecord } from "@/lib/record-link";
 export {
   EMPTY_TRANSCRIPT,
   PAUSE_MS,

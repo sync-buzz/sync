@@ -187,7 +187,8 @@ the thing* — a platform without a bundled ACP sidecar exposes the same
 
 So a build publishes named capabilities and a manifest may require them:
 `records`, `agents.acp`, `markdown.plugins`, `native-menu`, `folders`, `sheets`,
-`net`, `background`, `schedule`, `work.agent`. A missing capability is a refusal
+`net`, `net.write`, `vault`, `background`, `schedule`, `work.agent`,
+`agent.tools`. A missing capability is a refusal
 with a sentence a person can act on, and it is also what lets an extension
 degrade deliberately — asking for a capability is a choice, and reading whether
 one is present is allowed.
@@ -195,7 +196,7 @@ one is present is allowed.
 ### `net` is a capability and a list, and neither works alone
 
 The other capabilities are one word each, because what they promise is the same
-for every package that asks. Reading outside this window is not: *may this
+for every package that asks. Reaching outside this window is not: *may this
 package dial out* and *where to* are two questions, and a person shown only the
 first has agreed to something with no edges. So a package that asks for `net`
 also writes `net: { hosts: [...] }`, and each of the two without the other is
@@ -212,9 +213,171 @@ in `extension_fetch` — and never taken from the caller. What the window hands 
 package is `host.net`, built for that package and closed over its id, so a call
 carries which package is making it rather than stating it. Every redirect is
 checked again against the same list, so a hop off it is refused as firmly as the
-first request, and the surface has no method, no body and no header: a header is
-where a token goes, and a token is a further agreement with a person rather than
-a field that was already there.
+first request.
+
+### A package names a secret and never holds one
+
+**The recommended way to use one.** Beside the hosts, a package may declare
+which of this machine's secrets goes to which of them, and in which header:
+
+```json
+"net": {
+  "hosts": ["api.example.com"],
+  "secrets": [
+    { "host": "api.example.com", "header": "authorization",
+      "secret": "token", "scheme": "Bearer" }
+  ]
+}
+```
+
+`secret` names an entry in the package's own corner of the keychain — the owner
+half is its id and is composed in Rust, so a manifest can no more name somebody
+else's entry than a call can. `scheme` is written in front of the value, and no
+scheme writes the value alone, which is what an API key header wants.
+
+**The value is read in Rust and put into the request there.** It never crosses
+into JavaScript, so an author who only has to reach an API with a token never
+holds one — and a package that never holds a value has nothing to pass to an
+agent, which is the rule `vault` can only ask for. This path asks for no
+capability of its own beyond `net`, deliberately: the safe road should not cost
+more than the other one.
+
+A pair is checked when the manifest is read. It may only name a host the package
+already reaches, two secrets may not share one header at one host, and the
+transport's own headers carry none. A package whose entry is not in the keychain
+is **refused in words** rather than sent without the header: the manifest
+promised the header would be there, and a silent `401` from somebody else's API
+is an hour of the wrong person's time.
+
+The same header written by the package is refused rather than resolved either
+way. Overwriting would send a token whose author believed they had replaced it;
+ignoring would drop a value the card promised a person would be sent. Both are
+one header meaning two things, and the refusal says which of them to change.
+
+**A person is shown this before they install**, on the same section of the
+extension's page that names the hosts: which secret, to which host, and that the
+package does not read it.
+
+### `net.write` is the second half of it, and the verb is what divides them
+
+```ts
+const answer = await host.net.fetch({
+  url: "https://api.example.com/tickets",
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ title: "It fell over again" }),
+})
+if (!answer.ok) console.error(answer.status, answer.body)
+```
+
+**Reading somebody else's page and filing something in it are two agreements.**
+`net` is the first; `net.write` is the second, and a card that offered only the
+first would be describing the smaller of the two to a person deciding. So a
+package that asked for `net` alone is refused — in words, at the call — the
+moment it uses a method that is not `GET` or `HEAD`. Where a write may go is
+the same list as a read: `net.write` without `net` is refused when the manifest
+is read, because the hosts are what either is checked against.
+
+**The line is the protocol's, not ours.** `GET` and `HEAD` are defined as safe;
+every other method is defined as being allowed to have an effect. A division
+drawn anywhere else — the verbs we think are usually harmless — is not a
+category a person can be asked to agree to.
+
+**Headers are not behind it, and that is deliberate.** The argument that a
+header is a body by another name proves too much: a package composes the URL,
+so anything it wanted to send outward could already leave in a query string,
+and gating the header would buy nothing while costing every package a
+`content-type`. What a verb changes is not what leaves this machine but what
+the other end is asked to do, which is the thing worth agreeing to.
+
+Four headers are refused by name — `host`, `content-length`, `connection`,
+`transfer-encoding`. Not as a boundary: the URL decides which machine is
+connected to and none of these change that. It is a refusal in place of a
+puzzle, because a request that sets its own `content-length` disagrees with
+itself and the server answers about something else entirely.
+
+**It is an agreement, and not a mechanism, and the difference belongs here
+rather than in somebody's head.** A package that reaches a host at all can put
+whatever it likes in a query string, because it composes the URL; and it can
+cause an effect with a `GET` wherever the other end is built that way, which is
+most webhooks and a good deal else. So `net.write` stops a package that did not
+mean to change anything and does not stop one that did. What it buys is the
+sentence a person reads before they install — *this one acts, that one watches*
+— and a refusal for an honest mistake. What it does not buy is a boundary, and a
+document that let it read as one would be lying in the place a person is
+deciding what to trust.
+
+The refusal arrives at the call rather than at the build, and for a handler that
+may be three in the morning with nobody watching. Scanning the built module for
+it, the way `sync-ext check` scans for `work.order`, is not available here: a
+method can be computed, and a scan that missed one would be worse than no scan.
+
+**The vocabulary is `fetch`'s**, narrowed to what crosses a process boundary,
+so an author is reading the same words here and in the documentation of
+whatever they are calling. A request is one object rather than a URL and an
+init, because that is the shape that actually crosses — Rust reads the same
+members back, and `method` sits beside `url` where it is looked for. What
+`fetch` has and this does not — streams, `Request` and `Response` objects,
+`signal`, `credentials`, `mode`, `cache`, `redirect` — **is refused by name
+rather than ignored**: a member dropped in silence is a timeout somebody
+believes they set.
+
+What comes back is the final URL after any redirect, the status, `ok`, the
+response's headers and a text body of at most 2 MB. The headers are there
+because pagination and rate limits live in them, and a package polling somebody
+else's tracker without `link` or `retry-after` either stops at the first page or
+gets itself blocked. There is no `statusText`: HTTP/2 carries no reason phrase,
+so it would be a member that is sometimes there, which is worse than one that
+never is.
+
+**Nothing is retried.** A request that timed out may have been performed, and
+whether to send it again is a question only the package can answer.
+
+**What a person sees before they install** is a section of the extension's own
+page: one sentence saying whether it reads or may also change things, and under
+it every host it named. For a package in the registry and not yet on this
+machine the sentence is there and the hosts are not — the index carries what a
+package asks for, and where it reaches is a sentence in the package itself.
+
+**Deliberately absent.** Writing is per package rather than per host: a person
+deciding is deciding about a package, and a manifest that could read one host
+and write another would put a second table on the card to spare a reader one
+sentence. Request timeouts and redirect policy are the host's, for the reason
+every limit here is: a package that could raise its own has none.
+
+### `vault` hands a value over, and one rule no check can hold
+
+A package's secrets live in the system keychain, in a namespace of its own: the
+owner half of every entry is the id this machine resolved, and a call says only
+what the package calls its own secret. Reading, writing and forgetting are one
+agreement rather than three — a package that signs somebody in holds a token
+nobody could have typed, replaces it before it expires, and drops it when they
+sign out.
+
+Like `net`, the door is built for the package and handed to it as `host.vault`,
+so a call carries which package is making it rather than stating it. Unlike
+`net`, what comes back is the value itself, which is what the rest of this
+section is about. The capability is checked when the call is made rather than
+when the manifest is read, as `work.agent` is: whether a package touches a
+secret at all is inside its built JavaScript.
+
+**A secret is never handed to an agent.** Not in the prompt of an order, not in
+the environment a process is raised with, not as a tool that answers with one.
+What an agent is given is a method that *does the work* — sign this request,
+fetch this page, post this comment. The password does the work and stays in the
+package; the agent gets the outcome.
+
+**Sync does not check that, and this paragraph is the reason it does not.** A
+value that has crossed into a package's own JavaScript is that package's to pass
+on, and the call that would pass it on is invisible to anything reading a
+manifest. A check that pretended otherwise would cost an author the one sentence
+they need and buy nothing, and what an agent does with a token is worse than a
+leak: a transcript is kept, read back, and sent to a model again, so a token
+that reaches one has been published rather than mislaid.
+
+One note for the author rather than a rule: every extension in a window shares
+one origin, so what holds two packages apart here is the door each was handed,
+not a wall the webview puts between them.
 
 ## 5. What a package is
 
@@ -433,7 +596,7 @@ name an occasion calls must be in it — `sync-ext check` fails either way round
 because a handler nothing calls will never run and an occasion with nothing
 behind it fails at the moment it matters.
 
-### Two occasions, so far
+### Three occasions
 
 **Install.** `lifecycle.installed` names a handler called when the package is
 installed into a project. It is synchronous, a person is in front of it, and a
@@ -466,20 +629,61 @@ wakes rather than six times.
 and why a person can stop it for one project from the extension's own page
 without removing the package.
 
-### Three capabilities, because they are three different agreements
+**A tool.** `tools` names a handler and what an agent is told about it:
+
+```json
+"tools": [
+  { "handler": "issues.search", "name": "search_tickets",
+    "description": "Finds tickets by their words",
+    "input": { "type": "object",
+               "properties": { "words": { "type": "string" } } } }
+]
+```
+
+This is the occasion whose caller is not the application. An install and a clock
+are things that happen here; a tool is a name somebody else says, so everything
+needed in order to decide to say it is in the entry — and none of it is the
+host's to write, because the host knows none of it.
+
+`handler` and `name` are two names for two readers, and a package that wants
+them the same writes them the same: the handler is its own name for one of its
+functions, and the name is the one published with the package's id in front of
+it. That is why the name may not carry a dot — it is where a published name
+splits — and why it may not be one of this build's own occasions, which are
+resolved first and would leave such a tool unreachable. Both are refused when
+the manifest is read rather than discovered as a handler that never runs.
+
+`description` is required for the reason a schedule's is, and one more: a
+schedule's sentence is read by a person deciding whether to allow it, and this
+one is the whole of what a caller decides on. `input` is a JSON Schema, carried
+whole and never interpreted — what an argument means is the package's business —
+and an absent one is a tool that takes nothing.
+
+All three occasions resolve to a handler through one answer to *which function
+is this*, and run through one evaluation path. An occasion added later cannot
+quietly get a different runtime, different limits or a different host.
+
+### Four capabilities, because they are four different agreements
 
 | Capability | What a person is agreeing to |
 | --- | --- |
 | `background` | this package runs code with no screen mounted |
 | `schedule` | it runs while nobody is there |
 | `work.agent` | it may raise an agent, which **spends money while they sleep** |
+| `agent.tools` | an agent is told this package is there, and may act through it |
 
 A manifest that ships a service module and does not ask for `background` is
-refused when it is read, and so is one that schedules a handler without
-`schedule`. `work.agent` cannot be checked that way — whether a handler calls
-`work.order` is inside the built JavaScript — so the host refuses the *call*, in
-words the handler can catch, and `sync-ext check` scans the built module for it
-so an author hears about it in their own terminal instead.
+refused when it is read, and so are one that schedules a handler without
+`schedule` and one that offers tools without `agent.tools`. `work.agent` cannot
+be checked that way — whether a handler calls `work.order` is inside the built
+JavaScript — so the host refuses the *call*, in words the handler can catch, and
+`sync-ext check` scans the built module for it so an author hears about it in
+their own terminal instead.
+
+The fourth is a separate agreement rather than a wider reading of the first for
+the reason the second is: `background` is this package running its own code, and
+being acted on by an agent is a conversation the person who installed it is not
+part of.
 
 ### What a handler may reach
 
@@ -744,6 +948,17 @@ re-tagging a release under the same version is detected rather than trusted.
 Artefacts are the machine's, content-addressed under the app data directory and
 shared by every project.
 
+**Two more members travel beside them, and both are read by something that
+cannot see the catalogue.** `prompt` is what the extension tells an agent, and
+`tools` is what it offers one to call — the name, the sentence a decision to
+call it is made on, and the schema its arguments are checked against. Both are
+the build's text rather than the project's decision, so a window that opens a
+project and finds the two disagree rewrites the record from the package on this
+machine; and both are absent for an extension that has nothing of them, which is
+most of them. What is deliberately *not* written is the handler behind a tool:
+that is the package's own name for one of its functions, and nothing outside the
+package can act on it.
+
 Installing is types first, declaration second, and the order is load-bearing: a
 failure between them leaves types nobody declared, which the next install
 reuses, rather than a declaration whose schema is missing. Removing writes only
@@ -871,7 +1086,7 @@ extensions, and no rule left to enforce against the next one.*
 | **Menu commands** | What File offers while its area is selected |
 | **Markdown plugin** | Replacing how one block of stored prose is drawn |
 | **Native menu** | Secondary click, through the host's own menu |
-| **Handler** | A function the host calls with no screen mounted — at install, and on a clock (§5a) |
+| **Handler** | A function the host calls with no screen mounted — at install, on a clock, and by the name a tool published (§5a) |
 
 **Not open, and each for its own reason.** The record inspector: it is drawn by
 whichever extension shows records, so contributing to it would be a protocol

@@ -16,6 +16,7 @@ import {
   unsubscribe,
   type OpenedSession,
   type PastedContent,
+  type SessionAbout,
   type SessionConfigOption,
   type SessionEvent,
   type SessionMode,
@@ -274,6 +275,8 @@ export async function startSession(args: {
   agentId: string;
   cwd: string;
   model?: string | null;
+  /** The record it is being opened under, for a screen that opened it from one. */
+  about?: SessionAbout | null;
 }): Promise<OpenedSession> {
   return openSession(args);
 }

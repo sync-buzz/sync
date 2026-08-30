@@ -459,3 +459,127 @@ async fn codex_mcp_tool_approval_round_trips_through_acp_permission() {
     task.abort();
     let _ = task.await;
 }
+
+/// A picture Codex made reaches the window, live and on a replay alike.
+///
+/// The item's shape is the app-server's own, read off
+/// `codex app-server generate-json-schema` for `codex-cli 0.144.5`:
+/// `imageGeneration` carries `result` — base64 with no prefix, the same field
+/// the model's `image_generation_call` returns — beside a `savedPath` Codex
+/// wrote it to. Both paths are asserted in one test on purpose: they are one
+/// translation, and a test for only one of them would go green while a
+/// resumed conversation lost every picture in it.
+#[tokio::test]
+async fn a_generated_image_becomes_acp_image_content_live_and_on_a_replay() {
+    let (mut acp_reader, mut acp_writer, mut codex_reader, mut codex_writer, task) = harness();
+    initialize(
+        &mut acp_reader,
+        &mut acp_writer,
+        &mut codex_reader,
+        &mut codex_writer,
+    )
+    .await;
+
+    // Live. `item/started` fires for the same id before there is an image, and
+    // must produce nothing: a chunk carrying an empty string is a picture that
+    // cannot be drawn, and it would end the block the agent was writing.
+    send(
+        &mut codex_writer,
+        json!({
+            "jsonrpc": "2.0",
+            "method": "item/started",
+            "params": { "threadId": "thread-1", "item": {
+                "type": "imageGeneration", "id": "img-1",
+                "status": "inProgress", "revisedPrompt": null, "result": ""
+            }}
+        }),
+    )
+    .await;
+    send(
+        &mut codex_writer,
+        json!({
+            "jsonrpc": "2.0",
+            "method": "item/completed",
+            "params": { "threadId": "thread-1", "item": {
+                "type": "imageGeneration", "id": "img-1",
+                "status": "completed",
+                "revisedPrompt": "A red circle on white",
+                "result": "aGVsbG8=",
+                "savedPath": "/work/repo/.codex/img-1.png"
+            }}
+        }),
+    )
+    .await;
+
+    let drawn = recv(&mut acp_reader).await;
+    assert_eq!(drawn["method"], json!("session/update"));
+    assert_eq!(
+        drawn["params"]["update"]["sessionUpdate"],
+        json!("agent_message_chunk"),
+        "a picture is what the agent answered with, so it belongs in its message: {drawn}"
+    );
+    assert_eq!(drawn["params"]["update"]["content"]["type"], json!("image"));
+    assert_eq!(
+        drawn["params"]["update"]["content"]["data"],
+        json!("aGVsbG8="),
+        "the base64 crosses as it arrived — a `data:` prefix added here decodes to nothing"
+    );
+    assert_eq!(
+        drawn["params"]["update"]["content"]["mimeType"],
+        json!("image/png")
+    );
+
+    // On a replay, out of `thread/resume`'s own turns. The same picture, and it
+    // has to read identically: a conversation that came back without it would
+    // be a different conversation.
+    send(
+        &mut acp_writer,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "session/load",
+            "params": { "sessionId": "thread-1", "cwd": "/work/repo", "mcpServers": [] }
+        }),
+    )
+    .await;
+    let resume = recv(&mut codex_reader).await;
+    send(
+        &mut codex_writer,
+        json!({
+            "jsonrpc": "2.0",
+            "id": resume["id"],
+            "result": { "thread": { "id": "thread-1", "turns": [{
+                "id": "turn-1",
+                "status": "completed",
+                "itemsView": "full",
+                "items": [{
+                    "type": "imageGeneration", "id": "img-1",
+                    "status": "completed",
+                    "revisedPrompt": "A red circle on white",
+                    "result": "aGVsbG8=",
+                    "savedPath": "/work/repo/.codex/img-1.jpeg"
+                }]
+            }]}}
+        }),
+    )
+    .await;
+
+    let replayed = recv(&mut acp_reader).await;
+    assert_eq!(
+        replayed["params"]["update"]["sessionUpdate"],
+        json!("agent_message_chunk")
+    );
+    assert_eq!(
+        replayed["params"]["update"]["content"]["data"],
+        json!("aGVsbG8=")
+    );
+    assert_eq!(
+        replayed["params"]["update"]["content"]["mimeType"],
+        json!("image/jpeg"),
+        "the media type is read off the file Codex saved beside it: {replayed}"
+    );
+    assert_eq!(recv(&mut acp_reader).await["result"], json!({}));
+
+    task.abort();
+    let _ = task.await;
+}

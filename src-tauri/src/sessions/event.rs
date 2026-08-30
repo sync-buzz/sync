@@ -11,6 +11,17 @@
 //! compiled protocol types could read it, and that is the whole of the
 //! interpretation done on this side.
 //!
+//! # The one thing taken out of it
+//!
+//! An image block is the exception, and it is the rule above that forces it: a
+//! history is replayed **whole** to every screen that comes back to the
+//! conversation, so base64 left in one is paid for on every return, for as long
+//! as the session lives. The bytes are moved into the session and the block
+//! keeps its place carrying `imageId` and `bytes` where `data` was — see
+//! `Session::hold_pictures`. Nothing else about the payload is touched, and
+//! `recognized` is still an answer about what the agent sent, because it is
+//! read before the picture is taken out.
+//!
 //! # Why the time is stamped here
 //!
 //! A conversation is assembled in the window: a run of text chunks becomes one
@@ -113,7 +124,9 @@ pub enum SessionEvent {
         attachments: Vec<String>,
         images: Vec<PastedImage>,
     },
-    /// A `session/update` notification, exactly as the agent wrote it.
+    /// A `session/update` notification as the agent wrote it, less the bytes of
+    /// any picture in it — which are in the session, under the `imageId` left
+    /// in their place. See the head of this module.
     Update {
         seq: u64,
         at_ms: u64,

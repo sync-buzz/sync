@@ -43,8 +43,9 @@ use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 
-use sync_memory::ATTACH;
+use sync_memory::{ATTACH, ATTEND, MemoryError};
 
+use crate::application::Application;
 use crate::host::Host;
 
 /// Serve the host channel on `path` until the process ends.
@@ -54,15 +55,20 @@ use crate::host::Host;
 /// When the socket cannot be bound — including when another process is already
 /// listening on it, which is a machine running two copies of Sync rather than a
 /// state to recover from.
-pub async fn serve(host: Arc<Host>, path: PathBuf) -> io::Result<()> {
+pub async fn serve(
+    host: Arc<Host>,
+    application: Arc<Application>,
+    path: PathBuf,
+) -> io::Result<()> {
     let listener = bind(&path)?;
     loop {
         let (stream, _) = listener.accept().await?;
         let host = Arc::clone(&host);
+        let application = Arc::clone(&application);
         // Per connection, because one window has several projects open and a
         // call in one of them must not be behind a call in another.
         tokio::spawn(async move {
-            if let Err(error) = attend(&host, stream).await {
+            if let Err(error) = attend(&host, &application, stream).await {
                 // A connection ending is ordinary — the window closed a project
                 // — so this is only worth a line when it ended for a reason.
                 if error.kind() != io::ErrorKind::UnexpectedEof {
@@ -114,7 +120,11 @@ pub fn pid_file(socket: &Path) -> PathBuf {
 }
 
 /// Read one connection to its end, answering every line.
-async fn attend(host: &Arc<Host>, stream: UnixStream) -> io::Result<()> {
+async fn attend(
+    host: &Arc<Host>,
+    application: &Arc<Application>,
+    stream: UnixStream,
+) -> io::Result<()> {
     let (reading, mut writing) = stream.into_split();
     let mut lines = BufReader::new(reading).lines();
     let mut attached: Option<PathBuf> = None;
@@ -133,6 +143,15 @@ async fn attend(host: &Arc<Host>, stream: UnixStream) -> io::Result<()> {
         let id = request.get("id").cloned().unwrap_or(Value::Null);
         let method = request.get("method").and_then(Value::as_str).unwrap_or("");
         let params = request.get("params").cloned().unwrap_or_else(|| json!({}));
+
+        // The one call that turns this connection around. Everything after
+        // it is answers to what *this* process asked, so the loop below never
+        // sees another line — [`answer_calls`] owns the connection from here.
+        if method == ATTEND {
+            let answer = json!({"jsonrpc": "2.0", "id": id, "result": {"attending": true}});
+            write(&mut writing, &answer).await?;
+            return answer_calls(application, lines, writing).await;
+        }
 
         if method == ATTACH {
             let answer = match params.get("path").and_then(Value::as_str) {
@@ -184,6 +203,85 @@ async fn attend(host: &Arc<Host>, stream: UnixStream) -> io::Result<()> {
     Ok(())
 }
 
+/// Hold the channel back until the application lets go of it.
+///
+/// Two halves and they are genuinely independent: a task drains the queue of
+/// outgoing requests, and this one reads answers as they come. Putting both in
+/// one loop would mean a request could only go out between two answers, which
+/// for a channel whose calls take seconds each is a queue behind a wait.
+///
+/// The connection ending is how it is meant to end — Sync closing, or Sync
+/// reconnecting after this process restarted. Everything still waiting is
+/// failed rather than left, so an agent hears why now rather than in a minute.
+async fn answer_calls(
+    application: &Arc<Application>,
+    mut lines: tokio::io::Lines<BufReader<tokio::net::unix::OwnedReadHalf>>,
+    mut writing: tokio::net::unix::OwnedWriteHalf,
+) -> io::Result<()> {
+    let (queue, mut queued) = tokio::sync::mpsc::unbounded_channel::<String>();
+    application.attend(queue);
+    let writer = tokio::spawn(async move {
+        while let Some(request) = queued.recv().await {
+            if writing
+                .write_all(format!("{request}\n").as_bytes())
+                .await
+                .is_err()
+                || writing.flush().await.is_err()
+            {
+                break;
+            }
+        }
+    });
+
+    let reading = async {
+        while let Some(line) = lines.next_line().await? {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let Ok(answer) = serde_json::from_str::<Value>(&line) else {
+                // Not fatal, for the reason a malformed request is not: one
+                // unreadable line is a mistake at the other end, and dropping
+                // the channel over it would take every tool call with it.
+                eprintln!("an answer on the channel back could not be read as JSON");
+                continue;
+            };
+            let Some(id) = answer.get("id").and_then(Value::as_u64) else {
+                continue;
+            };
+            application.answered(id, outcome(&answer));
+        }
+        Ok(())
+    }
+    .await;
+
+    application.withdrew();
+    writer.abort();
+    reading
+}
+
+/// What one answer on the channel back says: a result, or a refusal with the
+/// application's own `kind` on it.
+///
+/// A response carrying neither is a refusal too. The alternative is answering
+/// `null` as though the tool returned nothing, and a tool that returned nothing
+/// is a thing that happens — so the two must not read alike.
+fn outcome(answer: &Value) -> sync_memory::Result<Value> {
+    if let Some(result) = answer.get("result") {
+        return Ok(result.clone());
+    }
+    let error = answer.get("error");
+    let message = error
+        .and_then(|error| error.get("message"))
+        .and_then(Value::as_str)
+        .unwrap_or("Sync answered with neither a result nor a reason");
+    let kind = error
+        .and_then(|error| error.get("data"))
+        .and_then(|data| data.get("kind"))
+        .and_then(Value::as_str)
+        .unwrap_or("extension_failed");
+    Err(MemoryError::domain(kind, message, Value::Null))
+}
+
 async fn write(stream: &mut tokio::net::unix::OwnedWriteHalf, answer: &Value) -> io::Result<()> {
     stream.write_all(format!("{answer}\n").as_bytes()).await?;
     stream.flush().await
@@ -211,6 +309,127 @@ mod tests {
     #![allow(clippy::expect_used)]
 
     use super::*;
+
+    /// The whole of the inversion, on a socket pair: a request goes out on the
+    /// connection that attended, and the answer written back reaches whoever
+    /// asked.
+    ///
+    /// On a pair rather than through a bound socket because what is being
+    /// tested is the direction of the messages, not the door — [`bind`] has its
+    /// own tests and this would be waiting for a listener to prove something
+    /// about a line.
+    #[tokio::test]
+    async fn a_connection_that_attended_carries_a_call_and_brings_the_answer() {
+        let (engine, application) = UnixStream::pair().expect("a pair of connections");
+        let held = Arc::new(Application::new());
+        let (reading, writing) = engine.into_split();
+        let attending = Arc::clone(&held);
+        tokio::spawn(async move {
+            let _ = answer_calls(&attending, BufReader::new(reading).lines(), writing).await;
+        });
+
+        let (theirs, mut ours) = application.into_split();
+        let mut arriving = BufReader::new(theirs).lines();
+
+        let asking = Arc::clone(&held);
+        let call =
+            tokio::spawn(async move { asking.call("extension.tool", json!({"tool": "s"})).await });
+
+        let request: Value = serde_json::from_str(
+            &arriving
+                .next_line()
+                .await
+                .expect("the line is readable")
+                .expect("a request arrived"),
+        )
+        .expect("it is JSON");
+        assert_eq!(request["method"], "extension.tool");
+        assert_eq!(request["params"]["tool"], "s");
+
+        let answer = json!({"jsonrpc": "2.0", "id": request["id"], "result": {"found": 1}});
+        ours.write_all(format!("{answer}\n").as_bytes())
+            .await
+            .expect("the application answers");
+
+        let answered = call
+            .await
+            .expect("the call finished")
+            .expect("it was answered");
+        assert_eq!(answered, json!({"found": 1}));
+    }
+
+    /// A refusal from the application arrives as a refusal, carrying its own
+    /// `kind` rather than being flattened into "something went wrong".
+    #[tokio::test]
+    async fn a_refusal_from_the_application_stays_a_refusal() {
+        let (engine, application) = UnixStream::pair().expect("a pair of connections");
+        let held = Arc::new(Application::new());
+        let (reading, writing) = engine.into_split();
+        let attending = Arc::clone(&held);
+        tokio::spawn(async move {
+            let _ = answer_calls(&attending, BufReader::new(reading).lines(), writing).await;
+        });
+
+        let (theirs, mut ours) = application.into_split();
+        let mut arriving = BufReader::new(theirs).lines();
+        let asking = Arc::clone(&held);
+        let call = tokio::spawn(async move { asking.call("extension.tool", json!({})).await });
+
+        let request: Value = serde_json::from_str(
+            &arriving
+                .next_line()
+                .await
+                .expect("the line is readable")
+                .expect("a request arrived"),
+        )
+        .expect("it is JSON");
+        let answer = json!({"jsonrpc": "2.0", "id": request["id"], "error": {
+            "code": -32000,
+            "message": "`acme.tracker` is not installed on this machine",
+            "data": {"kind": "extension_failed"},
+        }});
+        ours.write_all(format!("{answer}\n").as_bytes())
+            .await
+            .expect("the application refuses");
+
+        let refused = call
+            .await
+            .expect("the call finished")
+            .expect_err("it was refused");
+        assert_eq!(
+            refused.kind().map(sync_memory::MemoryErrorKind::as_wire),
+            Some("extension_failed")
+        );
+        assert!(
+            refused
+                .to_string()
+                .contains("not installed on this machine"),
+            "the application's own words reach the agent: {refused}"
+        );
+    }
+
+    /// An answer with neither result nor error is a refusal, and specifically
+    /// not `null`.
+    ///
+    /// A tool that answered with nothing is an ordinary tool, so the two must
+    /// not read alike — otherwise a broken answer looks like a working one that
+    /// had nothing to say.
+    #[test]
+    fn an_answer_that_says_nothing_at_all_is_not_an_answer() {
+        let refused =
+            outcome(&json!({"jsonrpc": "2.0", "id": 1})).expect_err("that is not an answer");
+        assert!(
+            refused
+                .to_string()
+                .contains("neither a result nor a reason")
+        );
+
+        assert_eq!(
+            outcome(&json!({"jsonrpc": "2.0", "id": 1, "result": Value::Null}))
+                .expect("a tool may answer with nothing"),
+            Value::Null
+        );
+    }
 
     /// A socket file left by a process that is gone is what a crash leaves, and
     /// refusing to start over it would mean a crash costs somebody a restart of

@@ -323,6 +323,16 @@ fn a_project_declares_its_extensions_and_what_each_tells_an_agent() {
                         "version": "1.0.0",
                         "prompt": "# Project memory\n\nSeven kinds of claim.",
                         "source": "folder",
+                        "tools": [
+                            {
+                                "name": "search",
+                                "description": "Finds a claim by its words",
+                                "input": {
+                                    "type": "object",
+                                    "properties": { "words": { "type": "string" } },
+                                },
+                            },
+                        ],
                     },
                 ],
             },
@@ -356,6 +366,21 @@ fn a_project_declares_its_extensions_and_what_each_tells_an_agent() {
         "the digest is what a re-tagged release is caught by: {installed}"
     );
     assert_eq!(installed[0]["source"], "file");
+
+    // What an agent may call, and the whole of what it is told before it calls.
+    // The same crossing the prompt makes and the same silence if a member is
+    // dropped: a tool declared in a manifest and offered to nobody.
+    assert!(
+        installed[0].get("tools").is_none(),
+        "an extension that offers none stores none: {installed}"
+    );
+    let tools = &installed[1]["tools"];
+    assert_eq!(tools[0]["name"], "search");
+    assert_eq!(tools[0]["description"], "Finds a claim by its words");
+    assert_eq!(
+        tools[0]["input"]["properties"]["words"]["type"], "string",
+        "the schema is carried whole, to the depth the package wrote it: {tools}"
+    );
 
     // A folder has no fixed content to hash, and that absence is stored as an
     // absence rather than as an empty string somebody could mistake for one.

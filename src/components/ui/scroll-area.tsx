@@ -48,11 +48,17 @@ function ScrollArea({
 
           Content that is genuinely wider than the column — a table or a code
           block in a document — still scrolls: the scrollbar is derived from the
-          viewport's own `scrollWidth`, which an overflowing child still grows. */}
+          viewport's own `scrollWidth`, which an overflowing child still grows.
+
+          `overscroll-contain` is the other half of a panel owning its own
+          scrolling: a scroller that has reached its end stops there rather than
+          handing the rest of the gesture to whatever is behind it. Without it
+          one flick through a list carries on into the surface underneath, and
+          what moves is not the thing the gesture started on. */}
       <ScrollAreaPrimitive.Viewport
         ref={viewportRef}
         data-slot="scroll-area-viewport"
-        className="size-full rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1 [&>div]:block!"
+        className="size-full overscroll-contain rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1 [&>div]:block!"
       >
         {children}
       </ScrollAreaPrimitive.Viewport>

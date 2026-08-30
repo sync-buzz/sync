@@ -598,6 +598,11 @@ export function ExtensionPage({
   // two come to disagree.
   const occasions =
     packaged === null ? [] : occasionsOf(packaged.manifest, clock?.isOn ?? true);
+  // What it does outside this window, and the hosts it named. Both come off the
+  // package rather than off the index here, so the sentence and the list are
+  // the same package's own words.
+  const reach =
+    packaged === null ? null : reachOf(packaged.manifest.capabilities);
   const firstClockKey =
     occasions.find((occasion) => occasion.isClock)?.key ?? null;
 
@@ -752,6 +757,52 @@ export function ExtensionPage({
                 )}
               </Section>
 
+              {/* Only for a package that reaches outside, by the same rule the
+                  section below follows: a section drawn empty names a state
+                  instead of showing one. A package that dials nowhere is the
+                  ordinary case and says so by not being here. */}
+              {reach === null ? null : (
+                <Section title="What it reaches outside this window">
+                  <p className="text-sm leading-5 text-fg-secondary">{reach}</p>
+                  {/* Every host it named, and the whole list: this is what a
+                      request is checked against, so a page that showed the
+                      first few would be describing a narrower permission than
+                      the one being agreed to. A manifest asking for the
+                      capability and naming nowhere is refused when it is read,
+                      so there is no empty case to draw. */}
+                  <ul className="flex flex-col gap-1">
+                    {packaged.manifest.net.hosts.map((host) => (
+                      <li
+                        key={host}
+                        className="font-mono text-xs text-fg-secondary"
+                      >
+                        {host}
+                      </li>
+                    ))}
+                  </ul>
+                  {/* Whose secret goes where, said before anybody installs. A
+                      package that sends one of this person's tokens somewhere
+                      is the thing they are agreeing to, and the row names the
+                      entry rather than showing a value — the window never has
+                      one, and the package that declared this does not hold one
+                      either. */}
+                  {packaged.manifest.net.secrets.map((sending) => (
+                    <p
+                      key={`${sending.host}/${sending.header}`}
+                      className="text-sm leading-5 text-fg-secondary"
+                    >
+                      It sends the secret{" "}
+                      <span className="font-mono text-xs">
+                        {sending.secret}
+                      </span>{" "}
+                      to{" "}
+                      <span className="font-mono text-xs">{sending.host}</span>,
+                      and never reads it itself.
+                    </p>
+                  ))}
+                </Section>
+              )}
+
               {/* Only for a package that has handlers. A section drawn empty
                   would name a state instead of showing one, which is the rule
                   the navigator's groups already follow. */}
@@ -904,6 +955,10 @@ export function ExtensionPage({
  * them, and the page fills in the moment it has.
  */
 function ListedElsewhere({ listed }: { listed: ListedExtension }) {
+  // Composed once and drawn once. A sentence built twice in one component is
+  // two sentences that agree until somebody edits one of them.
+  const reach = reachOf(listed.capabilities);
+
   return (
     <div className="flex flex-col gap-3">
       <p className="text-sm leading-5 text-fg-secondary">
@@ -948,6 +1003,17 @@ function ListedElsewhere({ listed }: { listed: ListedExtension }) {
           </ul>
         )}
       </Section>
+
+      {reach === null ? null : (
+        <Section title="What it reaches outside this window">
+          <p className="text-sm leading-5 text-fg-secondary">{reach}</p>
+          <p className="text-sm leading-5 text-fg-tertiary">
+            Which hosts, exactly, is a sentence in the package rather than in the
+            registry&apos;s index — it is shown here whole once the package is
+            unpacked, and it is what every request is checked against.
+          </p>
+        </Section>
+      )}
 
       <Section title="What it tells an agent">
         <p className="text-sm leading-5 text-fg-tertiary">
@@ -1298,6 +1364,24 @@ function Disclosure({
       {isOpen ? <div className="pt-3 pl-5">{children}</div> : null}
     </section>
   );
+}
+
+/**
+ * What a package says it does outside this window, or `null` for nothing.
+ *
+ * Read off the capabilities rather than off the host list, because the two
+ * answer different questions and only this one is on the registry's index: a
+ * card for something nobody has downloaded still has to say that installing it
+ * lets a package file in somebody's tracker. Where it reaches is drawn beside
+ * this wherever it is known, and it is only ever known from the package itself.
+ */
+function reachOf(capabilities: readonly string[]): string | null {
+  if (!capabilities.includes("net")) return null;
+  // Two sentences rather than one with a clause, because they are what a person
+  // is deciding between: something that watches, and something that acts.
+  return capabilities.includes("net.write")
+    ? "It reaches outside this window, and may change things where it reaches rather than only read them."
+    : "It reads from outside this window and changes nothing there.";
 }
 
 /** One reason a package runs with no screen, as the page says it. */

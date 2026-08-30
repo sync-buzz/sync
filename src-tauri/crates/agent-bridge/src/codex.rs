@@ -431,7 +431,15 @@ impl State {
                 }),
             ),
             "item/started" => tool_update(session_id, params.get("item"), false),
-            "item/completed" => tool_update(session_id, params.get("item"), true),
+            // A finished item is where a picture is whole. `item/started` for the
+            // same item carries an empty `result`, and the deltas in between are
+            // Codex's own progress reporting rather than image data.
+            "item/completed" => {
+                let item = params.get("item");
+                let mut done = tool_update(session_id, item, true);
+                done.extend(generated_image(session_id, item));
+                done
+            }
             "turn/plan/updated" => {
                 let entries = params["plan"]
                     .as_array()
@@ -676,8 +684,8 @@ fn resumed_session_response(acp_id: Value, session_id: &str, result: Value) -> V
 /// chunks into blocks and cannot tell the difference.
 ///
 /// Items with no reading here are skipped rather than guessed at. A web search
-/// or an image view is not a thing this window draws, and inventing a tool call
-/// for one would put a row in the transcript that never existed.
+/// is not a thing this window draws, and inventing a tool call for one would put
+/// a row in the transcript that never existed.
 fn replayed_turns(session_id: &str, result: &Value) -> Vec<Outgoing> {
     let Some(turns) = result.pointer("/thread/turns").and_then(Value::as_array) else {
         return Vec::new();
@@ -756,6 +764,10 @@ fn replayed_item(session_id: &str, item: &Value) -> Vec<Outgoing> {
             both.extend(tool_update(session_id, Some(item), true));
             both
         }
+        // The same translation the live path uses, for the same reason tool
+        // calls reuse `tool_update`: a picture that replayed differently from
+        // the way it first arrived would be a different conversation.
+        Some("imageGeneration") => generated_image(session_id, Some(item)),
         _ => Vec::new(),
     }
 }
@@ -862,6 +874,73 @@ fn codex_mcp_servers(servers: Option<&Value>) -> serde_json::Map<String, Value> 
         );
     }
     translated
+}
+
+/// A picture Codex made, as the one content block ACP has for one.
+///
+/// Codex reports it as a thread item rather than as a message, so nothing in
+/// the ACP stream would carry it and the window would show a turn in which the
+/// agent said nothing. It becomes an `agent_message_chunk` because that is
+/// where a thing the agent produced belongs in a transcript: it is what the
+/// agent answered with, in the same run of chunks as the sentence around it.
+///
+/// `result` is base64 with no prefix — the same field the model's own
+/// `image_generation_call` carries. A `data:` prefix is split off if one is
+/// ever there rather than sent on as if it were payload, because base64 that
+/// begins `data:image/png;base64,` decodes to nothing and would draw a broken
+/// picture with no error anywhere to say why.
+///
+/// Nothing is emitted for an item with no `result`: `item/started` fires for
+/// the same id before there is an image, and a chunk carrying an empty string
+/// is a picture that cannot be drawn.
+fn generated_image(session_id: &str, item: Option<&Value>) -> Vec<Outgoing> {
+    let Some(item) = item else { return Vec::new() };
+    if item["type"].as_str() != Some("imageGeneration") {
+        return Vec::new();
+    }
+    let Some(result) = item["result"].as_str().filter(|result| !result.is_empty()) else {
+        return Vec::new();
+    };
+    let saved = item["savedPath"].as_str();
+    let (mime, data) = split_data_url(result, saved);
+    if data.is_empty() {
+        return Vec::new();
+    }
+    update(
+        session_id,
+        json!({
+            "sessionUpdate": "agent_message_chunk",
+            "content": { "type": "image", "mimeType": mime, "data": data },
+        }),
+    )
+}
+
+/// The media type and the base64 of a picture, whichever of the two spellings
+/// it arrived in.
+///
+/// The media type is taken from the payload itself when it is a data URL, then
+/// from the extension of the file Codex saved beside it, and is `image/png`
+/// otherwise — which is what an image tool returns unless it was asked for
+/// something else, and is the guess that draws rather than the guess that is
+/// merely honest about not knowing.
+fn split_data_url<'a>(result: &'a str, saved: Option<&str>) -> (String, &'a str) {
+    if let Some(rest) = result.strip_prefix("data:") {
+        if let Some((declared, data)) = rest.split_once(',') {
+            let mime = declared.split(';').next().unwrap_or_default();
+            let mime = if mime.is_empty() { "image/png" } else { mime };
+            return (mime.to_owned(), data);
+        }
+    }
+    let mime = saved
+        .and_then(|path| path.rsplit_once('.'))
+        .map(|(_, extension)| extension.to_ascii_lowercase());
+    let mime = match mime.as_deref() {
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        _ => "image/png",
+    };
+    (mime.to_owned(), result)
 }
 
 fn tool_update(session_id: &str, item: Option<&Value>, completed: bool) -> Vec<Outgoing> {
@@ -1083,6 +1162,29 @@ mod tests {
         assert!(supported_codex("codex-cli/1.2.3 (macos)"));
         assert!(!supported_codex("codex_cli_rs/0.146.9"));
         assert!(!supported_codex("unknown"));
+    }
+
+    /// A payload that arrived as a data URL is split rather than sent on whole.
+    ///
+    /// Not a shape Codex 0.144.5 emits, and that is the point: base64 that
+    /// begins `data:image/png;base64,` decodes to nothing, draws a broken
+    /// picture, and leaves no error anywhere to say why. The cost of being
+    /// wrong about which spelling arrives is a silent blank, so both are read.
+    #[test]
+    fn a_result_that_is_a_data_url_is_split_into_its_type_and_its_bytes() {
+        let (mime, data) = split_data_url("data:image/webp;base64,aGVsbG8=", Some("/tmp/x.png"));
+        assert_eq!(
+            mime, "image/webp",
+            "the payload's own type outranks the file's"
+        );
+        assert_eq!(data, "aGVsbG8=");
+
+        let (mime, data) = split_data_url("aGVsbG8=", None);
+        assert_eq!(
+            mime, "image/png",
+            "an image tool returns PNG unless it was asked for something else"
+        );
+        assert_eq!(data, "aGVsbG8=");
     }
 
     #[test]

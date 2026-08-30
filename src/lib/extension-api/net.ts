@@ -2,10 +2,14 @@
 
 import { invoke } from "@tauri-apps/api/core";
 
-import type { ExtensionNet, NetAnswer } from "@/lib/extension-api/contract";
+import type {
+  ExtensionNet,
+  NetRequest,
+  NetResponse,
+} from "@/lib/extension-api/contract";
 
 /**
- * Reading something nobody in this window wrote.
+ * Reaching something nobody in this window wrote.
  *
  * Here rather than beside the rest of the surface's functions because of the
  * one thing that makes it different: **every other call an extension makes is
@@ -27,6 +31,11 @@ import type { ExtensionNet, NetAnswer } from "@/lib/extension-api/contract";
  */
 export function netFor(id: string): ExtensionNet {
   return {
-    read: (url: string) => invoke<NetAnswer>("extension_fetch", { id, url }),
+    // The request crosses whole rather than as members this rebuilds on the
+    // way. What a request is, is stated once — in `NetRequest`, and in the type
+    // Rust reads it back into — so a member added to one is a member the other
+    // refuses by name rather than one that quietly never arrives.
+    fetch: (request: NetRequest) =>
+      invoke<NetResponse>("extension_fetch", { id, request }),
   };
 }

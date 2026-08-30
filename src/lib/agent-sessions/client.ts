@@ -93,6 +93,40 @@ export interface SessionRow {
    * deliberately — a list already answers it.
    */
   readonly source?: SessionSource;
+  /**
+   * The record this conversation is being held under, when there is one.
+   *
+   * Beside `source` rather than inside it, because *who asked* and *what it is
+   * about* are two questions and only the first of them has a person as an
+   * ordinary answer. A conversation somebody opened from a task has no orderer
+   * and is still about that task, so a list that grouped by who asked would
+   * leave every one of those in the same undifferentiated heap.
+   *
+   * Set when the session is opened and never edited, which is what lets a list
+   * group by it: a row that changed group while somebody was reading it was the
+   * mistake a `Running`/`Not running` split already made once.
+   */
+  readonly about?: SessionAbout;
+}
+
+/**
+ * The record a conversation is being held under.
+ *
+ * Three members and each is load-bearing: the key is what a list groups by, the
+ * kind is what opening the record takes beside it — an area lists records by
+ * type and cannot find out which of its own lists a key belongs in without
+ * reading the record first — and the title is what a heading says.
+ *
+ * The title is what the record was called when the work began, so a heading is
+ * drawn without reading the corpus for every row of a list that is polled every
+ * few seconds. It goes stale the way `extensionName` does, and in the same
+ * direction: a record renamed later is called what it was called here until
+ * something is opened about it again.
+ */
+export interface SessionAbout {
+  readonly key: string;
+  readonly kind: string;
+  readonly title: string;
 }
 
 /**
@@ -287,6 +321,27 @@ export interface PastedImage {
   readonly bytes: number;
 }
 
+/**
+ * A picture the agent sent, as it survives in the transcript.
+ *
+ * What is left where the base64 was. The host takes an image block's bytes out
+ * of the update before it records it — a session's history is replayed whole to
+ * every screen that comes back to the conversation, and a picture left in it
+ * would be paid for on every one of them — and puts them in the session under
+ * `imageId`, which {@link sessionImage} fetches by.
+ *
+ * `imageId` is `null` when the conversation could not keep it: there is one
+ * ceiling on what a conversation holds in pictures, and what was pasted into it
+ * counts against the same one. The block stays either way, because a turn that
+ * lost its picture entirely is a turn in which the agent answered with nothing.
+ */
+export interface SentImage {
+  readonly imageId: string | null;
+  readonly mimeType: string;
+  /** How many bytes it was, whether or not it is held. */
+  readonly bytes: number;
+}
+
 /** An image on its way into a prompt. `data` is base64, with no `data:` prefix. */
 export interface PastedContent {
   readonly name: string;
@@ -391,11 +446,19 @@ export function openSession(args: {
   agentId: string;
   cwd: string;
   model?: string | null;
+  /**
+   * The record this conversation is being opened under, for a screen that
+   * opened it from one. Only the caller can answer it: somebody pressing
+   * `Send to agent` is standing in a record, and nothing below this line can
+   * find that out afterwards.
+   */
+  about?: SessionAbout | null;
 }): Promise<OpenedSession> {
   return call<OpenedSession>("session_open", {
     agentId: args.agentId,
     cwd: args.cwd,
     model: args.model ?? null,
+    about: args.about ?? null,
   });
 }
 
@@ -436,6 +499,14 @@ export interface RememberedConversation {
    * the live one.
    */
   readonly source?: SessionSource;
+  /**
+   * The record the conversation was held under, when it was held under one.
+   *
+   * Carried here for the reason `source` is: a dormant row and a live one are
+   * the same conversation at two moments, and one that lost its heading when
+   * its agent stopped would move up the list under somebody reading it.
+   */
+  readonly about?: SessionAbout;
   /** The record it was kept as, when somebody kept it on this machine. */
   readonly recordKey?: string;
 }
@@ -566,6 +637,55 @@ export function sessionImage(
   id: string,
 ): Promise<{ readonly mimeType: string; readonly data: string }> {
   return call("session_image", { key, id });
+}
+
+/**
+ * Save one of a conversation's pictures to a file, with the system's panel.
+ *
+ * It exists because the webview's own image menu does not work here and cannot
+ * be made to. `Save Image` and `Open Image in New Window` are drawn by WebKit
+ * on any `img`, and both are dead in this window: the source is a `data:` URL,
+ * saving one needs a download handler the shell does not install, and opening
+ * one is a navigation the content security policy refuses. Two menu items that
+ * look like the system offering something and then do nothing are worse than no
+ * menu at all, so the picture is given a menu of ours — native, like every
+ * other context menu here — and this is what its one command calls.
+ *
+ * The bytes never come back through the window. It has them as base64 to draw
+ * with, and writing a file from that would mean decoding what was encoded for a
+ * different purpose; the panel answers with a path and Rust writes the bytes it
+ * already holds.
+ *
+ * Answers whether a file was written: `false` is the person having dismissed
+ * the panel, which is not a failure and is not reported as one.
+ */
+export async function saveSessionImage(
+  key: string,
+  id: string,
+  suggestedName: string,
+): Promise<boolean> {
+  const { save } = await import("@tauri-apps/plugin-dialog");
+  const path = await save({ defaultPath: suggestedName });
+  if (path === null) return false;
+  await call<void>("session_image_save", { key, id, path });
+  return true;
+}
+
+/**
+ * A file name for a picture that has none, from what it is.
+ *
+ * A conversation's pictures are not files and have no names — the one the agent
+ * sent never had one, and every browser invents the same name for a pasted one.
+ * So the panel is given something to start from rather than an empty field, and
+ * the extension is taken from the media type because saving a PNG as `.jpg` is
+ * a file that will not open where it lands.
+ */
+export function imageFileName(mimeType: string, called?: string): string {
+  const extension = mimeType.startsWith("image/")
+    ? mimeType.slice("image/".length).split("+")[0].toLowerCase()
+    : "png";
+  const stem = called?.replace(/\.[^.]+$/, "").trim();
+  return `${stem !== undefined && stem !== "" ? stem : "Picture"}.${extension === "jpeg" ? "jpg" : extension}`;
 }
 
 /**

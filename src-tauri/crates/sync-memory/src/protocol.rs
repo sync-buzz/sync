@@ -35,6 +35,31 @@ pub const METHODS: &str = "methods.list";
 /// name is how a rename breaks the half nobody edited.
 pub const ATTACH: &str = "project.attach";
 
+/// The call that turns a host connection into the channel *back*.
+///
+/// Every other message on this socket goes one way — the window asks, the
+/// engine answers. This one inverts a connection: after it, the engine writes
+/// requests and the application answers them, on the same line-framed JSON-RPC
+/// and matched by the same `id`.
+///
+/// It exists because a tool an agent calls has to run **in the application**,
+/// where the permissions, the artefact and the keychain are. The engine is a
+/// child process that Sync spawns and outlives, so the direction of the pipe
+/// and the direction of a call are not the same question.
+///
+/// A separate connection rather than an inversion of an attached one, and that
+/// is the whole reason it is its own call: a connection with a project on it
+/// exists only while somebody has that project open, and an agent calls a tool
+/// with no window anywhere.
+pub const ATTEND: &str = "host.attend";
+
+/// What the engine asks the application to run, over [`ATTEND`].
+///
+/// The one request that travels in that direction today. Named here beside the
+/// others because both ends spell it, and a name spelled twice is a name that
+/// gets renamed once.
+pub const TOOL_CALL: &str = "extension.tool";
+
 /// A bidirectional line-delimited JSON channel to the engine.
 ///
 /// Implemented by the sidecar's stdio in production and by an in-process fake

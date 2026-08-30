@@ -202,6 +202,14 @@ fn opened_in_sync(project: &Path) -> (sync_memory::MemoryClient, tempfile::TempD
                 // in with a hash nothing on this surface checks.
                 integrity: None,
                 source: None,
+                tools: vec![sync_memory::ToolDeclaration {
+                    name: "search_tickets".to_owned(),
+                    description: "Finds tickets by their words".to_owned(),
+                    input: json!({
+                        "type": "object",
+                        "properties": {"words": {"type": "string"}},
+                    }),
+                }],
             }],
         })
         .expect("the project describes itself");
@@ -422,9 +430,34 @@ fn the_project_names_itself_its_kinds_and_what_it_is_composed_of() {
         "sync_instructions",
         &json!({"project": "PROBE", "topic": "extension:acme.tracker"}),
     );
-    assert_eq!(
-        extension["body"], EXTENSION_PROMPT,
+    let body = extension["body"].as_str().expect("a body");
+    assert!(
+        body.starts_with(EXTENSION_PROMPT),
         "an extension's topic answers with what the extension published: {extension}"
+    );
+
+    // And with what it offers an agent to call, which is the half an agent
+    // cannot guess: the full name, the sentence it decides on, and the schema
+    // its arguments are checked against. Whole rather than summarised — a
+    // description of a schema is a schema that disagrees with the one the
+    // arguments are actually checked against.
+    for said in [
+        "acme.tracker.search_tickets",
+        "Finds tickets by their words",
+        "\"words\"",
+    ] {
+        assert!(
+            body.contains(said),
+            "the topic tells an agent what it can call: {said} is missing from {body}"
+        );
+    }
+    // The names in orientation and nothing more: this is read on every session,
+    // and a schema per tool here is paid for by every agent that never calls
+    // one. What it buys is an agent knowing there is something to ask about.
+    assert_eq!(
+        described["installed"][0]["tools"],
+        json!(["search_tickets"]),
+        "orientation says what there is, by name: {described}"
     );
     assert!(
         described["installed"][0].get("prompt").is_none(),
@@ -508,6 +541,194 @@ fn an_agent_writes_records_without_ever_seeing_an_envelope() {
         &json!({"project": "PROBE", "delete": ["d-written"]}),
     );
     assert_eq!(deleted["changed_keys"][0], "d-written", "{deleted}");
+}
+
+/// A key is an address and a title is a name, and the write door is where the
+/// difference is noticed: what comes back is the record that was named by its
+/// address, and the exact link to name it by instead.
+#[test]
+fn a_record_named_by_its_key_comes_back_with_the_link_to_name_it_by() {
+    let project = repository();
+    let _sync = opened_in_sync(project.path());
+    let mut agent = Agent::open(project.path());
+
+    agent.call(
+        "sync_apply",
+        &json!({"project": "PROBE", "save": [{
+            "key": "d-first",
+            "kind": "decision",
+            "title": "The one that was taken",
+            "content": "It was taken.",
+        }]}),
+    );
+
+    let written = agent.call(
+        "sync_apply",
+        &json!({"project": "PROBE", "save": [{
+            "key": "d-second",
+            "kind": "decision",
+            "title": "The one after it",
+            "content": "Supersedes `d-first`, which it names twice: `d-first`.",
+        }]}),
+    );
+    let bare = written["bare_keys"]
+        .as_array()
+        .unwrap_or_else(|| panic!("the write says what it noticed: {written}"));
+    assert_eq!(
+        bare.len(),
+        1,
+        "one record to name, not one report a mention: {written}"
+    );
+    assert_eq!(bare[0]["key"], "d-first");
+    assert_eq!(bare[0]["written_in"], "d-second");
+    assert_eq!(
+        bare[0]["write_instead"],
+        "[The one that was taken](sync://decision/d-first)"
+    );
+
+    // The write landed regardless. A transaction is not thrown away over prose.
+    assert_eq!(written["changed_keys"][0], "d-second", "{written}");
+
+    // Written as it asks for, there is nothing to say and nothing is said.
+    let named = agent.call(
+        "sync_apply",
+        &json!({"project": "PROBE", "save": [{
+            "key": "d-third",
+            "kind": "decision",
+            "title": "The one that names the first properly",
+            "content": "Supersedes [The one that was taken](sync://decision/d-first).",
+        }]}),
+    );
+    assert!(
+        named["bare_keys"].is_null(),
+        "a write with nothing to report says nothing: {named}"
+    );
+
+    // A record naming a sibling of the same transaction is answered from the
+    // transaction: neither of them is in the store yet.
+    let together = agent.call(
+        "sync_apply",
+        &json!({"project": "PROBE", "save": [
+            {
+                "key": "d-fourth",
+                "kind": "decision",
+                "title": "The one that names its sibling",
+                "content": "Rests on `d-fifth`.",
+            },
+            {
+                "key": "d-fifth",
+                "kind": "decision",
+                "title": "The sibling",
+                "content": "Nothing here names anything.",
+            },
+        ]}),
+    );
+    assert_eq!(
+        together["bare_keys"][0]["write_instead"], "[The sibling](sync://decision/d-fifth)",
+        "{together}"
+    );
+}
+
+/// The other spelling, and the other answer: double brackets carry no kind, so
+/// nothing can follow one, and the door refuses rather than advises. What makes
+/// that affordable is that nothing is guessed — the spelling is wrong whatever
+/// it points at.
+#[test]
+fn a_write_spelling_a_record_in_double_brackets_is_refused() {
+    let project = repository();
+    let _sync = opened_in_sync(project.path());
+    let mut agent = Agent::open(project.path());
+
+    agent.call(
+        "sync_apply",
+        &json!({"project": "PROBE", "save": [{
+            "key": "d-first",
+            "kind": "decision",
+            "title": "The one that was taken",
+            "content": "It was taken.",
+        }]}),
+    );
+
+    let refused = agent.call(
+        "sync_apply",
+        &json!({"project": "PROBE", "save": [{
+            "key": "d-bracketed",
+            "kind": "decision",
+            "title": "The one that pointed nowhere",
+            "content": "Supersedes [[d-first]].",
+        }]}),
+    );
+    assert_eq!(refused["error"]["kind"], "invalid_argument", "{refused}");
+    let message = refused["error"]["message"]
+        .as_str()
+        .unwrap_or_else(|| panic!("a refusal says why: {refused}"));
+    assert!(
+        message.contains("[The one that was taken](sync://decision/d-first)"),
+        "the refusal carries the link to write instead: {message}"
+    );
+    assert!(
+        message.contains("Nothing was written"),
+        "the refusal says the transaction did not land: {message}"
+    );
+    assert_eq!(refused["error"]["data"]["wikilinks"][0]["where"], "content");
+
+    // Refused means refused: the record is not in the store under half of what
+    // was sent. A door that reported and wrote would leave the dead end behind.
+    let revision = agent.call("sync_project", &json!({"project": "PROBE"}))["revision"]
+        .as_str()
+        .expect("a revision")
+        .to_owned();
+    let read = agent.call(
+        "memory_get_record",
+        &json!({"project": "PROBE", "key": "d-bracketed", "revision": revision}),
+    );
+    assert!(
+        read["record"].is_null() || read.get("error").is_some(),
+        "the refused record was not written: {read}"
+    );
+
+    // A title and a field are read as well as a body: they are what a reader
+    // meets first, and a dead end in one is the same dead end.
+    let by_title = agent.call(
+        "sync_apply",
+        &json!({"project": "PROBE", "save": [{
+            "key": "d-titled",
+            "kind": "decision",
+            "title": "After [[d-first]]",
+            "content": "Nothing here names anything.",
+        }]}),
+    );
+    assert_eq!(by_title["error"]["data"]["wikilinks"][0]["where"], "title");
+
+    // Nothing answers to this one, and it is refused all the same: the spelling
+    // is what is wrong, and a link to nowhere is not what was missing.
+    let nowhere = agent.call(
+        "sync_apply",
+        &json!({"project": "PROBE", "save": [{
+            "key": "d-nowhere",
+            "kind": "decision",
+            "title": "The one that named a stranger",
+            "content": "Rests on [[d-never-existed]].",
+        }]}),
+    );
+    assert_eq!(nowhere["error"]["kind"], "invalid_argument", "{nowhere}");
+    assert!(
+        nowhere["error"]["data"]["wikilinks"][0]["write_instead"].is_null(),
+        "there is no link to suggest for a key nothing answers to: {nowhere}"
+    );
+
+    // And a document about the spelling remains writable, because quoting a
+    // syntax is what code spans and fences are for.
+    let quoted = agent.call(
+        "sync_apply",
+        &json!({"project": "PROBE", "save": [{
+            "key": "d-quoting",
+            "kind": "decision",
+            "title": "The one that explains the rule",
+            "content": "Do not write `[[d-first]]`.",
+        }]}),
+    );
+    assert_eq!(quoted["changed_keys"][0], "d-quoting", "{quoted}");
 }
 
 #[test]
@@ -732,5 +953,166 @@ fn a_type_that_declares_an_envelope_member_is_not_published() {
     assert!(
         !types.iter().any(|kind| kind.kind == "chat.conversation"),
         "the definition was refused, so the project does not hold it"
+    );
+}
+
+/// **The catalogue grows by one name, whatever a project's extensions offer.**
+///
+/// This is the whole reason there is a dispatcher rather than a tool per
+/// contribution: every entry in this list is paid for in tokens by every agent
+/// on every turn, including the ones that will never call it. A project with
+/// four extensions offering three tools each would put twelve descriptions and
+/// twelve schemas in front of an agent that asked about none of them.
+#[test]
+fn what_extensions_offer_is_one_name_in_the_catalogue_rather_than_one_each() {
+    let project = repository();
+    let _sync = opened_in_sync(project.path());
+    let mut agent = Agent::open(project.path());
+
+    let names: Vec<String> = agent
+        .tools()
+        .iter()
+        .filter_map(|tool| tool.get("name").and_then(Value::as_str))
+        .map(str::to_owned)
+        .collect();
+
+    assert!(
+        names.iter().any(|name| name == "sync_call"),
+        "the one door onto extensions is published: {names:?}"
+    );
+    assert!(
+        !names.iter().any(|name| name.contains("acme.tracker")),
+        "and what the extension offers is not in the catalogue: {names:?}"
+    );
+}
+
+/// A tool of an extension the project does not have is refused by name, and the
+/// refusal says which project was asked.
+///
+/// An agent reads one answer and has to be able to act on it: *this project*
+/// has no such extension is a different fact from *no such tool exists*, and
+/// only the first tells it to look at `sync_project`.
+#[test]
+fn a_tool_of_an_extension_this_project_does_not_have_is_refused_naming_both() {
+    let project = repository();
+    let _sync = opened_in_sync(project.path());
+    let mut agent = Agent::open(project.path());
+
+    let answer = agent.request(
+        "tools/call",
+        &json!({
+            "name": "sync_call",
+            "arguments": {"project": "PROBE", "tool": "other.notes.search"},
+        }),
+    );
+    let said = answer.to_string();
+
+    assert!(
+        said.contains("PROBE"),
+        "the refusal names the project: {said}"
+    );
+    assert!(
+        said.contains("other.notes"),
+        "and the extension that is not here: {said}"
+    );
+    assert!(
+        said.contains("sync_project"),
+        "and where to read what this project does have: {said}"
+    );
+}
+
+/// A name the extension does not offer is refused with what it does offer, and
+/// with the topic that describes each one.
+///
+/// The compensation for a catalogue that carries one name: a client cannot
+/// check against a schema it was never given, so this side has to answer better
+/// than the client's own check would have.
+#[test]
+fn a_tool_an_extension_does_not_offer_is_refused_with_the_ones_it_does() {
+    let project = repository();
+    let _sync = opened_in_sync(project.path());
+    let mut agent = Agent::open(project.path());
+
+    let answer = agent.request(
+        "tools/call",
+        &json!({
+            "name": "sync_call",
+            "arguments": {"project": "PROBE", "tool": "acme.tracker.file_ticket"},
+        }),
+    );
+    let said = answer.to_string();
+
+    assert!(
+        said.contains("acme.tracker.search_tickets"),
+        "the refusal names what is offered instead: {said}"
+    );
+    assert!(
+        said.contains("extension:acme.tracker"),
+        "and the topic that says what each takes: {said}"
+    );
+}
+
+/// Arguments that do not match the schema its author published are refused
+/// before anything runs, and the refusal says what was wrong with them.
+#[test]
+fn arguments_that_do_not_fit_the_package_s_own_schema_are_refused() {
+    let project = repository();
+    let _sync = opened_in_sync(project.path());
+    let mut agent = Agent::open(project.path());
+
+    let answer = agent.request(
+        "tools/call",
+        &json!({
+            "name": "sync_call",
+            "arguments": {
+                "project": "PROBE",
+                "tool": "acme.tracker.search_tickets",
+                // The package declared this a string.
+                "arguments": {"words": 41},
+            },
+        }),
+    );
+    let said = answer.to_string();
+
+    assert!(
+        said.contains("words"),
+        "the refusal names the argument that was wrong: {said}"
+    );
+    assert!(
+        said.contains("extension:acme.tracker"),
+        "and where the whole schema is stated: {said}"
+    );
+}
+
+/// A call that passes every check reaches for Sync — and says so plainly when
+/// Sync is not there.
+///
+/// This process is started by the application in the product and by this test
+/// on its own, so "nobody is attending" is the honest state here. What is being
+/// tested is that it is *said*, at once: a tool call that hung until its
+/// patience ran out would be a minute of an agent's time spent on an answer
+/// this process had from the first instant.
+#[test]
+fn a_call_with_no_application_behind_it_says_so_rather_than_hanging() {
+    let project = repository();
+    let _sync = opened_in_sync(project.path());
+    let mut agent = Agent::open(project.path());
+
+    let answer = agent.request(
+        "tools/call",
+        &json!({
+            "name": "sync_call",
+            "arguments": {
+                "project": "PROBE",
+                "tool": "acme.tracker.search_tickets",
+                "arguments": {"words": "a ticket"},
+            },
+        }),
+    );
+    let said = answer.to_string();
+
+    assert!(
+        said.contains("Sync is not on the other end"),
+        "the refusal says what is missing rather than blaming the package: {said}"
     );
 }

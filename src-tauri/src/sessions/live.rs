@@ -29,6 +29,8 @@ use acp_client::{
     AgentConnection, AgentProcess, ClientHandler, McpToolName, RpcError, SessionUpdateEvent,
     SessionUpdatePayload, schema,
 };
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
 use tokio::sync::oneshot;
@@ -104,9 +106,47 @@ pub struct Source {
     pub extension_name: String,
     /// The handler that ordered it, by the name an occasion calls.
     pub handler: String,
-    /// What it was about, as a record key, when the orderer named one.
+    /// The record key the order named, as the order named it.
+    ///
+    /// What a conversation is *about* is answered by [`About`] on the session
+    /// itself, and this is not a second answer to it — it is what the order
+    /// said, kept where the rest of the order is kept, and it is what a package
+    /// matches on to find its own work by record. The two cannot disagree:
+    /// both are written from one order, once.
+    ///
+    /// It stays a bare key. Dropping it would narrow something already
+    /// returned, which is a major on this surface, and the number it would cost
+    /// buys nothing a reader of [`About`] does not already have.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub about: Option<String>,
+}
+
+/// The record the work is being done under.
+///
+/// Held beside the source rather than inside it, because *who asked* and *what
+/// it is about* are two questions and only the first of them has a person as an
+/// ordinary answer. A conversation somebody opened from a task has no orderer
+/// and is still about that task, and a source that carried both would make the
+/// second unanswerable for exactly the conversations a list most wants to group.
+///
+/// Set when the session is opened and never edited, which is what lets a list
+/// group by it: a row that changed group when its agent stopped was the mistake
+/// the `Running`/`Not running` split made, and this cannot make it.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct About {
+    /// The record's key: what a list groups by, and what opening it resolves.
+    pub key: String,
+    /// Its kind, because opening a record takes both — an area lists records by
+    /// type and cannot find out which of its own lists a key belongs in without
+    /// reading the record first.
+    pub kind: String,
+    /// What it was called when the work began, so a heading is drawn without
+    /// reading the corpus for every row of a list that is polled every few
+    /// seconds. The same bargain `extension_name` makes one field up, and it
+    /// goes stale the same way: a record renamed later is called what it was
+    /// called here until something is ordered about it again.
+    pub title: String,
 }
 
 pub struct Session {
@@ -125,6 +165,12 @@ pub struct Session {
     /// cannot change does not belong behind a lock that exists for fields that
     /// do.
     pub source: Option<Source>,
+    /// The record this conversation is being held under, when it is being held
+    /// under one. Beside [`Self::source`] and immutable for the same reason.
+    ///
+    /// `None` is a conversation about nothing in particular, which is what the
+    /// window's own `New conversation` opens.
+    pub about: Option<About>,
     state: Mutex<State>,
     /// Held apart from the rest of the state because ending a process is async
     /// and takes `&mut`, and nothing else about a session needs to wait.
@@ -162,22 +208,26 @@ struct State {
     /// Whether the agent said it reads images. Answered at `initialize` and
     /// fixed for the life of the session.
     accepts_images: bool,
-    /// Images pasted into this conversation, by the id the window draws them
-    /// by.
+    /// Every picture this conversation holds, by the id the window draws it by
+    /// — the ones pasted into it and the ones the agent answered with alike.
     ///
     /// Held here, in memory, and written nowhere. They live exactly as long as
     /// the conversation does, which is what a person pasting a screenshot into
     /// a chat expects of it — and it is why they are here rather than in the
     /// window: the transcript survives leaving the section, and a picture kept
     /// in a screen's own state would leave half a message behind.
-    pasted: HashMap<String, Pasted>,
+    ///
+    /// One store for both directions rather than two, because the ceiling below
+    /// is about what one conversation may hold and a second store would be a
+    /// second ceiling — two halves of a limit neither of which is the limit.
+    images: HashMap<String, HeldImage>,
     /// What those images come to, so one conversation cannot fill the machine.
-    pasted_bytes: usize,
-    /// The ordinal of the next pasted image. Its own counter rather than the
+    image_bytes: usize,
+    /// The ordinal of the next image. Its own counter rather than the
     /// event sequence: `seq` is the position of an event in this session and
     /// the window builds block ids from it, so spending numbers on something
     /// that is not an event would put gaps in it for no reason.
-    next_pasted: u64,
+    next_image: u64,
     /// Whether anything has been said in this conversation.
     ///
     /// What decides whether it is worth writing a pointer for. A session that
@@ -196,24 +246,30 @@ struct State {
     title: Option<String>,
 }
 
-/// One image pasted into a conversation.
+/// One picture a conversation holds, however it got there.
 #[derive(Debug, Clone)]
-pub struct Pasted {
+pub struct HeldImage {
     /// What it is called where it is drawn. Every browser invents the same name
     /// for a clipboard image, so this is the agent's and the person's label
-    /// rather than an identifier.
+    /// rather than an identifier. Empty for a picture the agent sent: there is
+    /// nothing it was called, and inventing a name would be a caption nobody
+    /// wrote.
     pub name: String,
     pub mime_type: String,
     pub bytes: Vec<u8>,
 }
 
-/// What one conversation may hold in pasted images.
+/// What one conversation may hold in pictures.
 ///
 /// A ceiling rather than a policy: a screenshot is a megabyte or two, and a
 /// long session that pasted forty of them would be holding a hundred megabytes
 /// for as long as it stayed open. Refused rather than silently dropped — a
 /// picture that vanished without a word is worse than one that was not taken.
-pub const PASTED_LIMIT_BYTES: usize = 64 * 1024 * 1024;
+///
+/// It counts what the agent sent as well as what was pasted, and that is the
+/// point of one ceiling: an agent asked for twenty pictures in one turn fills
+/// the same conversation a person can.
+pub const IMAGE_LIMIT_BYTES: usize = 64 * 1024 * 1024;
 
 impl Session {
     pub fn new(
@@ -222,6 +278,7 @@ impl Session {
         agent_name: String,
         cwd: PathBuf,
         source: Option<Source>,
+        about: Option<About>,
     ) -> Arc<Self> {
         Arc::new(Self {
             key,
@@ -230,6 +287,7 @@ impl Session {
             cwd,
             opened_at_ms: now_ms(),
             source,
+            about,
             state: Mutex::new(State::default()),
             process: tokio::sync::Mutex::new(None),
         })
@@ -400,29 +458,29 @@ impl Session {
     ///
     /// The number of bytes already held, when these would take the session past
     /// what it is allowed to hold.
-    pub fn keep_pasted(&self, images: Vec<Pasted>) -> Result<Vec<String>, usize> {
+    pub fn keep_images(&self, images: Vec<HeldImage>) -> Result<Vec<String>, usize> {
         let mut state = self.locked();
         let asking: usize = images.iter().map(|image| image.bytes.len()).sum();
-        if state.pasted_bytes + asking > PASTED_LIMIT_BYTES {
-            return Err(state.pasted_bytes);
+        if state.image_bytes + asking > IMAGE_LIMIT_BYTES {
+            return Err(state.image_bytes);
         }
 
         let mut ids = Vec::with_capacity(images.len());
         for image in images {
             // Unique within the session, and saying nothing about the file it
             // came from — there is no file.
-            let id = format!("p{}", state.next_pasted);
-            state.next_pasted += 1;
-            state.pasted_bytes += image.bytes.len();
-            state.pasted.insert(id.clone(), image);
+            let id = format!("i{}", state.next_image);
+            state.next_image += 1;
+            state.image_bytes += image.bytes.len();
+            state.images.insert(id.clone(), image);
             ids.push(id);
         }
         Ok(ids)
     }
 
-    /// One pasted image, for the window to draw.
-    pub fn pasted(&self, id: &str) -> Option<Pasted> {
-        self.locked().pasted.get(id).cloned()
+    /// One picture this conversation holds, for the window to draw.
+    pub fn image(&self, id: &str) -> Option<HeldImage> {
+        self.locked().images.get(id).cloned()
     }
 
     /// What this conversation is called, when it is called anything.
@@ -475,7 +533,7 @@ impl Session {
     }
 
     fn record_update(&self, event: SessionUpdateEvent) {
-        let (update, recognized, payload) = match event.payload {
+        let (update, recognized, mut payload) = match event.payload {
             SessionUpdatePayload::Known(known) => {
                 let payload = serde_json::to_value(&*known).unwrap_or(serde_json::Value::Null);
                 let name = payload
@@ -486,6 +544,10 @@ impl Session {
             }
             SessionUpdatePayload::Unrecognized(raw) => (raw.session_update, false, raw.raw),
         };
+        // Read as it arrived, and only then relieved of its bytes: `recognized`
+        // above is a statement about what the agent sent, and it has to stay
+        // one.
+        self.hold_pictures(&mut payload);
         let replayed = self.locked().replaying;
         self.emit(|seq, at_ms| SessionEvent::Update {
             seq,
@@ -495,6 +557,86 @@ impl Session {
             payload,
             replayed,
         });
+    }
+
+    /// Takes every picture out of an update and puts it in the session.
+    ///
+    /// **The one place an update is not forwarded as the agent wrote it**, and
+    /// the exception is paid for by the rule at the head of
+    /// [`super::event`]: an image block carries base64, a session's history is
+    /// replayed whole to every screen that comes back to the conversation, and
+    /// a megabyte of picture in it would be paid for on every one of them. So
+    /// the bytes move to the store this session already keeps pasted images in,
+    /// and what is left in their place is the id they are held under — which is
+    /// what the window fetches by, exactly as it does for a picture somebody
+    /// pasted.
+    ///
+    /// Every block is walked rather than the one member `agent_message_chunk`
+    /// puts its content in, because a tool call carries content too and an
+    /// agent nobody has met yet may put a picture somewhere neither of them
+    /// does. What must be true is not "the known places are handled" but "no
+    /// image bytes are in the history", and only a walk says that.
+    ///
+    /// A picture that would not fit keeps its place in the conversation and
+    /// loses its id: `imageId` is null, and the window says a picture was here
+    /// rather than drawing a gap. Dropping the block instead would be a turn in
+    /// which the agent answered with nothing.
+    fn hold_pictures(&self, payload: &mut serde_json::Value) {
+        match payload {
+            serde_json::Value::Array(blocks) => {
+                for block in blocks {
+                    self.hold_pictures(block);
+                }
+            }
+            serde_json::Value::Object(block) => {
+                let picture = (block.get("type").and_then(serde_json::Value::as_str)
+                    == Some("image"))
+                .then(|| {
+                    let data = block.get("data")?.as_str()?.to_owned();
+                    let mime = block
+                        .get("mimeType")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("image/png")
+                        .to_owned();
+                    Some((data, mime))
+                })
+                .flatten();
+                if let Some((data, mime)) = picture {
+                    let (id, size) = self.hold_one_picture(&data, &mime);
+                    block.remove("data");
+                    block.insert("imageId".to_owned(), id);
+                    block.insert("bytes".to_owned(), size.into());
+                    return;
+                }
+                for (_, value) in block.iter_mut() {
+                    self.hold_pictures(value);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The id one picture is held under and how many bytes it came to, or a
+    /// null id and a zero when it could not be kept.
+    ///
+    /// Undecodable and too large answer alike, because from the window they are
+    /// one thing — a picture that is not there to draw — and two spellings of
+    /// it would be two ways to say so in Chat for a difference nobody can act
+    /// on.
+    fn hold_one_picture(&self, data: &str, mime_type: &str) -> (serde_json::Value, usize) {
+        let Ok(bytes) = BASE64.decode(data.as_bytes()) else {
+            return (serde_json::Value::Null, 0);
+        };
+        let size = bytes.len();
+        let kept = self.keep_images(vec![HeldImage {
+            name: String::new(),
+            mime_type: mime_type.to_owned(),
+            bytes,
+        }]);
+        match kept.ok().and_then(|ids| ids.into_iter().next()) {
+            Some(id) => (serde_json::Value::String(id), size),
+            None => (serde_json::Value::Null, size),
+        }
     }
 
     /// Opens a question and waits for the window to answer it.
@@ -815,6 +957,7 @@ mod tests {
             "OpenCode".to_owned(),
             std::env::temp_dir(),
             None,
+            None,
         )
     }
 
@@ -847,6 +990,112 @@ mod tests {
         assert_eq!(state.history.len(), 2);
         assert_eq!(state.history[0].seq(), 0);
         assert_eq!(state.history[1].seq(), 1);
+    }
+
+    /// An update carrying an image, as an agent sends one.
+    ///
+    /// Built through the client crate's own decoder rather than hand-assembled,
+    /// so what is tested is the shape that actually reaches this side.
+    fn image_update(data: &str) -> SessionUpdateEvent {
+        acp_client::decode_session_update(serde_json::json!({
+            "sessionId": "s0",
+            "update": {
+                "sessionUpdate": "agent_message_chunk",
+                "content": { "type": "image", "data": data, "mimeType": "image/webp" },
+            },
+        }))
+        .expect("the envelope carries a session id")
+    }
+
+    /// The picture goes to the session; the history keeps its place and not its
+    /// bytes.
+    ///
+    /// This is the whole reason the transport touches the payload at all. The
+    /// assertion that matters is the last one: it is made against the JSON the
+    /// window is actually sent, because a base64 payload that survived in some
+    /// nested member would still be paid for on every return to the
+    /// conversation, and would still be invisible to an assertion about the
+    /// members this test happens to name.
+    #[test]
+    fn an_image_in_an_update_moves_into_the_session_and_out_of_the_history() {
+        let session = session();
+        // "hello" — five bytes, and short enough that its base64 can be looked
+        // for in the serialised history by eye as well as by the assertion.
+        session.record_update(image_update("aGVsbG8="));
+
+        let state = session.locked();
+        let SessionEvent::Update { payload, .. } = &state.history[0] else {
+            panic!("an update is recorded as an update");
+        };
+        let block = &payload["content"];
+        assert_eq!(block["type"], serde_json::json!("image"));
+        assert_eq!(
+            block["imageId"],
+            serde_json::json!("i0"),
+            "what is left in the bytes' place is what the window fetches by"
+        );
+        assert_eq!(
+            block["bytes"],
+            serde_json::json!(5),
+            "so a window can say how big it is without asking for it"
+        );
+        assert_eq!(
+            block["mimeType"],
+            serde_json::json!("image/webp"),
+            "the agent's own media type, not a guess made here"
+        );
+        assert!(
+            block.get("data").is_none(),
+            "the bytes are the one thing that must not be in the history"
+        );
+        let history = serde_json::to_string(&state.history).expect("a history serialises");
+        assert!(
+            !history.contains("aGVsbG8="),
+            "no base64 anywhere in what the window is sent: {history}"
+        );
+        drop(state);
+
+        assert_eq!(
+            session.image("i0").expect("the session holds it").bytes,
+            b"hello",
+            "and the bytes are in the session, under the id the block carries"
+        );
+    }
+
+    /// A picture past the ceiling keeps its place in the conversation and loses
+    /// its id.
+    ///
+    /// Dropping the block instead would be a turn in which the agent answered
+    /// with nothing — the failure that is worse than the picture being missing,
+    /// because there would be nothing to say a picture had been missed.
+    #[test]
+    fn an_image_that_would_not_fit_is_still_a_place_in_the_conversation() {
+        let session = session();
+        session
+            .keep_images(vec![HeldImage {
+                name: "Pasted image".to_owned(),
+                mime_type: "image/png".to_owned(),
+                bytes: vec![0; IMAGE_LIMIT_BYTES],
+            }])
+            .expect("the conversation is empty, so this fits exactly");
+
+        session.record_update(image_update("aGVsbG8="));
+
+        let state = session.locked();
+        let SessionEvent::Update { payload, .. } = &state.history[0] else {
+            panic!("an update is recorded as an update");
+        };
+        let block = &payload["content"];
+        assert_eq!(block["type"], serde_json::json!("image"));
+        assert!(
+            block["imageId"].is_null(),
+            "there is no id because there is nothing held under one: {block}"
+        );
+        assert_eq!(
+            block["bytes"],
+            serde_json::json!(5),
+            "how big it was is still worth saying"
+        );
     }
 
     #[test]
@@ -931,13 +1180,13 @@ mod tests {
     fn a_pasted_image_is_held_by_the_session_and_by_nothing_else() {
         let session = session();
         let ids = session
-            .keep_pasted(vec![
-                Pasted {
+            .keep_images(vec![
+                HeldImage {
                     name: "Pasted image".to_owned(),
                     mime_type: "image/png".to_owned(),
                     bytes: vec![1, 2, 3],
                 },
-                Pasted {
+                HeldImage {
                     name: "Pasted image".to_owned(),
                     mime_type: "image/png".to_owned(),
                     bytes: vec![4],
@@ -948,12 +1197,12 @@ mod tests {
         assert_eq!(ids.len(), 2, "two pastes are two images");
         assert_ne!(ids[0], ids[1]);
         assert_eq!(
-            session.pasted(&ids[0]).expect("the first").bytes,
+            session.image(&ids[0]).expect("the first").bytes,
             vec![1, 2, 3],
             "the bytes come back as they went in, in the order they were given",
         );
         assert!(
-            session.pasted("p404").is_none(),
+            session.image("i404").is_none(),
             "an id nothing was kept under is not invented for",
         );
     }
@@ -961,16 +1210,16 @@ mod tests {
     #[test]
     fn images_that_would_not_fit_are_refused_whole_rather_than_in_part() {
         let session = session();
-        let refused = session.keep_pasted(vec![
-            Pasted {
+        let refused = session.keep_images(vec![
+            HeldImage {
                 name: "Small".to_owned(),
                 mime_type: "image/png".to_owned(),
                 bytes: vec![0; 16],
             },
-            Pasted {
+            HeldImage {
                 name: "Enormous".to_owned(),
                 mime_type: "image/png".to_owned(),
-                bytes: vec![0; PASTED_LIMIT_BYTES],
+                bytes: vec![0; IMAGE_LIMIT_BYTES],
             },
         ]);
         assert_eq!(
@@ -979,7 +1228,7 @@ mod tests {
             "it says how much is already held, which is nothing",
         );
         assert!(
-            session.pasted("p0").is_none(),
+            session.image("i0").is_none(),
             "and the one that would have fitted was not kept either — they are \
              one message, and half of it is not a message",
         );

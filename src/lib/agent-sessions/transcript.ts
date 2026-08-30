@@ -40,6 +40,7 @@
 import type {
   PastedImage,
   PermissionRequest,
+  SentImage,
   SessionEvent,
   SessionStatus,
 } from "./client";
@@ -90,6 +91,26 @@ export type Entry =
       readonly lastAt: number;
       readonly voice: "thought";
       readonly text: string;
+    }
+  /**
+   * A picture the agent answered with.
+   *
+   * Its own block rather than something hung off the message beside it, and for
+   * the same reason a tool call is: the agent went and made something, and the
+   * text before it and the text after it are two different things to say. It
+   * also has to fold identically live and on a replay — an agent sends the
+   * picture in the same run of chunks either way — and a block that joined the
+   * open message would put it in a different place depending on how fast the
+   * chunk before it arrived.
+   */
+  | {
+      readonly id: string;
+      readonly at: number;
+      readonly voice: "picture";
+      /** What the session holds the bytes under, or `null` when it could not. */
+      readonly imageId: string | null;
+      readonly mimeType: string;
+      readonly bytes: number;
     }
   /** A tool the agent ran. */
   | {
@@ -350,9 +371,12 @@ function applyUpdate(draft: Draft, event: Extract<SessionEvent, { kind: "update"
       return;
     }
     case "agent_message_chunk":
+      // A chunk carries one content block, and it is a picture or it is words.
+      if (pictureOf(draft, payload.content, event.atMs, id)) return;
       appendChunk(draft, "agent", textOf(payload.content), event.atMs, id);
       return;
     case "agent_thought_chunk":
+      if (pictureOf(draft, payload.content, event.atMs, id)) return;
       appendChunk(draft, "thought", textOf(payload.content), event.atMs, id);
       return;
     case "tool_call":
@@ -470,6 +494,29 @@ function lastSpokenAt(transcript: Transcript): number {
   const last = transcript.entries.at(-1);
   if (last === undefined) return 0;
   return last.voice === "agent" || last.voice === "thought" ? last.lastAt : last.at;
+}
+
+/**
+ * Pushes a block for a picture, and says whether the content was one.
+ *
+ * The bytes are already gone by the time this runs — the host moved them into
+ * the session and left the id in their place — so what is folded here is a
+ * pointer and a size, and the picture is fetched when something draws it.
+ */
+function pictureOf(draft: Draft, content: unknown, at: number, id: string): boolean {
+  if (typeof content !== "object" || content === null) return false;
+  const block = content as Record<string, unknown>;
+  if (block.type !== "image") return false;
+  const sent = block as unknown as SentImage;
+  push(draft, {
+    id,
+    at,
+    voice: "picture",
+    imageId: typeof sent.imageId === "string" ? sent.imageId : null,
+    mimeType: typeof sent.mimeType === "string" ? sent.mimeType : "image/png",
+    bytes: typeof sent.bytes === "number" ? sent.bytes : 0,
+  });
+  return true;
 }
 
 /** The text of an ACP content block, for the kinds that carry any. */

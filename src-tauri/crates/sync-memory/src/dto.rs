@@ -535,6 +535,45 @@ pub struct InstalledExtension {
     /// a shared record it is noise at best.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    /// What this extension offers an agent to call, as it declared them.
+    ///
+    /// Here for the reason [`InstalledExtension::prompt`] is, and it is the
+    /// same reason twice: the MCP server is a process with no view of the
+    /// catalogue, so a declaration that stayed in the window would be one only
+    /// the window could read. The manifest is on this machine; the project
+    /// travels, and what an agent may call has to travel with it.
+    ///
+    /// The package's own name for the function behind a tool is deliberately
+    /// not here. It is how the package finds its own code, it changes when the
+    /// author renames something, and nothing outside that package can do
+    /// anything with it — what travels is what an agent is told.
+    ///
+    /// Rewritten when the build and the record disagree, the way the prompt is.
+    /// Empty for the extensions that offer none, which is most of them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tools: Vec<ToolDeclaration>,
+}
+
+/// One tool an extension offers an agent, as the project records it.
+///
+/// Three members, and each is read by something that cannot ask for it twice:
+/// the name is what a call carries, the description is the whole of what the
+/// decision to call it is made on, and the schema is what the arguments are
+/// checked against.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolDeclaration {
+    /// What an agent calls it, without the extension's id in front of it.
+    pub name: String,
+    pub description: String,
+    /// The shape of what it takes, as JSON Schema, carried whole.
+    ///
+    /// Never interpreted on the way through: what an argument means is the
+    /// package's business, and a layer between that read one would be a second
+    /// opinion about somebody else's schema. Absent is a tool that takes
+    /// nothing, which is an ordinary tool.
+    #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
+    pub input: serde_json::Value,
 }
 
 /// An entity on its way from the interface into memory.
@@ -605,5 +644,85 @@ impl From<EntityInput> for crate::mapping::Entity {
             folder: input.folder,
             is_folder: input.is_folder,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    // A test that cannot set itself up has failed, and panicking is the
+    // shortest true way to say so.
+    #![allow(clippy::expect_used)]
+
+    use super::*;
+    use serde_json::json;
+
+    /// **What a declaration is worth is what survives the round trip.** The
+    /// end-to-end version of this runs a real engine and is skipped on a
+    /// machine that has not built one; this is the half that can be checked in
+    /// milliseconds, and it is the half that catches the ordinary mistake — a
+    /// member renamed on one side of the boundary and read by its old name on
+    /// the other, which crosses as nothing and reports nothing.
+    #[test]
+    fn a_tool_declaration_survives_the_round_trip_under_the_names_it_crosses_by() {
+        let written = InstalledExtension {
+            id: "acme.tracker".to_owned(),
+            version: "1.2.0".to_owned(),
+            prompt: None,
+            integrity: None,
+            source: None,
+            tools: vec![ToolDeclaration {
+                name: "search_tickets".to_owned(),
+                description: "Finds tickets by their words".to_owned(),
+                input: json!({"type": "object", "properties": {"words": {"type": "string"}}}),
+            }],
+        };
+
+        let crossing = serde_json::to_value(&written).expect("it serialises");
+        assert_eq!(
+            crossing["tools"][0]["name"], "search_tickets",
+            "the names on the wire are the ones the other side reads: {crossing}"
+        );
+        assert_eq!(
+            crossing["tools"][0]["description"],
+            "Finds tickets by their words"
+        );
+        assert_eq!(
+            crossing["tools"][0]["input"]["properties"]["words"]["type"], "string",
+            "the schema crosses whole, to the depth the package wrote it: {crossing}"
+        );
+
+        let read: InstalledExtension = serde_json::from_value(crossing).expect("it reads back");
+        assert_eq!(read.tools, written.tools);
+    }
+
+    /// An extension that offers none writes none — not an empty list, which a
+    /// reader would have to know to treat as an absence.
+    #[test]
+    fn an_extension_that_offers_no_tools_writes_nothing_about_them() {
+        let bare = InstalledExtension {
+            id: "records".to_owned(),
+            version: "1.0.1".to_owned(),
+            prompt: None,
+            integrity: None,
+            source: None,
+            tools: Vec::new(),
+        };
+
+        let crossing = serde_json::to_value(&bare).expect("it serialises");
+
+        assert!(
+            crossing.get("tools").is_none(),
+            "nothing to say is said by saying nothing: {crossing}"
+        );
+    }
+
+    /// And a record written before any of this existed still reads.
+    #[test]
+    fn a_declaration_from_before_tools_existed_reads_as_offering_none() {
+        let older = json!({"id": "records", "version": "1.0.0"});
+
+        let read: InstalledExtension = serde_json::from_value(older).expect("it reads back");
+
+        assert!(read.tools.is_empty());
     }
 }

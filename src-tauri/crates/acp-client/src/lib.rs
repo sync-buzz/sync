@@ -68,4 +68,6 @@ pub use handler::ClientHandler;
 pub use launch::{AgentProcess, SpawnOptions};
 pub use registry::{AcpMode, AgentLaunchSpec, ModelPin, Verification};
 pub use tool_names::{McpToolName, McpToolNaming};
-pub use update::{SessionUpdateEvent, SessionUpdatePayload, UnrecognizedUpdate};
+pub use update::{
+    decode_session_update, SessionUpdateEvent, SessionUpdatePayload, UnrecognizedUpdate,
+};

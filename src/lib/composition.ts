@@ -27,7 +27,7 @@ import {
 } from "@/lib/memory/client";
 import { explain } from "@/lib/memory/use-corpus";
 import { saveProjectSettings } from "@/lib/project/client";
-import type { OpenProject } from "@/lib/project/types";
+import type { OpenProject, ToolDeclaration } from "@/lib/project/types";
 
 /**
  * What a project is composed of, and how that changes.
@@ -113,6 +113,15 @@ interface Resolved {
   readonly source: string | undefined;
   readonly types: readonly ExtensionTypeInput[];
   readonly prompt: string | undefined;
+  /**
+   * What it offers an agent, as the record carries them.
+   *
+   * The manifest's `handler` is dropped here rather than in the record: it is
+   * the package's own name for one of its functions, it changes when the author
+   * renames something, and nothing outside the package can act on it. What
+   * travels is what an agent is told.
+   */
+  readonly tools: readonly ToolDeclaration[];
   /** Packages it needs from npm before it works well. */
   readonly npm: readonly string[];
 }
@@ -123,6 +132,7 @@ const NOTHING: Resolved = {
   source: undefined,
   types: [],
   prompt: undefined,
+  tools: [],
   npm: [],
 };
 
@@ -149,8 +159,63 @@ function resolvedOf(packaged: InstalledExtension): Resolved {
     // already written in the shape the engine's command asks for.
     types: packaged.types,
     prompt: packaged.prompt ?? undefined,
+    tools: packaged.manifest.tools.map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      input: tool.input,
+    })),
     npm: packaged.manifest.dependencies.npm,
   };
+}
+
+/**
+ * Whether two sets of declarations say the same thing.
+ *
+ * Compared member by member rather than by serialising both, because `input` is
+ * somebody else's JSON: two schemas that differ only in the order their keys
+ * were written are the same schema, and rewriting the record over that would be
+ * a write on every open for ever. Order within the list does matter — it is the
+ * order an agent is told about them in, and it is the author's.
+ */
+function sameTools(
+  mine: readonly ToolDeclaration[],
+  stored: readonly ToolDeclaration[] | undefined,
+): boolean {
+  const theirs = stored ?? [];
+  return (
+    mine.length === theirs.length &&
+    mine.every(
+      (tool, at) =>
+        tool.name === theirs[at].name &&
+        tool.description === theirs[at].description &&
+        sameShape(tool.input, theirs[at].input),
+    )
+  );
+}
+
+/** Deep equality over what a schema is made of, and nothing more. */
+function sameShape(mine: unknown, theirs: unknown): boolean {
+  if (mine === theirs) return true;
+  if (mine === null || theirs === null) return false;
+  if (typeof mine !== "object" || typeof theirs !== "object") return false;
+  if (Array.isArray(mine) !== Array.isArray(theirs)) return false;
+  if (Array.isArray(mine) && Array.isArray(theirs)) {
+    return (
+      mine.length === theirs.length &&
+      mine.every((one, at) => sameShape(one, theirs[at]))
+    );
+  }
+  const ours = Object.keys(mine as object);
+  const others = Object.keys(theirs as object);
+  return (
+    ours.length === others.length &&
+    ours.every((key) =>
+      sameShape(
+        (mine as Record<string, unknown>)[key],
+        (theirs as Record<string, unknown>)[key],
+      ),
+    )
+  );
 }
 
 /**
@@ -300,14 +365,20 @@ export function useComposition(
   }, [declared, project.path]);
 
   /**
-   * The prompts travel with the project, so this build's have to reach it.
+   * What an agent is told travels with the project, so this build's has to
+   * reach it.
    *
-   * An extension's prompt is written into the project because the agent reads
-   * it through a server that cannot see the catalogue. That copy is the build's
-   * text, not the project's decision, so when the two disagree — the extension
-   * shipped a better one, or this repository was written by an older build —
-   * the build wins and the record is rewritten. Nothing is written when they
-   * agree, which is every open but the first after an update.
+   * A prompt and a set of tool declarations are written into the project
+   * because the agent reads both through a server that cannot see the
+   * catalogue. Those copies are the build's, not the project's decision, so
+   * when the two disagree — the extension shipped a better prompt, renamed a
+   * tool, or this repository was written by an older build — the build wins and
+   * the record is rewritten. Nothing is written when they agree, which is every
+   * open but the first after an update.
+   *
+   * Both in one pass rather than two effects: they come off one manifest and go
+   * into one record, and two writers would mean two saves on the open after an
+   * update that changed both.
    *
    * The version is left exactly as it was. What a project declares is the
    * version somebody installed, and raising it here would be this window
@@ -315,13 +386,14 @@ export function useComposition(
    */
   useEffect(() => {
     const refreshed = project.installed.map((entry) => {
-      const { version, prompt } = resolve(entry.id, packages);
+      const { version, prompt, tools } = resolve(entry.id, packages);
       // Nothing on this machine answers to the id, so there is no text to
       // compare against and the stored one is left exactly as it is. Erasing it
       // would mean opening a project on a machine missing one of its extensions
       // silently took that extension's instructions away from every agent.
       if (version === null) return entry;
-      return prompt === entry.prompt ? entry : { ...entry, prompt };
+      if (prompt === entry.prompt && sameTools(tools, entry.tools)) return entry;
+      return { ...entry, prompt, tools };
     });
     if (refreshed.every((entry, at) => entry === project.installed[at])) return;
 
@@ -421,7 +493,7 @@ export function useComposition(
         void packages.reload();
       }
 
-      const { version, integrity, source, prompt, npm } = resolved;
+      const { version, integrity, source, prompt, tools, npm } = resolved;
       // Nothing on this machine answers to the id, and nothing was offered to
       // fetch. A project cannot declare a version nobody can name, and
       // inventing one would write a lockfile entry for an artefact that does
@@ -432,7 +504,7 @@ export function useComposition(
           ...project,
           installed: [
             ...project.installed,
-            { id, version, prompt, integrity, source },
+            { id, version, prompt, integrity, source, tools },
           ],
         },
         [id],
@@ -478,13 +550,15 @@ export function useComposition(
       setIsBusy(true);
       try {
         const resolved = resolvedOf(await installFromRegistry(to));
-        const { version, integrity, source, prompt, types, npm } = resolved;
+        const { version, integrity, source, prompt, tools, types, npm } = resolved;
         if (version === null) return;
 
         const next = {
           ...project,
           installed: project.installed.map((entry) =>
-            entry.id === id ? { id, version, prompt, integrity, source } : entry,
+            entry.id === id
+              ? { id, version, prompt, integrity, source, tools }
+              : entry,
           ),
         };
 

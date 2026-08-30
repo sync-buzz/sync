@@ -124,6 +124,33 @@ export interface InstalledExtension {
    * belongs to one machine, and in a shared record it is noise at best.
    */
   readonly source?: string;
+  /**
+   * What this extension offers an agent to call, as it declared them.
+   *
+   * Here for the reason `prompt` is: the server an agent reaches is a process
+   * of its own with no view of the catalogue, so a declaration that stayed in
+   * the window would be one only the window could read. Written on install and
+   * rewritten whenever this build's declarations and the stored ones disagree.
+   *
+   * Absent for an extension that offers none, which is most of them.
+   */
+  readonly tools?: readonly ToolDeclaration[];
+}
+
+/** One tool an extension offers an agent, as the project records it. */
+export interface ToolDeclaration {
+  /** What an agent calls it, without the extension's id in front of it. */
+  readonly name: string;
+  /** The whole of what a decision to call it is made on. */
+  readonly description: string;
+  /**
+   * The shape of what it takes, as JSON Schema, carried whole.
+   *
+   * Never read on the way through: what an argument means is the package's
+   * business, and a layer between that had an opinion about it would be a
+   * second opinion about somebody else's schema.
+   */
+  readonly input?: unknown;
 }
 
 /** Whether a repository has been opened as a project before. */

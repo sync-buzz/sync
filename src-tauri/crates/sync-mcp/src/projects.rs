@@ -448,6 +448,15 @@ impl Project {
         }
     }
 
+    /// Where this project is on disk.
+    ///
+    /// Read by the one caller that has to name it to somebody else: a tool call
+    /// travels to the application, which knows projects by their path rather
+    /// than by the key an agent used.
+    pub fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+
     /// Do one thing with this project's memory, off the async runtime's
     /// threads.
     ///

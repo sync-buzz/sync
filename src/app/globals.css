@@ -477,7 +477,18 @@ html[data-vibrancy="on"] body {
 
   body {
     height: 100%;
-    overflow: hidden;
+    /*
+     * `clip` rather than `hidden`, and the difference is the whole of rule 4
+     * in `docs/design-foundation.md` §"Panel roles and priority": a `hidden`
+     * box is still a scrollport and has only lost its bar, so the browser goes
+     * on scrolling it by itself — to bring a caret into view, to reach an
+     * element something called `focus()` on, for any `scrollIntoView` beneath
+     * it. There is no bar to see it happen and the wheel does not reach such a
+     * box, so nothing brings the offset back, and the window sits shifted
+     * until it is reloaded. A `clip` box is not a scrollport at all, which
+     * puts the rule in the platform instead of in every caller.
+     */
+    overflow: clip;
     background-color: var(--surface-window);
     color: var(--text-primary);
     font-family: var(--font-sans);

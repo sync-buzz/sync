@@ -11,7 +11,7 @@
 //! ```
 #![allow(clippy::expect_used)]
 
-use sync_extensions::{Net, net};
+use sync_extensions::{Net, NetRequest, net};
 
 /// The host to read from, and it is the one the Issues package declares.
 const DECLARED: &str = "api.github.com";
@@ -19,6 +19,7 @@ const DECLARED: &str = "api.github.com";
 fn declaring(host: &str) -> Net {
     Net {
         hosts: vec![host.to_owned()],
+        ..Net::default()
     }
 }
 
@@ -32,10 +33,14 @@ fn declaring(host: &str) -> Net {
 #[test]
 #[ignore = "talks to GitHub"]
 fn a_declared_host_answers() {
-    let answer = net::read(
+    let answer = net::fetch(
         "issues",
-        &format!("https://{DECLARED}/repos/rust-lang/rust/issues?state=open&per_page=1"),
+        &NetRequest {
+            url: format!("https://{DECLARED}/repos/rust-lang/rust/issues?state=open&per_page=1"),
+            ..NetRequest::default()
+        },
         &declaring(DECLARED),
+        &std::collections::BTreeMap::new(),
     )
     .expect("api.github.com is reachable");
 
@@ -47,9 +52,25 @@ fn a_declared_host_answers() {
         "GitHub is rate-limiting this machine, so this test cannot say anything"
     );
     assert_eq!(answer.status, 200, "GitHub answered {}", answer.status);
+    assert!(answer.ok, "a 200 is one of the successful ones");
     assert!(
         answer.body.trim_start().starts_with('['),
         "the issues endpoint answers with a list"
+    );
+
+    // The half of the response the unit tests cannot reach either: a real
+    // server's headers, read back under lower-cased names. `content-type` is
+    // the one every API sends, so its absence would mean the map is empty
+    // rather than that GitHub is unusual.
+    assert!(
+        answer.headers.contains_key("content-type"),
+        "a real answer carries headers: {:?}",
+        answer.headers
+    );
+    assert!(
+        answer.url.starts_with(&format!("https://{DECLARED}/")),
+        "the answer says where it came from: {}",
+        answer.url
     );
 }
 
@@ -61,10 +82,14 @@ fn a_declared_host_answers() {
 #[test]
 #[ignore = "talks to GitHub"]
 fn an_undeclared_host_is_refused_before_anything_leaves() {
-    let refusal = net::read(
+    let refusal = net::fetch(
         "issues",
-        &format!("https://{DECLARED}/repos/rust-lang/rust/issues"),
+        &NetRequest {
+            url: format!("https://{DECLARED}/repos/rust-lang/rust/issues"),
+            ..NetRequest::default()
+        },
         &declaring("example.com"),
+        &std::collections::BTreeMap::new(),
     )
     .expect_err("the package declared example.com and asked for GitHub")
     .to_string();

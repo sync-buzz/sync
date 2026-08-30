@@ -49,6 +49,42 @@ pub const SCHEDULE_CAPABILITY: &str = "schedule";
 /// extent, and neither is any use without the other.
 pub const NET_CAPABILITY: &str = "net";
 
+/// The capability a package needs before it may change anything it reaches.
+///
+/// [`NET_CAPABILITY`] is reading something nobody in this window wrote; this is
+/// writing something into somebody else's, and they are two agreements. A
+/// person shown only the first has agreed to a package that watches a tracker,
+/// not to one that files in it under their name.
+///
+/// Declared here and enforced at the call, which is the split `net` itself does
+/// not need: whether a package dials out at all is answerable from the file,
+/// and which verb it uses on a given day is inside its JavaScript. So the card
+/// is honest before anything runs and the door is what refuses.
+pub const NET_WRITE_CAPABILITY: &str = "net.write";
+
+/// Headers the transport writes for itself, which nothing else may.
+///
+/// Named here as well as checked at the door, because a manifest is read long
+/// before a request is made: a package that declared a secret for one of these
+/// is told when it is installed rather than when somebody's morning is spent on
+/// a server answering about something unrelated.
+pub(crate) const THE_TRANSPORT_S: [&str; 4] =
+    ["host", "content-length", "connection", "transfer-encoding"];
+
+/// The capability a package needs before an agent may call into it.
+///
+/// The fourth of the same kind, and a separate agreement from
+/// [`BACKGROUND_CAPABILITY`] for the reason [`SCHEDULE_CAPABILITY`] is one:
+/// running a package's own code is not the same as answering an agent that
+/// spends its context reading what this package says it can do, and then acts
+/// on the answer. A person shown only *this package runs code* would have
+/// agreed to the narrower of the two.
+///
+/// Checked when the manifest is read, because a declared tool is visible in the
+/// file — the same rule `schedule` follows, and the opposite of `work.agent`,
+/// which is only ever visible in built JavaScript.
+pub const AGENT_TOOLS_CAPABILITY: &str = "agent.tools";
+
 /// The manifest format this build reads.
 ///
 /// Bumped when the *shape* changes incompatibly, which is a different question
@@ -103,6 +139,69 @@ pub struct Net {
     /// The hosts, and empty is a package that reaches nothing.
     #[serde(default)]
     pub hosts: Vec<String>,
+    /// Which secret goes to which host, in which header.
+    ///
+    /// **The package names a secret and never holds one.** This is the
+    /// recommended way to use one: the value is put into the request in Rust
+    /// and is never handed to JavaScript, so an author who only has to reach an
+    /// API with a token never touches the token at all — and a package that
+    /// never holds a value has nothing to pass on.
+    ///
+    /// Declared here rather than chosen at the call for the reason the hosts
+    /// are: a person deciding whether to install this is shown which secret
+    /// goes where, and a choice that arrived in an argument would be the
+    /// package deciding after they agreed.
+    #[serde(default)]
+    pub secrets: Vec<Secret>,
+}
+
+/// One secret this package sends, and where it sends it.
+///
+/// Every member is a fact a person is shown before they install: which of their
+/// secrets, to which host, under which name. What is deliberately absent is the
+/// value — it is in the system keychain under this package's own namespace, and
+/// nothing in a manifest could carry one without the manifest becoming a place
+/// secrets live.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Secret {
+    /// Which of [`Net::hosts`] it goes to, and only that one.
+    ///
+    /// Named rather than sent everywhere the package may reach: a token for one
+    /// API arriving at another is how a credential leaks to somebody who never
+    /// asked for it, and a package that legitimately talks to two writes two.
+    pub host: String,
+    /// The header it is written into, `authorization` for almost everything.
+    ///
+    /// Stated rather than fixed, because an API key in `x-api-key` is the same
+    /// arrangement wearing a different name, and a door that only knew one
+    /// spelling would send that author to read the value instead — which is the
+    /// path this exists to make unnecessary.
+    pub header: String,
+    /// What the package calls it in its own corner of the keychain.
+    ///
+    /// The name only. The owner half is the package's id and is composed in
+    /// Rust, so a manifest cannot name somebody else's entry any more than a
+    /// call can.
+    pub secret: String,
+    /// What goes in front of the value, `Bearer` for most of them.
+    ///
+    /// Absent writes the value alone, which is what an API key header wants. A
+    /// scheme rather than a template: `Bearer {}` would be a small language in
+    /// a manifest, and every one of those grows.
+    #[serde(default)]
+    pub scheme: Option<String>,
+}
+
+impl Secret {
+    /// The header value: the scheme, a space, and the secret — or the secret.
+    #[must_use]
+    pub fn header_value(&self, secret: &str) -> String {
+        match &self.scheme {
+            Some(scheme) => format!("{scheme} {secret}"),
+            None => secret.to_owned(),
+        }
+    }
 }
 
 impl Net {
@@ -245,6 +344,65 @@ pub struct Lifecycle {
     /// firing at three in the morning has none of those.
     #[serde(default)]
     pub installed: Option<String>,
+}
+
+impl Lifecycle {
+    /// Every occasion name this build knows, whether or not a package uses one.
+    ///
+    /// Stated as a list as well as resolved by [`Self::handler_for`] because a
+    /// second kind of occasion is resolved *after* these — a tool is called by
+    /// its own name — and a tool called `installed` would be a handler that
+    /// never runs. So the list is what [`Manifest::validate_running_code`]
+    /// refuses a tool name against, and the two are checked against each other
+    /// by a test rather than by whoever adds the next occasion remembering.
+    pub const OCCASIONS: [&'static str; 1] = ["installed"];
+
+    /// The handler one of [`Self::OCCASIONS`] names, if the package named one.
+    #[must_use]
+    pub fn handler_for(&self, occasion: &str) -> Option<&str> {
+        match occasion {
+            "installed" => self.installed.as_deref(),
+            _ => None,
+        }
+    }
+}
+
+/// A handler an agent calls, and what it is told about it before it does.
+///
+/// The third occasion, and the first whose *caller* is not this application:
+/// a clock and an install are things that happen here, and a tool is a name
+/// somebody else says. So everything an agent needs in order to decide to say
+/// it is in this entry — what it is called, what it does, and the shape of what
+/// it takes — and none of it is written by the host, which knows none of it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Tool {
+    /// A name in the package's service module.
+    pub handler: String,
+    /// What an agent calls it, without the package's id in front of it.
+    ///
+    /// Separate from [`Tool::handler`] because they are named for two different
+    /// readers: the handler is the package's own name for one of its functions,
+    /// and this is the sentence-fragment an agent puts in a call. A package that
+    /// wants them the same writes them the same.
+    pub name: String,
+    /// What the tool does, in the author's own words.
+    ///
+    /// **Required, for the reason [`Scheduled::description`] is and one more.**
+    /// A scheduled handler's description is read by a person deciding whether to
+    /// let it run; this one is read by an agent deciding whether to call it, and
+    /// it is the whole of what that decision is made on. A tool with no sentence
+    /// is a tool nothing will ever call correctly.
+    pub description: String,
+    /// The shape of what the tool takes, as a JSON Schema.
+    ///
+    /// Carried whole and never interpreted here. What arguments mean is the
+    /// package's business — every tool it could declare has its own shape, and a
+    /// host that read one would be this build having an opinion about somebody
+    /// else's schema. Empty is a tool that takes nothing, which is an ordinary
+    /// tool rather than an omission.
+    #[serde(default)]
+    pub input: serde_json::Value,
 }
 
 /// A handler the clock calls, and how often it is called.
@@ -420,6 +578,14 @@ pub struct Manifest {
     /// Handlers called because something happened to the package.
     #[serde(default)]
     pub lifecycle: Lifecycle,
+    /// Handlers called because an agent asked for one by name.
+    ///
+    /// A list rather than a map from name to handler, for the reason
+    /// [`Manifest::schedule`] is one: two tools behind one handler is a package
+    /// saying something, and a list shows it as two entries rather than hiding
+    /// it behind a key that can only appear once.
+    #[serde(default)]
+    pub tools: Vec<Tool>,
     /// Handlers called because a clock struck.
     ///
     /// A list rather than a map from handler to interval: the same handler on
@@ -431,6 +597,22 @@ pub struct Manifest {
 }
 
 impl Manifest {
+    /// Whether the package asked for one capability.
+    ///
+    /// A method rather than the search written out wherever it is wanted: this
+    /// build asks the question in seven places across two crates and the window
+    /// half, and a list scanned by hand in seven places is one that will
+    /// eventually be scanned case-insensitively in exactly one of them.
+    ///
+    /// It answers only what was *asked for*. Whether that is enough for what is
+    /// being attempted is the caller's, and deliberately so — the same
+    /// capability means "may run at all" here and "may do this particular
+    /// thing" one layer up.
+    #[must_use]
+    pub fn asks_for(&self, capability: &str) -> bool {
+        self.capabilities.iter().any(|asked| asked == capability)
+    }
+
     /// Reads a manifest and refuses anything this build cannot honour.
     ///
     /// Order matters: the format version is checked before the fields, so an
@@ -480,12 +662,7 @@ impl Manifest {
         // can — but because the capability is what a person is shown before
         // they install anything, and a package whose card said nothing about
         // running code would be running code nobody agreed to.
-        if self.service.is_some()
-            && !self
-                .capabilities
-                .iter()
-                .any(|capability| capability == BACKGROUND_CAPABILITY)
-        {
+        if self.service.is_some() && !self.asks_for(BACKGROUND_CAPABILITY) {
             return Err(ManifestError::Incomplete(format!(
                 "the \"{BACKGROUND_CAPABILITY}\" capability: it ships a service module, and running one is something a person agrees to before it is installed"
             )));
@@ -496,12 +673,7 @@ impl Manifest {
         // code, and `schedule` is agreeing that it runs it while nobody is
         // there. A person shown only the first would have agreed to the
         // narrower of two different things.
-        if !self.schedule.is_empty()
-            && !self
-                .capabilities
-                .iter()
-                .any(|capability| capability == SCHEDULE_CAPABILITY)
-        {
+        if !self.schedule.is_empty() && !self.asks_for(SCHEDULE_CAPABILITY) {
             return Err(ManifestError::Incomplete(format!(
                 "the \"{SCHEDULE_CAPABILITY}\" capability: it asks for the clock, and running on one when no window is open is something a person agrees to before it is installed"
             )));
@@ -513,13 +685,18 @@ impl Manifest {
         // declared, so `background` can only be missing; a host list is the
         // permission itself, so a package can also ask for the network and name
         // nowhere to reach, which is an agreement somebody made for nothing.
-        let asked_for_the_network = self
-            .capabilities
-            .iter()
-            .any(|capability| capability == NET_CAPABILITY);
+        let asked_for_the_network = self.asks_for(NET_CAPABILITY);
         if !self.net.hosts.is_empty() && !asked_for_the_network {
             return Err(ManifestError::Incomplete(format!(
                 "the \"{NET_CAPABILITY}\" capability: it names hosts to reach, and reading something nobody in this window wrote is something a person agrees to before it is installed"
+            )));
+        }
+        // Writing is a wider reading of the same permission rather than a
+        // separate one, so it cannot stand on its own: the list of hosts is
+        // what a write is checked against, and it arrives with `net`.
+        if self.asks_for(NET_WRITE_CAPABILITY) && !asked_for_the_network {
+            return Err(ManifestError::Incomplete(format!(
+                "the \"{NET_CAPABILITY}\" capability: \"{NET_WRITE_CAPABILITY}\" is what it may do where it reaches, and where it reaches is the other one"
             )));
         }
         if asked_for_the_network && self.net.hosts.is_empty() {
@@ -534,6 +711,8 @@ impl Manifest {
                 )));
             }
         }
+
+        self.validate_secrets()?;
 
         for scheduled in &self.schedule {
             // A package that asks for the clock says what it will do on it.
@@ -551,6 +730,129 @@ impl Manifest {
                 return Err(ManifestError::Invalid(format!(
                     "\"{}\" is not how often to run \"{}\": a count and a unit, like \"30m\", \"6h\" or \"1d\" — minutes, hours or days, and at least one of them",
                     scheduled.every, scheduled.handler
+                )));
+            }
+        }
+
+        self.validate_tools()?;
+
+        Ok(())
+    }
+
+    /// Which of this machine's secrets this package sends, and where.
+    ///
+    /// Its own method for the reason [`Self::validate_tools`] is: every rule
+    /// here is about one subject — a value the package will never see going
+    /// somewhere a person agreed to — and each is a refusal that would
+    /// otherwise be met as a request behaving oddly.
+    fn validate_secrets(&self) -> Result<(), ManifestError> {
+        let mut written: Vec<(String, String)> = Vec::new();
+        for sending in &self.net.secrets {
+            // A pair naming somewhere the package may not reach is one nothing
+            // could ever act on, and it would sit on the card telling a person
+            // their token goes somewhere it cannot go.
+            if !self.net.admits(&sending.host) {
+                return Err(ManifestError::Invalid(format!(
+                    "\"{}\" is not a host it reaches, so a secret cannot be sent there: it reaches {}",
+                    sending.host,
+                    if self.net.hosts.is_empty() {
+                        "nothing".to_owned()
+                    } else {
+                        self.net.hosts.join(", ")
+                    }
+                )));
+            }
+            if sending.secret.trim().is_empty() {
+                return Err(ManifestError::Incomplete(format!(
+                    "what the secret it sends to \"{}\" is called: an entry of its own is what the value is looked up under",
+                    sending.host
+                )));
+            }
+            let header = sending.header.trim().to_ascii_lowercase();
+            if header.is_empty() {
+                return Err(ManifestError::Incomplete(format!(
+                    "which header the secret for \"{}\" goes in: `authorization` for almost everything",
+                    sending.host
+                )));
+            }
+            // The four the transport writes for itself, refused here as well as
+            // at the door: a package should hear this when its manifest is
+            // read, not on the first request of somebody else's morning.
+            if THE_TRANSPORT_S.contains(&header.as_str()) {
+                return Err(ManifestError::Invalid(format!(
+                    "\"{}\" is the transport's own header and carries no secret",
+                    sending.header
+                )));
+            }
+            let pair = (sending.host.to_ascii_lowercase(), header);
+            if written.contains(&pair) {
+                return Err(ManifestError::Invalid(format!(
+                    "two secrets are sent to \"{}\" in \"{}\", and only one of them could be",
+                    sending.host, sending.header
+                )));
+            }
+            written.push(pair);
+        }
+
+        Ok(())
+    }
+
+    /// What a package offers an agent, and what it had to ask for first.
+    ///
+    /// Its own method for the reason [`Self::validate_running_code`] is one:
+    /// every rule here is about the same subject — a name somebody outside this
+    /// application says, and what has to be true of it before it can be said.
+    fn validate_tools(&self) -> Result<(), ManifestError> {
+        // A fourth capability, and the same rule a fourth time. `background` is
+        // agreeing that this package runs code; this is agreeing that an agent
+        // is told the package is there and may act through it, which is a
+        // conversation the person who installed it is not part of.
+        if !self.tools.is_empty() && !self.asks_for(AGENT_TOOLS_CAPABILITY) {
+            return Err(ManifestError::Incomplete(format!(
+                "the \"{AGENT_TOOLS_CAPABILITY}\" capability: it offers tools to an agent, and being acted on by one is something a person agrees to before it is installed"
+            )));
+        }
+
+        let mut taken: Vec<&str> = Vec::new();
+        for tool in &self.tools {
+            if !is_tool_name(&tool.name) {
+                return Err(ManifestError::Invalid(format!(
+                    "\"{}\" is not a usable tool name: lowercase letters, digits, hyphens and underscores, starting with a letter — a dot in it would read as the package's id",
+                    tool.name
+                )));
+            }
+            // An occasion is resolved before any tool is, so a tool wearing an
+            // occasion's name is one nothing would ever call. Refused rather
+            // than shadowed: a handler that is never reached and never
+            // complains is the failure this whole file is arranged against.
+            if Lifecycle::OCCASIONS.contains(&tool.name.as_str()) {
+                return Err(ManifestError::Invalid(format!(
+                    "\"{}\" is what this build calls an occasion of its own, so a tool by that name would never be the one called",
+                    tool.name
+                )));
+            }
+            if taken.contains(&tool.name.as_str()) {
+                return Err(ManifestError::Invalid(format!(
+                    "two tools are called \"{}\", and a caller naming it would be naming both",
+                    tool.name
+                )));
+            }
+            taken.push(tool.name.as_str());
+            // Read by an agent and by nobody else, which is why it is required
+            // here and optional on an area: an area has a label beside it, and
+            // a tool has this sentence or nothing at all.
+            if tool.description.trim().is_empty() {
+                return Err(ManifestError::Incomplete(format!(
+                    "what \"{}\" does: an agent decides whether to call a tool on that sentence and on nothing else",
+                    tool.name
+                )));
+            }
+            // Whatever the schema says is the package's business; that it is an
+            // object is this build's, because arguments arrive under names.
+            if !(tool.input.is_null() || tool.input.is_object()) {
+                return Err(ManifestError::Invalid(format!(
+                    "what \"{}\" takes is not a schema: an object, as JSON Schema writes one",
+                    tool.name
                 )));
             }
         }
@@ -702,7 +1004,28 @@ impl Manifest {
         for scheduled in &self.schedule {
             named.push(scheduled.handler.as_str());
         }
+        for tool in &self.tools {
+            named.push(tool.handler.as_str());
+        }
         named
+    }
+
+    /// Which handler an occasion names, if any.
+    ///
+    /// **One resolution for all three occasions**, so that a handler reached by
+    /// a clock, by an install and by an agent is reached through one answer to
+    /// *which function is this*. The occasions this build knows are tried
+    /// first and a tool's own name after them; a tool named after one of them
+    /// is refused when the manifest is read, so the order here decides nothing
+    /// a package could be surprised by.
+    #[must_use]
+    pub fn handler_for(&self, occasion: &str) -> Option<&str> {
+        self.lifecycle.handler_for(occasion).or_else(|| {
+            self.tools
+                .iter()
+                .find(|tool| tool.name == occasion)
+                .map(|tool| tool.handler.as_str())
+        })
     }
 
     /// The kinds this extension may publish, by the rule the store enforces.
@@ -728,6 +1051,29 @@ pub(crate) fn is_identifier(candidate: &str) -> bool {
     }
     candidate.chars().all(|character| {
         character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-'
+    }) && !candidate.ends_with('-')
+}
+
+/// `search`, `create_ticket`, `close-2` — and nothing carrying a dot.
+///
+/// Looser than [`is_identifier`] by one character and stricter by nothing: an
+/// underscore is how a tool name is ordinarily written where an agent reads it,
+/// and an id may not contain one, so the two shapes stay apart. The dot is the
+/// character that matters: a published name is the package's id, a dot and
+/// this, and a dot in here would move where that name splits.
+fn is_tool_name(candidate: &str) -> bool {
+    let mut characters = candidate.chars();
+    let Some(first) = characters.next() else {
+        return false;
+    };
+    if !first.is_ascii_lowercase() {
+        return false;
+    }
+    candidate.chars().all(|character| {
+        character.is_ascii_lowercase()
+            || character.is_ascii_digit()
+            || character == '-'
+            || character == '_'
     }) && !candidate.ends_with('-')
 }
 
@@ -815,6 +1161,75 @@ mod tests {
         )
     }
 
+    /// The whole of what a package needs to work with somebody else's API, read
+    /// as one manifest.
+    ///
+    /// **The parts are tested separately above; this is about them together.**
+    /// A package that signs somebody in, holds the token that comes back,
+    /// refreshes it on a clock and offers an agent a way to use it declares
+    /// five things at once — and the manifest schema published in
+    /// `@sync-buzz/extension-api` has to accept exactly what this accepts, or an
+    /// author's own terminal disagrees with the machine they install on.
+    ///
+    /// That schema is a second statement of this one, in another repository and
+    /// another language. Nothing can check the two mechanically from here, so
+    /// what holds them together is that both are exercised by the same shape:
+    /// this test, and a package built with `sync-ext check`.
+    #[test]
+    fn a_package_that_holds_a_token_and_refreshes_it_is_read_whole() {
+        let manifest = Manifest::parse(
+            minimal(
+                r#", "capabilities": ["background", "schedule", "vault", "net", "net.write", "agent.tools"],
+                   "service": "service/index.js",
+                   "lifecycle": { "installed": "posts.installed" },
+                   "schedule": [{
+                     "handler": "posts.refresh",
+                     "description": "Refreshes the token before it expires",
+                     "every": "6h"
+                   }],
+                   "net": {
+                     "hosts": ["api.example.com"],
+                     "secrets": [{
+                       "host": "api.example.com",
+                       "header": "authorization",
+                       "secret": "token",
+                       "scheme": "Bearer"
+                     }]
+                   },
+                   "tools": [{
+                     "handler": "posts.publish",
+                     "name": "publish_update",
+                     "description": "Publishes a draft",
+                     "input": {"type": "object", "properties": {"text": {"type": "string"}}}
+                   }]"#,
+            )
+            .as_bytes(),
+        )
+        .expect("a package may do all of this at once");
+
+        assert_eq!(manifest.net.hosts, vec!["api.example.com"]);
+        assert_eq!(manifest.net.secrets.len(), 1, "the pair is read");
+        assert_eq!(manifest.net.secrets[0].scheme.as_deref(), Some("Bearer"));
+        assert_eq!(manifest.tools.len(), 1);
+        assert_eq!(manifest.tools[0].name, "publish_update");
+
+        // Every occasion resolves through one answer, and all three are here.
+        assert_eq!(
+            manifest.handler_for("installed"),
+            Some("posts.installed"),
+            "an install"
+        );
+        assert_eq!(
+            manifest.handler_for("publish_update"),
+            Some("posts.publish"),
+            "and a tool, by the name an agent says"
+        );
+        assert!(
+            manifest.handlers().contains(&"posts.refresh"),
+            "and the clock's, which `sync-ext check` reads from the same list"
+        );
+    }
+
     #[test]
     fn a_minimal_manifest_reads() {
         let manifest = Manifest::parse(minimal("").as_bytes()).expect("valid");
@@ -846,6 +1261,313 @@ mod tests {
             manifest.files().contains(&"service/index.js"),
             "a file the hashes do not cover is a file nothing verified"
         );
+    }
+
+    fn sending(pair: &str) -> String {
+        minimal(&format!(
+            r#", "capabilities": ["net"],
+                "net": {{ "hosts": ["api.example.com"], "secrets": [{pair}] }}"#
+        ))
+    }
+
+    /// The whole of a pair, read back as it was written. Every member is one a
+    /// person is shown before they install — which secret, to which host, in
+    /// which header — so a member dropped in parsing is a card that promises
+    /// something other than what happens.
+    #[test]
+    fn a_declared_secret_is_read_whole() {
+        let manifest = Manifest::parse(
+            sending(
+                r#"{ "host": "api.example.com", "header": "authorization",
+                     "secret": "token", "scheme": "Bearer" }"#,
+            )
+            .as_bytes(),
+        )
+        .expect("valid");
+
+        let sending = &manifest.net.secrets[0];
+        assert_eq!(sending.host, "api.example.com");
+        assert_eq!(sending.header, "authorization");
+        assert_eq!(sending.secret, "token");
+        assert_eq!(sending.header_value("s3cret"), "Bearer s3cret");
+    }
+
+    /// No scheme writes the value alone, which is what an API key header wants.
+    #[test]
+    fn a_secret_with_no_scheme_is_the_value_alone() {
+        let manifest = Manifest::parse(
+            sending(r#"{ "host": "api.example.com", "header": "x-api-key", "secret": "key" }"#)
+                .as_bytes(),
+        )
+        .expect("valid");
+
+        assert_eq!(manifest.net.secrets[0].header_value("k3y"), "k3y");
+    }
+
+    /// A pair naming somewhere the package may not reach would sit on the card
+    /// telling a person their token goes where it cannot go.
+    #[test]
+    fn a_secret_for_a_host_it_does_not_reach_is_refused() {
+        let error = Manifest::parse(
+            sending(
+                r#"{ "host": "api.elsewhere.example", "header": "authorization",
+                     "secret": "token" }"#,
+            )
+            .as_bytes(),
+        )
+        .expect_err("it may not reach that host at all");
+        let said = error.to_string();
+        assert!(said.contains("api.elsewhere.example"), "{said}");
+        assert!(
+            said.contains("api.example.com"),
+            "the refusal names what it does reach: {said}"
+        );
+    }
+
+    /// Two secrets in one header at one host is two things one header cannot be.
+    #[test]
+    fn two_secrets_in_one_header_at_one_host_are_refused() {
+        let error = Manifest::parse(
+            sending(
+                r#"{ "host": "api.example.com", "header": "authorization", "secret": "one" },
+                   { "host": "api.example.com", "header": "Authorization", "secret": "two" }"#,
+            )
+            .as_bytes(),
+        )
+        .expect_err("one header cannot carry two secrets");
+        assert!(error.to_string().contains("only one"), "{error}");
+    }
+
+    /// And the transport's own headers carry no secret, said when the file is
+    /// read rather than on somebody's first request.
+    #[test]
+    fn a_secret_in_a_header_the_transport_owns_is_refused() {
+        let error = Manifest::parse(
+            sending(
+                r#"{ "host": "api.example.com", "header": "Content-Length", "secret": "token" }"#,
+            )
+            .as_bytes(),
+        )
+        .expect_err("the transport writes that one");
+        assert!(error.to_string().contains("transport"), "{error}");
+    }
+
+    /// Writing is what a package may do where it reaches, and where it reaches
+    /// comes with the other capability. One without the other is a permission
+    /// with nothing to check it against.
+    #[test]
+    fn writing_without_the_network_is_refused() {
+        let error = Manifest::parse(minimal(r#", "capabilities": ["net.write"]"#).as_bytes())
+            .expect_err("it asks to write and names nowhere to write to");
+        let said = error.to_string();
+        assert!(said.contains("net.write"), "{said}");
+        assert!(
+            said.contains("\"net\""),
+            "the refusal names the capability to add beside it: {said}"
+        );
+    }
+
+    fn with_one_tool(capabilities: &str, tool: &str) -> String {
+        minimal(&format!(
+            r#", "capabilities": {capabilities},
+                "service": "service/index.js",
+                "tools": [{tool}]"#
+        ))
+    }
+
+    /// The whole of a tool declaration, read back as it was written. Every
+    /// member here is one an agent is shown and none of them is the host's to
+    /// invent, so a member dropped in parsing is a tool nobody can call.
+    #[test]
+    fn a_tool_is_read_whole() {
+        let manifest = Manifest::parse(
+            with_one_tool(
+                r#"["background", "agent.tools"]"#,
+                r#"{ "handler": "probe.search", "name": "search",
+                     "description": "Finds a ticket by its words",
+                     "input": { "type": "object",
+                                "properties": { "words": { "type": "string" } } } }"#,
+            )
+            .as_bytes(),
+        )
+        .expect("valid");
+
+        let tool = &manifest.tools[0];
+        assert_eq!(tool.handler, "probe.search");
+        assert_eq!(tool.name, "search");
+        assert_eq!(tool.description, "Finds a ticket by its words");
+        assert_eq!(tool.input["properties"]["words"]["type"], "string");
+        assert!(
+            manifest.handlers().contains(&"probe.search"),
+            "a handler a tool names is one the package has to ship: {:?}",
+            manifest.handlers()
+        );
+    }
+
+    /// The occasion an agent's call resolves to, through the one resolution all
+    /// three occasions go through.
+    #[test]
+    fn a_tool_name_resolves_to_the_handler_behind_it() {
+        let manifest = Manifest::parse(
+            with_one_tool(
+                r#"["background", "agent.tools"]"#,
+                r#"{ "handler": "probe.search", "name": "search", "description": "Finds one" }"#,
+            )
+            .as_bytes(),
+        )
+        .expect("valid");
+
+        assert_eq!(manifest.handler_for("search"), Some("probe.search"));
+        assert_eq!(
+            manifest.handler_for("probe.search"),
+            None,
+            "the handler's own name is the package's, and is not what a caller says"
+        );
+        assert_eq!(
+            manifest.handler_for("nothing-it-declared"),
+            None,
+            "an occasion a package says nothing about is not a failure"
+        );
+    }
+
+    /// Both lists in [`Lifecycle`] say the same thing, and this is what keeps
+    /// them saying it: an occasion added to one and not the other would either
+    /// never resolve or never be refused as a tool name.
+    #[test]
+    fn every_occasion_this_build_knows_is_one_it_resolves() {
+        let lifecycle = Lifecycle {
+            installed: Some("probe.installed".to_string()),
+        };
+        for occasion in Lifecycle::OCCASIONS {
+            assert!(
+                lifecycle.handler_for(occasion).is_some(),
+                "`{occasion}` is named as an occasion and resolves to nothing"
+            );
+        }
+    }
+
+    /// Being acted on by an agent is a different agreement from running code,
+    /// and the card is where it is made.
+    #[test]
+    fn tools_without_the_capability_are_refused() {
+        let error = Manifest::parse(
+            with_one_tool(
+                r#"["background"]"#,
+                r#"{ "handler": "probe.search", "name": "search", "description": "Finds one" }"#,
+            )
+            .as_bytes(),
+        )
+        .expect_err("it offers tools and asked only to run code");
+        let said = error.to_string();
+        assert!(said.contains("agent.tools"), "{said}");
+        assert!(
+            said.contains("agrees to"),
+            "the refusal says why it is a capability rather than an inference: {said}"
+        );
+    }
+
+    /// A tool is a handler by another name, so the rule about shipping the file
+    /// is the one that already exists — and it has to cover this occasion too.
+    #[test]
+    fn a_tool_with_no_service_module_is_refused() {
+        let error = Manifest::parse(
+            minimal(
+                r#", "capabilities": ["background", "agent.tools"],
+                   "tools": [{ "handler": "probe.search", "name": "search",
+                               "description": "Finds one" }]"#,
+            )
+            .as_bytes(),
+        )
+        .expect_err("it names a handler and ships no file to find it in");
+        let said = error.to_string();
+        assert!(said.contains("service module"), "{said}");
+        assert!(
+            said.contains("probe.search"),
+            "the refusal names the handler that has nowhere to live: {said}"
+        );
+    }
+
+    /// The sentence an agent decides on. Without it a tool is a name and a
+    /// schema, which is enough to call it wrongly and nothing else.
+    #[test]
+    fn a_tool_without_a_description_is_refused() {
+        let error = Manifest::parse(
+            with_one_tool(
+                r#"["background", "agent.tools"]"#,
+                r#"{ "handler": "probe.search", "name": "search", "description": "  " }"#,
+            )
+            .as_bytes(),
+        )
+        .expect_err("an agent would have nothing to decide on");
+        let said = error.to_string();
+        assert!(said.contains("search"), "{said}");
+        assert!(
+            said.contains("decides"),
+            "the refusal says who reads the sentence: {said}"
+        );
+    }
+
+    /// A dot is where a published name splits into the package and the tool.
+    #[test]
+    fn a_tool_name_carrying_a_dot_is_refused() {
+        let error = Manifest::parse(
+            with_one_tool(
+                r#"["background", "agent.tools"]"#,
+                r#"{ "handler": "probe.search", "name": "probe.search",
+                     "description": "Finds one" }"#,
+            )
+            .as_bytes(),
+        )
+        .expect_err("a dotted tool name moves where the published name splits");
+        assert!(error.to_string().contains("dot"), "{error}");
+    }
+
+    /// Two tools under one name is one name that answers twice.
+    #[test]
+    fn two_tools_under_one_name_are_refused() {
+        let error = Manifest::parse(
+            with_one_tool(
+                r#"["background", "agent.tools"]"#,
+                r#"{ "handler": "probe.search", "name": "search", "description": "Finds one" },
+                   { "handler": "probe.find", "name": "search", "description": "Finds another" }"#,
+            )
+            .as_bytes(),
+        )
+        .expect_err("one name cannot mean two tools");
+        assert!(error.to_string().contains("two tools"), "{error}");
+    }
+
+    /// An occasion is resolved before any tool, so a tool wearing an occasion's
+    /// name would never be the thing called. Said when the manifest is read
+    /// rather than discovered as a handler that stays silent.
+    #[test]
+    fn a_tool_named_after_an_occasion_is_refused() {
+        let error = Manifest::parse(
+            with_one_tool(
+                r#"["background", "agent.tools"]"#,
+                r#"{ "handler": "probe.installed", "name": "installed",
+                     "description": "Would never be called" }"#,
+            )
+            .as_bytes(),
+        )
+        .expect_err("an occasion resolves first, so this tool is unreachable");
+        assert!(error.to_string().contains("occasion"), "{error}");
+    }
+
+    /// Arguments arrive under names, so the schema is an object or there is
+    /// nothing for a name to be in.
+    #[test]
+    fn a_tool_whose_schema_is_not_an_object_is_refused() {
+        let error = Manifest::parse(
+            with_one_tool(
+                r#"["background", "agent.tools"]"#,
+                r#"{ "handler": "probe.search", "name": "search",
+                     "description": "Finds one", "input": "a string" }"#,
+            )
+            .as_bytes(),
+        )
+        .expect_err("a schema that is not an object holds no named argument");
+        assert!(error.to_string().contains("schema"), "{error}");
     }
 
     /// Running code with nobody watching is something a person agrees to, and

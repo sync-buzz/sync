@@ -41,6 +41,10 @@ const KINDS: &str = "probe-handlers-kinds";
 const SILENT_ORDER: &str = "probe-handlers-silent-order";
 const UNNAMED: &str = "probe-handlers-unnamed";
 const BLANK: &str = "probe-handlers-blank";
+const TOOLED: &str = "probe-handlers-tooled";
+const LOCKED: &str = "probe-handlers-locked";
+const REACHING: &str = "probe-handlers-reaching";
+const WRITING: &str = "probe-handlers-writing";
 
 fn app() -> (App<MockRuntime>, WebviewWindow<MockRuntime>) {
     let app = mock_builder()
@@ -49,6 +53,7 @@ fn app() -> (App<MockRuntime>, WebviewWindow<MockRuntime>) {
         .invoke_handler(tauri::generate_handler![
             sync_lib::extensions::extension_install_folder,
             sync_lib::extensions::extension_forget,
+            sync_lib::extensions::extension_fetch,
             sync_lib::handlers::extension_handler_call,
         ])
         .build(mock_context(noop_assets()))
@@ -117,6 +122,89 @@ fn asking(root: &Path, id: &str, capabilities: &[&str], handlers: &str) {
         .to_string(),
     );
     write(root.join("service/index.js"), handlers);
+}
+
+/// A package that names somewhere to reach, and asks for what it needs to.
+///
+/// Written out rather than threaded through [`asking`] because the host list is
+/// the subject: the permission to dial out is *these hosts*, and a package with
+/// the capability and no list is a different package.
+fn reaching(root: &Path, id: &str, capabilities: &[&str], hosts: &[&str], handlers: &str) {
+    write(
+        root.join("manifest.json"),
+        &json!({
+            "manifestVersion": 1,
+            "id": id,
+            "version": "1.0.0",
+            "name": "Handler probe",
+            "engines": { "syncApi": "^2.0" },
+            "capabilities": capabilities,
+            "net": { "hosts": hosts },
+            "service": "service/index.js",
+            "lifecycle": { "installed": "probe.installed" },
+        })
+        .to_string(),
+    );
+    write(root.join("service/index.js"), handlers);
+}
+
+/// A handler that makes one request and answers with whatever came back.
+///
+/// It `await`s, which is the shape every package writes: the door is typed as a
+/// promise so that the day it genuinely waits — which is the day it reaches the
+/// network — nothing in any package changes.
+fn fetching(request: &str) -> String {
+    format!(
+        r#"
+        export default function register() {{
+          return {{
+            "probe.installed": async () => {{
+              try {{ return {{ answered: JSON.parse(__syncHost__("net.fetch", JSON.stringify({request}))) }}; }}
+              catch (error) {{ return {{ refused: String(error) }}; }}
+            }},
+          }};
+        }}
+        "#
+    )
+}
+
+/// A package that offers one tool to an agent, beside its install handler.
+///
+/// Written out rather than threaded through [`asking`] because the tool is the
+/// subject: what is being checked is that the name in `tools` reaches the
+/// handler behind it, so the two names are deliberately different.
+fn offering_a_tool(root: &Path, id: &str) {
+    write(
+        root.join("manifest.json"),
+        &json!({
+            "manifestVersion": 1,
+            "id": id,
+            "version": "1.0.0",
+            "name": "Handler probe",
+            "engines": { "syncApi": "^2.0" },
+            "capabilities": ["background", "agent.tools"],
+            "service": "service/index.js",
+            "lifecycle": { "installed": "probe.installed" },
+            "tools": [{
+                "handler": "probe.search",
+                "name": "search",
+                "description": "Finds a ticket by its words",
+                "input": { "type": "object", "properties": { "words": { "type": "string" } } },
+            }],
+        })
+        .to_string(),
+    );
+    write(
+        root.join("service/index.js"),
+        r#"
+        export default function register() {
+          return {
+            "probe.installed": () => ({ ran: "installed" }),
+            "probe.search": (payload) => ({ ran: "search", words: payload.words }),
+          };
+        }
+        "#,
+    );
 }
 
 /// A handler that orders work and answers with whatever came back.
@@ -193,7 +281,7 @@ fn every_function_this_build_offers_is_one_it_answers() {
           return {
             "probe.installed": () => {
               const said = {};
-              for (const name of ["memory.record", "memory.list", "memory.content", "work.order", "memory.invented"]) {
+              for (const name of ["memory.record", "memory.list", "memory.content", "work.order", "vault.read", "vault.write", "vault.forget", "net.fetch", "memory.invented"]) {
                 try { __syncHost__(name, JSON.stringify({ key: "k" })); said[name] = "answered"; }
                 catch (error) { said[name] = String(error); }
               }
@@ -216,6 +304,13 @@ fn every_function_this_build_offers_is_one_it_answers() {
         "memory.list",
         "memory.content",
         "work.order",
+        // These four are refused for this package — it asked for neither
+        // capability — and that is the answer being checked: a permission
+        // refusal is not the sentence a name nothing answers gets.
+        "vault.read",
+        "vault.write",
+        "vault.forget",
+        "net.fetch",
     ] {
         let reply = said[offered].as_str().unwrap_or_default();
         assert!(
@@ -234,6 +329,150 @@ fn every_function_this_build_offers_is_one_it_answers() {
     );
 
     invoke(&webview, "extension_forget", json!({ "id": OFFERS })).expect("it is forgotten");
+}
+
+/// Neither door opens for a package that did not ask for it, and the refusal is
+/// one the handler can catch.
+///
+/// **The permission is read off the artefact on this machine.** A call carries
+/// arguments and nothing else, so there is nothing a handler can pass that
+/// changes the answer — which is the whole reason these two live here rather
+/// than in the crate that runs the module.
+#[test]
+fn a_package_that_asked_for_neither_door_is_refused_by_name() {
+    let folder = tempfile::tempdir().expect("a directory");
+    package(
+        folder.path(),
+        LOCKED,
+        r#"
+        export default function register() {
+          return {
+            "probe.installed": () => {
+              const said = {};
+              const asking = {
+                "vault.read": { name: "token" },
+                "vault.write": { name: "token", secret: "kept" },
+                "vault.forget": { name: "token" },
+                "net.fetch": { url: "https://api.example.com/things" },
+              };
+              for (const [name, argument] of Object.entries(asking)) {
+                try { __syncHost__(name, JSON.stringify(argument)); said[name] = "answered"; }
+                catch (error) { said[name] = String(error); }
+              }
+              return said;
+            },
+          };
+        }
+        "#,
+    );
+    let (_app, webview) = app();
+    install(&webview, folder.path());
+
+    let answer =
+        called(&webview, LOCKED, "installed", json!({})).expect("the handler itself did not fail");
+    let said = answer.as_object().expect("an object of answers");
+
+    for (asked, capability) in [
+        ("vault.read", "vault"),
+        ("vault.write", "vault"),
+        ("vault.forget", "vault"),
+        ("net.fetch", "net"),
+    ] {
+        let reply = said[asked].as_str().unwrap_or_default();
+        assert!(
+            reply.contains(&format!("did not ask for the \"{capability}\" capability")),
+            "`{asked}` should name the capability it needed: {reply}"
+        );
+    }
+
+    invoke(&webview, "extension_forget", json!({ "id": LOCKED })).expect("it is forgotten");
+}
+
+/// A host the package did not declare is refused, and refused in the same words
+/// whichever half of the extension asked.
+///
+/// **This is what one implementation buys.** The window's door and a handler's
+/// are the same call with the same list, so a package that hears one sentence
+/// in its screen and a different one from its service module would be a package
+/// debugged as two problems. The two are compared rather than described.
+#[test]
+fn a_host_a_package_did_not_declare_is_refused_the_same_way_from_either_half() {
+    const ELSEWHERE: &str = "https://elsewhere.example.com/things";
+    let folder = tempfile::tempdir().expect("a directory");
+    reaching(
+        folder.path(),
+        REACHING,
+        &["background", "net"],
+        &["api.example.com"],
+        &fetching(&json!({ "url": ELSEWHERE }).to_string()),
+    );
+    let (_app, webview) = app();
+    install(&webview, folder.path());
+
+    let from_a_handler = called(&webview, REACHING, "installed", json!({}))
+        .expect("the handler itself did not fail");
+    let refused = from_a_handler["refused"].as_str().unwrap_or_default();
+
+    let from_the_window = invoke(
+        &webview,
+        "extension_fetch",
+        json!({ "id": REACHING, "request": { "url": ELSEWHERE } }),
+    )
+    .expect_err("the window is refused too");
+    let from_the_window = from_the_window.as_str().unwrap_or_default();
+
+    assert!(
+        refused.contains(from_the_window),
+        "the two halves refuse differently:\n  handler: {refused}\n  window:  {from_the_window}"
+    );
+    assert!(
+        refused.contains("elsewhere.example.com"),
+        "the refusal should name where it would not go: {refused}"
+    );
+
+    invoke(&webview, "extension_forget", json!({ "id": REACHING })).expect("it is forgotten");
+}
+
+/// Reaching a declared host and *changing* something there is a second
+/// agreement, and a handler is held to it exactly as the window is.
+///
+/// The refusal arrives before anything is sent, which is what makes this
+/// testable without a server: the verb is read off the request and the
+/// capability off the manifest, and neither needs the other end to exist.
+#[test]
+fn a_verb_that_changes_something_needs_the_capability_that_says_so() {
+    let folder = tempfile::tempdir().expect("a directory");
+    reaching(
+        folder.path(),
+        WRITING,
+        &["background", "net"],
+        &["api.example.com"],
+        &fetching(
+            &json!({
+                "url": "https://api.example.com/things",
+                "method": "POST",
+                "body": "{}",
+            })
+            .to_string(),
+        ),
+    );
+    let (_app, webview) = app();
+    install(&webview, folder.path());
+
+    let answer =
+        called(&webview, WRITING, "installed", json!({})).expect("the handler itself did not fail");
+    let refused = answer["refused"].as_str().unwrap_or_default();
+
+    assert!(
+        refused.contains("net.write"),
+        "the refusal should name the capability a write needs: {refused}"
+    );
+    assert!(
+        refused.contains("POST"),
+        "and the verb that needed it: {refused}"
+    );
+
+    invoke(&webview, "extension_forget", json!({ "id": WRITING })).expect("it is forgotten");
 }
 
 #[test]
@@ -312,7 +551,7 @@ fn what_a_handler_may_not_do_is_refused_in_words_it_can_catch() {
             export default function register() {
               return {
                 "probe.installed": () => {
-                  try { __syncHost__("net.fetch", "{}"); return { caught: false }; }
+                  try { __syncHost__("filesystem.read", "{}"); return { caught: false }; }
                   catch (error) { return { caught: true, said: String(error) }; }
                 },
               };
@@ -601,4 +840,44 @@ fn an_order_that_does_not_say_what_to_do_if_it_is_interrupted_is_refused() {
     );
 
     invoke(&webview, "extension_forget", json!({ "id": SILENT_ORDER })).expect("it is forgotten");
+}
+
+/// **The third occasion, through the path the other two take.** A tool is named
+/// by whoever calls it, not by this application — so what is checked here is
+/// that the name a package published resolves to the handler behind it, and
+/// that the handler runs with the same runtime, the same limits and the same
+/// host as one a clock or an install reached.
+///
+/// The two names differ on purpose. A tool's name is what an agent says and a
+/// handler's is the package's own name for one of its functions, and a fixture
+/// where they matched would pass whichever of the two the resolution used.
+#[test]
+fn a_tool_is_reached_by_the_name_it_published() {
+    let folder = tempfile::tempdir().expect("a directory");
+    offering_a_tool(folder.path(), TOOLED);
+    let (_app, webview) = app();
+    install(&webview, folder.path());
+
+    let answer = called(&webview, TOOLED, "search", json!({ "words": "a ticket" }))
+        .expect("the tool's handler runs");
+    assert_eq!(
+        answer,
+        json!({ "ran": "search", "words": "a ticket" }),
+        "the tool's own handler answered, and what it returned crosses whole"
+    );
+
+    let by_its_handler = called(&webview, TOOLED, "probe.search", json!({}))
+        .expect("an occasion nothing declares is not a failure");
+    assert!(
+        by_its_handler.is_null(),
+        "the handler's own name is the package's and is not what a caller says: {by_its_handler}"
+    );
+
+    let still_installed = called(&webview, TOOLED, "installed", json!({}))
+        .expect("the occasion that was there before still is");
+    assert_eq!(
+        still_installed,
+        json!({ "ran": "installed" }),
+        "a package gaining a tool does not lose an occasion"
+    );
 }

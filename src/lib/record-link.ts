@@ -39,7 +39,7 @@
  * record somebody else wrote.
  */
 
-import { createContext, useContext } from "react";
+import { createContext, useContext, useMemo } from "react";
 
 /** The scheme that names a record with no file of its own. */
 export const RECORD_SCHEME = "sync";
@@ -274,6 +274,36 @@ export const RecordLinksProvider = Links.Provider;
 
 export function useRecordLinks(): RecordLinks | null {
   return useContext(Links);
+}
+
+/**
+ * Showing one record, for a section that has a reason to point at another.
+ *
+ * The narrow half of what the shell's own bodies follow links with, and it is
+ * narrow deliberately. What a section outside the shell needs is *show this
+ * one*; the rest of that interface is how a body is parsed, where a picture
+ * comes from and how a link is spelled from one record to another, none of
+ * which is a question an area asks and all of which would be a wider agreement
+ * than the one thing it wants.
+ *
+ * The kind travels with the key for the reason an intent carries it: which area
+ * shows a record is decided by its type, and nothing can find that out from a
+ * key without reading the record first.
+ *
+ * `null` where nothing can show anything — the settings window, a test — so a
+ * section leaves the command out rather than drawing one that does nothing.
+ */
+export function useOpenRecord():
+  | ((record: { key: string; kind: string }) => void)
+  | null {
+  const links = useContext(Links);
+  return useMemo(
+    () =>
+      links === null
+        ? null
+        : ({ key, kind }) => links.follow({ at: "record", key, kind }),
+    [links],
+  );
 }
 
 /**

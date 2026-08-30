@@ -193,7 +193,16 @@ Rules the implementation actually enforces:
 3. Space is released before it is claimed, and the layout is applied as one
    atomic operation, so the result never depends on the order in which
    individual panels were resized.
-4. Each panel owns its scrolling. The window itself never scrolls.
+4. Each panel owns its scrolling. The window itself never scrolls, and that is
+   held by how the boxes around a panel are closed rather than by the code
+   drawing inside one: they clip with `overflow: clip` and never with
+   `overflow: hidden`. A hidden box is still a scrollport that has lost its
+   bar, so the browser goes on scrolling it to reveal a caret or reach whatever
+   was focused, and with no bar and no wheel reaching it the offset stays —
+   leaving a column shifted with its foot over empty panel. A clipped box
+   cannot hold an offset at all. A panel's own scroller stops at its end
+   instead of passing the rest of the gesture on, so a flick through a list
+   never moves the surface behind it.
 5. Separators inside the slab are structural edges — one hairline, no shadow,
    no radius, no inset. No column is a floating card: the rounding and the
    shadow belong to the slab as a whole and are stated once, so no arrangement
@@ -377,8 +386,9 @@ Three consequences are stated rather than hidden:
   from producing a third spelling.
 - **`[[wikilinks]]` are unescaped on the way out.** The serialiser escapes a
   leading bracket because a bracket starts a link. That one escape is undone by
-  name, in `src/lib/editor/markdown.ts`, because the corpus and the agents share
-  that syntax and correcting it would be the interface correcting the project.
+  name, in `src/lib/editor/markdown.ts`. The write door refuses that spelling
+  from an agent, but bodies holding it are already stored, and an editor that
+  respelled one on opening would change a record somebody came to read.
 - **A table has commands, and no width.** Rows and columns are what a table is,
   so they are seven commands: four insertions and three removals, on the
   system's own menu on any cell and in `Format ▸ Table` where the keyboard

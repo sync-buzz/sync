@@ -88,6 +88,14 @@ pub struct Remembered {
     /// §6.3).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<super::live::Source>,
+    /// The record the conversation was held under, when it was held under one.
+    ///
+    /// Written from the session for the reason [`Self::source`] is: a dormant
+    /// row and a live one are the same conversation at two moments, and one
+    /// that lost its heading when its agent stopped would move up the list
+    /// under somebody reading it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub about: Option<super::live::About>,
     /// The record it was kept as, when somebody kept it.
     ///
     /// The link is held here rather than in the record because it is the half
@@ -228,6 +236,7 @@ mod tests {
             opened_at_ms: 1_000,
             last_seen_ms: seen,
             source: None,
+            about: None,
             record_key: None,
         }
     }

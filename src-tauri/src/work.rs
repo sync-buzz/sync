@@ -49,7 +49,7 @@ use tauri::{AppHandle, Manager, Runtime};
 
 use crate::project::{ProjectError, configuration_file, write_configuration};
 use crate::sessions::event::now_ms;
-use crate::sessions::live::Source;
+use crate::sessions::live::{About, Source};
 
 /// The file, in this installation's configuration directory.
 const FILE: &str = "ordered-work.json";
@@ -169,9 +169,9 @@ pub struct Ordered {
     pub extension_id: String,
     pub extension_name: String,
     pub handler: String,
-    /// What it was about, as a record key, when the orderer named one.
+    /// What it was about, when the orderer named a record.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub about: Option<String>,
+    pub about: Option<AboutOrder>,
     pub on_interrupted: OnInterrupted,
     /// Whether this order's conversation stands beside the ones before it or in
     /// place of them.
@@ -195,7 +195,50 @@ impl Ordered {
             extension_id: self.extension_id.clone(),
             extension_name: self.extension_name.clone(),
             handler: self.handler.clone(),
-            about: self.about.clone(),
+            about: self.about.as_ref().map(|about| about.key().to_owned()),
+        }
+    }
+}
+
+/// What an order says it is about, in either spelling a package may use.
+///
+/// A record is what a list groups by, so a heading has to be drawable from what
+/// the order carried: the key alone is an address, and an address is not
+/// something a person can read or an area can open — opening one takes the kind
+/// as well, because an area lists records by type and cannot find out which of
+/// its own lists a key belongs in without reading the record first.
+///
+/// The bare key is the older spelling and is still read, both from packages
+/// built against it and from orders already written to this machine's file. It
+/// says which slot the work belongs to and nothing else, so a conversation
+/// ordered with one carries no heading — that is the whole of what the newer
+/// spelling buys, and it is why the older one is accepted rather than refused:
+/// a package that has not been rebuilt goes on working.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum AboutOrder {
+    /// The record, in full: what a heading says and what opening it resolves.
+    Record(About),
+    /// Its key alone.
+    Key(String),
+}
+
+impl AboutOrder {
+    /// The key, which is what a slot is named by whichever spelling was used.
+    #[must_use]
+    pub fn key(&self) -> &str {
+        match self {
+            Self::Record(record) => &record.key,
+            Self::Key(key) => key,
+        }
+    }
+
+    /// The record a heading can be drawn from, when the order carried one.
+    #[must_use]
+    pub fn record(&self) -> Option<About> {
+        match self {
+            Self::Record(record) => Some(record.clone()),
+            Self::Key(_) => None,
         }
     }
 }
@@ -278,7 +321,7 @@ impl Store {
         let mut going = Vec::new();
         held.retain(|entry| {
             let mine = entry.extension_id == extension_id
-                && entry.about.as_deref() == Some(about)
+                && entry.about.as_ref().map(AboutOrder::key) == Some(about)
                 && entry.key != keeping;
             if !mine {
                 return true;
@@ -362,7 +405,7 @@ pub struct Order {
     pub prompt: Prompt,
     pub on_interrupted: OnInterrupted,
     #[serde(default)]
-    pub about: Option<String>,
+    pub about: Option<AboutOrder>,
     /// Whether to keep every conversation this handler orders, or only the most
     /// recent one about the same record. Absent is [`Keep::Each`].
     #[serde(default)]
@@ -436,8 +479,8 @@ pub(crate) fn order<R: Runtime>(
     if order.keep == Keep::Latest
         && !order
             .about
-            .as_deref()
-            .is_some_and(|about| !about.trim().is_empty())
+            .as_ref()
+            .is_some_and(|about| !about.key().trim().is_empty())
     {
         return Err(
             "`keep: \"latest\"` needs `about`: it keeps the most recent conversation about one record, and without a record named there is nothing for it to be the latest of"
@@ -472,6 +515,7 @@ pub(crate) fn order<R: Runtime>(
     // is composed: what one is made of is this module's question, and a second
     // composition somewhere else would answer it differently next year.
     let source = entry.source();
+    let about = entry.about.clone();
     let title = entry.title.clone();
     {
         let _held = work
@@ -500,6 +544,7 @@ pub(crate) fn order<R: Runtime>(
                 title,
                 prompt: order.prompt,
                 source,
+                about,
                 keep,
             },
         )
@@ -526,6 +571,10 @@ struct Run {
     title: String,
     prompt: Prompt,
     source: Source,
+    /// The record this run is under, which the source no longer carries: who
+    /// asked and what it is about are two questions, and the session holds them
+    /// as two fields.
+    about: Option<AboutOrder>,
     keep: Keep,
 }
 
@@ -545,6 +594,7 @@ async fn perform<R: Runtime>(
         title,
         prompt,
         source,
+        about,
         keep,
     } = run;
     let agent = agent.as_str();
@@ -552,10 +602,21 @@ async fn perform<R: Runtime>(
     // Which slot this run belongs to, taken before the source is given to the
     // session. Two borrowed strings rather than a clone of the whole source: it
     // is the pair the slot is named by and nothing else here needs the rest.
-    let slot = (source.extension_id.clone(), source.about.clone());
-    // The session carries the source from the moment it exists, so a window
-    // that opens while the agent is still rising already sees whose it is.
-    let session = crate::sessions::raise_for_work(app, agent, &cwd, source).await?;
+    let slot = (
+        source.extension_id.clone(),
+        about.as_ref().map(|about| about.key().to_owned()),
+    );
+    // The session carries both from the moment it exists, so a window that
+    // opens while the agent is still rising already sees whose it is and which
+    // record it belongs under.
+    let session = crate::sessions::raise_for_work(
+        app,
+        agent,
+        &cwd,
+        source,
+        about.and_then(|about| about.record()),
+    )
+    .await?;
     // Before the turn, because saying something is what writes the pointer, and
     // the pointer records the title. Set afterwards, the name would be right in
     // this run's list and wrong in every later one.
@@ -695,7 +756,7 @@ mod tests {
             extension_id: "routines".to_owned(),
             extension_name: "Routines".to_owned(),
             handler: handler.to_owned(),
-            about: Some(about.to_owned()),
+            about: Some(AboutOrder::Key(about.to_owned())),
             keep: Keep::Latest,
             acp_session: acp.map(ToOwned::to_owned),
             ..entry(key, at)

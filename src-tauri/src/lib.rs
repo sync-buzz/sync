@@ -16,6 +16,7 @@
 //! * Every capability or plugin added here widens the app's attack surface, so
 //!   it is added only when a shipped feature needs it.
 
+pub mod attending;
 pub mod connect;
 #[cfg(target_os = "macos")]
 pub mod dock;
@@ -29,6 +30,7 @@ pub mod sessions;
 pub mod settings;
 pub mod tray;
 pub mod updates;
+pub mod vault;
 pub mod voice;
 pub mod windows;
 pub mod work;
@@ -81,6 +83,10 @@ pub fn run() {
                 // be a product held hostage by whatever else is on that port.
                 eprintln!("the MCP server did not start: {}", error.message);
             }
+            // Held from here rather than from the first window: an agent
+            // calls an extension's tool whether or not anybody has a project
+            // open, and the engine has nowhere to knock.
+            attending::attend(&handle);
             if let Err(error) = tray::install(app) {
                 eprintln!("the menu bar item could not be created: {error}");
             }
@@ -139,6 +145,7 @@ pub fn run() {
             sessions::session_prompt,
             sessions::session_rename,
             sessions::session_image,
+            sessions::session_image_save,
             sessions::session_cancel,
             sessions::session_permission_respond,
             sessions::session_set_option,
@@ -219,6 +226,13 @@ pub fn run() {
             memory::memory_reindex,
             memory::memory_reconcile,
             settings::settings_open,
+            vault::vault_entries,
+            vault::vault_write,
+            vault::vault_forget,
+            vault::vault_storage,
+            vault::extension_secret_read,
+            vault::extension_secret_write,
+            vault::extension_secret_forget,
             voice::voice_status,
             voice::voice_choose,
             voice::voice_speak,

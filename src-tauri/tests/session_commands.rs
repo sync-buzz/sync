@@ -24,7 +24,7 @@
 //! conversation was ordered by an extension.
 
 use serde_json::Value;
-use sync_lib::sessions::live::{Session, Sessions, Source};
+use sync_lib::sessions::live::{About, Session, Sessions, Source};
 use tauri::test::{
     INVOKE_KEY, MockRuntime, get_ipc_response, mock_builder, mock_context, noop_assets,
 };
@@ -67,8 +67,8 @@ fn listed(webview: &WebviewWindow<MockRuntime>) -> Value {
 /// The field step 5 exists for, read back the way the window reads it.
 ///
 /// `src/lib/agent-sessions/client.ts` declares `source?: SessionSource` with
-/// `extension`, `handler` and `about`. These are those names, and nothing but
-/// this run of the real command produces them.
+/// `extension` and `handler`. These are those names, and nothing but this run
+/// of the real command produces them.
 #[test]
 fn a_conversation_an_extension_ordered_says_so_across_the_boundary() {
     let (app, webview) = app();
@@ -85,6 +85,7 @@ fn a_conversation_an_extension_ordered_says_so_across_the_boundary() {
             handler: "issues.poll".to_owned(),
             about: Some("issue-4c1a".to_owned()),
         }),
+        None,
     ));
 
     let rows = listed(&webview);
@@ -99,6 +100,48 @@ fn a_conversation_an_extension_ordered_says_so_across_the_boundary() {
         "and which of that handler's orders it was, which is all three rows of a busy          handler have to tell them apart: {row}"
     );
     assert_eq!(row["source"]["about"], "issue-4c1a", "{row}");
+}
+
+/// What a list groups by, read back the way the window reads it.
+///
+/// Separate from the source above because the two are answers to different
+/// questions and only one of them has a person as an ordinary answer: this is
+/// the case that grouping by who asked cannot see — nobody ordered this
+/// conversation, and it still belongs under a record.
+#[test]
+fn a_conversation_held_under_a_record_says_which_one() {
+    let (app, webview) = app();
+    let sessions = tauri::Manager::state::<Sessions>(&app);
+    sessions.insert(Session::new(
+        sessions.mint_key(),
+        "claude".to_owned(),
+        "Claude Code".to_owned(),
+        std::env::temp_dir(),
+        None,
+        Some(About {
+            key: "task-4c1a".to_owned(),
+            kind: "tasks.task".to_owned(),
+            title: "Support worktrees".to_owned(),
+        }),
+    ));
+
+    let row = listed(&webview)[0].clone();
+    assert_eq!(
+        row["about"]["key"], "task-4c1a",
+        "what the list groups by: {row}"
+    );
+    assert_eq!(
+        row["about"]["kind"], "tasks.task",
+        "and what opening the record from the heading takes, beside the key: {row}"
+    );
+    assert_eq!(
+        row["about"]["title"], "Support worktrees",
+        "and what the heading says, so no corpus is read to draw one: {row}"
+    );
+    assert!(
+        row.get("source").is_none(),
+        "a person opening one from a record is still a person: {row}"
+    );
 }
 
 /// And the ordinary case, which is most of them.
@@ -118,6 +161,7 @@ fn a_conversation_a_person_started_says_nothing_about_a_source() {
         "claude".to_owned(),
         "Claude Code".to_owned(),
         std::env::temp_dir(),
+        None,
         None,
     ));
 
@@ -165,6 +209,7 @@ fn one_list_carries_both_and_they_can_be_told_apart() {
             "Claude Code".to_owned(),
             std::env::temp_dir(),
             source,
+            None,
         ));
     }
 

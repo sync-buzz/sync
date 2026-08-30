@@ -17,12 +17,14 @@
 //! carry `Access-Control-Allow-Origin` or the webview discards a body it has
 //! already received.
 
+use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 
 use serde::Serialize;
 use sync_extensions::{
-    Answer, Archive, Artefact, Fetched, Index, Installed, Ledger, Manifest, NET_CAPABILITY,
-    Pointer, Registry, Source, Store, TypeDefinition, read_prompt, read_types,
+    Archive, Artefact, Fetched, Index, Installed, Ledger, Manifest, NET_CAPABILITY,
+    NET_WRITE_CAPABILITY, NetRequest, NetResponse, Pointer, Registry, Source, Store,
+    TypeDefinition, read_prompt, read_types,
 };
 use tauri::http::{Request, Response, StatusCode};
 use tauri::path::BaseDirectory;
@@ -469,19 +471,72 @@ pub async fn registry_ledger<R: Runtime>(app: AppHandle<R>, id: String) -> Resul
     .map_err(|error| format!("reading the extension's versions did not finish: {error}"))?
 }
 
-/// Reads one URL on behalf of one package, or says why it did not.
+/// The package a call is being made for, or why it may not be made.
+///
+/// **Both answers come off the artefact on this machine and neither is taken
+/// from the caller.** Whether anything here serves that id, and whether the
+/// manifest a person installed asks for the capability the door is behind: a
+/// request that arrived carrying either answer would be an extension granting
+/// itself the permission.
+///
+/// Here rather than inside [`extension_fetch`] because the network is not the
+/// only door. The keychain's is in [`crate::vault`], it asks these same two
+/// questions, and a second copy of them is the copy that stops being asked.
+///
+/// It reads the disk, so every caller is already on the blocking pool.
+pub(crate) fn permitted<R: Runtime>(
+    app: &AppHandle<R>,
+    id: &str,
+    capability: &str,
+) -> Result<Installed, String> {
+    let installed = store(app)?
+        .resolve(id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("Nothing on this machine serves \"{id}\"."))?;
+
+    asked_for(&installed.manifest, id, capability)?;
+    Ok(installed)
+}
+
+/// Whether a manifest already in hand asks for a capability, in words.
+///
+/// The half of [`permitted`] that is left once the package has been resolved,
+/// and it is split out because a handler's host has resolved it already: the
+/// isolate is built from one artefact read at the start of the call, and
+/// resolving it again per call would be a second reading of the same file that
+/// could come back different halfway through a handler.
+///
+/// One function rather than two spellings of the refusal, because the sentence
+/// is the whole of what an author gets: a package that hears different words
+/// from the two halves of the same door will be debugged as two problems.
+///
+/// # Errors
+///
+/// When the manifest does not name the capability.
+pub(crate) fn asked_for(manifest: &Manifest, id: &str, capability: &str) -> Result<(), String> {
+    if !manifest.asks_for(capability) {
+        return Err(format!(
+            "\"{id}\" did not ask for the \"{capability}\" capability, so it does not have it."
+        ));
+    }
+    Ok(())
+}
+
+/// Makes one request on behalf of one package, or says why it did not.
 ///
 /// **The permission is read here, from the manifest on this machine, and never
 /// taken from the caller.** That is the whole of what this command adds over
-/// [`sync_extensions::net::read`]: what a package may reach is a sentence in
+/// [`sync_extensions::net::fetch`]: what a package may reach is a sentence in
 /// the manifest a person installed, so the id is resolved against the store
 /// and the list comes off the artefact. A request that arrived carrying its own
 /// allow-list would be an extension granting itself the permission.
 ///
-/// The capability is checked beside it rather than assumed from the list. A
-/// manifest cannot have one without the other — the crate refuses that pair
-/// when it parses — but the two say different things and an artefact on this
-/// disk was verified before this build ever ran, so both are asked for.
+/// **The second capability is decided here too, and for the reason every
+/// capability that cannot be read off a manifest is.** Whether a package dials
+/// out at all is written in the file; which verb it chooses on a given call is
+/// inside its JavaScript, so the card is honest before anything runs and this
+/// is what refuses. The definition of *changes something* is the door's, so
+/// this layer and the crate cannot come to disagree about which verbs are safe.
 ///
 /// On the blocking pool, for the reason [`registry_index`] is: the client here
 /// is `reqwest::blocking` and dropping its runtime inside an async context is
@@ -490,30 +545,94 @@ pub async fn registry_ledger<R: Runtime>(app: AppHandle<R>, id: String) -> Resul
 pub async fn extension_fetch<R: Runtime>(
     app: AppHandle<R>,
     id: String,
-    url: String,
-) -> Result<Answer, String> {
+    request: NetRequest,
+) -> Result<NetResponse, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let installed = store(&app)?
-            .resolve(&id)
-            .map_err(|error| error.to_string())?
-            .ok_or_else(|| format!("Nothing on this machine serves \"{id}\"."))?;
-
-        if !installed
-            .manifest
-            .capabilities
-            .iter()
-            .any(|capability| capability == NET_CAPABILITY)
-        {
-            return Err(format!(
-                "\"{id}\" did not ask for the network, so it does not have it."
-            ));
-        }
-
-        sync_extensions::net::read(&id, &url, &installed.manifest.net)
-            .map_err(|error| error.to_string())
+        let installed = permitted(&app, &id, NET_CAPABILITY)?;
+        fetch_now(&id, &installed.manifest, &request)
     })
     .await
     .map_err(|error| format!("the request did not finish: {error}"))?
+}
+
+/// One request for one package, for a caller that is already blocking.
+///
+/// **The whole of the door, minus who is allowed to open it.** The verb's own
+/// capability, the secrets the manifest declared, and the request itself: all
+/// three are here, so the window and a service module make the same request
+/// under the same rules rather than under two implementations of them. The one
+/// thing left to the caller is [`NET_CAPABILITY`], because the two halves reach
+/// the manifest by different routes — the window resolves an id, a handler was
+/// built from an artefact already read.
+///
+/// The second capability is decided here for the reason every capability that
+/// cannot be read off a manifest is. Whether a package dials out at all is
+/// written in the file; which verb it chooses on a given call is inside its
+/// JavaScript, so the card is honest before anything runs and this is what
+/// refuses. The definition of *changes something* is the crate's, so this layer
+/// and the door cannot come to disagree about which verbs are safe.
+///
+/// # Errors
+///
+/// When the verb needs a capability the package did not ask for, when a
+/// declared secret cannot be read, or when the request was refused or failed.
+pub(crate) fn fetch_now(
+    id: &str,
+    manifest: &Manifest,
+    request: &NetRequest,
+) -> Result<NetResponse, String> {
+    if request.method.changes_something() {
+        asked_for(manifest, id, NET_WRITE_CAPABILITY).map_err(|_| {
+            format!(
+                "\"{id}\" may read where it reaches and not change anything there: a {} needs the \"{NET_WRITE_CAPABILITY}\" capability, which is what a person agrees to before it is installed",
+                request.method
+            )
+        })?;
+    }
+
+    let sealed = sealed_for(id, &request.url, &manifest.net, |name| {
+        crate::vault::read_for_extension(id, name)
+    })?;
+
+    sync_extensions::net::fetch(id, request, &manifest.net, &sealed)
+        .map_err(|error| error.to_string())
+}
+
+/// The headers this request carries that the package did not write.
+///
+/// **The value is looked up here and goes nowhere else.** It is put into a
+/// header in Rust and never returned, so a package that only has to reach an
+/// API with a token never holds one — which is the whole of what the
+/// declaration buys, and the reason it is the recommended way to use a secret.
+///
+/// Reading is a closure rather than a call, because that is what makes this
+/// testable without a keychain: the failure worth a test is the sentence a
+/// person gets when nothing is stored, and standing up a real entry to see it
+/// would be a test that writes to somebody's login keychain.
+///
+/// An entry that is not there is a refusal and never a request sent without the
+/// header. A silent `401` from somebody else's API is an hour of the wrong
+/// person's time, and the manifest already promised this header would be there.
+fn sealed_for(
+    id: &str,
+    url: &str,
+    allowed: &sync_extensions::Net,
+    read: impl Fn(&str) -> Result<String, String>,
+) -> Result<BTreeMap<String, String>, String> {
+    let mut sealed = BTreeMap::new();
+    for sending in sync_extensions::net::secrets_for(url, allowed) {
+        let value = read(&sending.secret).map_err(|error| {
+            format!(
+                "\"{id}\" sends the secret \"{}\" to {} and it could not be read: {error}",
+                sending.secret, sending.host
+            )
+        })?;
+        sealed.insert(
+            sending.header.to_ascii_lowercase(),
+            sending.header_value(&value),
+        );
+    }
+    Ok(sealed)
 }
 
 /// Points an id back at the artefact it was serving before an update.
@@ -583,6 +702,102 @@ pub async fn extension_install_registry<R: Runtime>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn sending(
+        host: &str,
+        header: &str,
+        secret: &str,
+        scheme: Option<&str>,
+    ) -> sync_extensions::Net {
+        sync_extensions::Net {
+            hosts: vec![host.to_owned()],
+            secrets: vec![sync_extensions::Secret {
+                host: host.to_owned(),
+                header: header.to_owned(),
+                secret: secret.to_owned(),
+                scheme: scheme.map(str::to_owned),
+            }],
+        }
+    }
+
+    /// The value is put into a header here and is not returned to anybody. What
+    /// this can assert is the header it went into and the shape it went in as;
+    /// that it goes no further is the surface's — nothing on it answers with
+    /// one — and the crossing is one function wide.
+    #[test]
+    fn a_declared_secret_becomes_a_header_the_package_never_wrote() {
+        let sealed = sealed_for(
+            "tracker",
+            "https://api.example.com/tickets",
+            &sending("api.example.com", "Authorization", "token", Some("Bearer")),
+            |name| {
+                assert_eq!(name, "token", "the entry the manifest named");
+                Ok("s3cret".to_owned())
+            },
+        )
+        .expect("the secret is read");
+
+        assert_eq!(
+            sealed.get("authorization").map(String::as_str),
+            Some("Bearer s3cret"),
+            "the scheme is written in front of the value: {sealed:?}"
+        );
+    }
+
+    /// An API key wants the value alone, and a manifest that says no scheme
+    /// gets exactly that rather than a space and a guess.
+    #[test]
+    fn a_secret_with_no_scheme_is_written_alone() {
+        let sealed = sealed_for(
+            "tracker",
+            "https://api.example.com/tickets",
+            &sending("api.example.com", "x-api-key", "key", None),
+            |_| Ok("k3y".to_owned()),
+        )
+        .expect("the secret is read");
+
+        assert_eq!(sealed.get("x-api-key").map(String::as_str), Some("k3y"));
+    }
+
+    /// A pair is about one host. A request to another that the package also
+    /// reaches carries nothing, which is what keeps one API's token from
+    /// arriving at another.
+    #[test]
+    fn a_secret_declared_for_one_host_is_not_sent_to_another() {
+        let mut allowed = sending("api.example.com", "authorization", "token", Some("Bearer"));
+        allowed.hosts.push("api.other.example".to_owned());
+
+        let sealed = sealed_for(
+            "tracker",
+            "https://api.other.example/anything",
+            &allowed,
+            |_| panic!("nothing should be read for a host with no pair"),
+        )
+        .expect("a request with no pair carries none");
+
+        assert!(sealed.is_empty(), "{sealed:?}");
+    }
+
+    /// Nothing stored is a refusal in words, not a request sent without the
+    /// header: the manifest promised the header, and a silent 401 from
+    /// somebody else's API is an hour of the wrong person's time.
+    #[test]
+    fn a_secret_that_is_not_there_is_a_refusal_naming_it() {
+        let refused = sealed_for(
+            "tracker",
+            "https://api.example.com/tickets",
+            &sending("api.example.com", "authorization", "token", Some("Bearer")),
+            |_| Err("there is no secret stored under that name".to_owned()),
+        )
+        .expect_err("nothing is stored");
+
+        for said in ["tracker", "token", "api.example.com"] {
+            assert!(
+                refused.contains(said),
+                "the refusal names what to put where: {said} missing from {refused}"
+            );
+        }
+    }
 
     /// The archives in the tree, without Tauri's idea of where resources are.
     ///

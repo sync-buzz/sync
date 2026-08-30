@@ -19,11 +19,12 @@ use rmcp::ServiceExt;
 use rmcp::transport::stdio;
 use serde_json::{Value, json};
 
-mod contributed;
+mod application;
 mod domain;
 mod engine;
 mod host;
 mod http;
+mod link;
 mod own;
 mod projects;
 mod published;
@@ -215,7 +216,13 @@ fn serve_http(
         .enable_all()
         .build()?
         .block_on(async move {
-            let agents = server::SyncMcp::over(std::sync::Arc::clone(&projects));
+            // One channel back, held by both doors: the socket puts Sync's
+            // connection into it and the agents' server takes tool calls out.
+            let application = std::sync::Arc::new(application::Application::new());
+            let agents = server::SyncMcp::over(
+                std::sync::Arc::clone(&projects),
+                std::sync::Arc::clone(&application),
+            );
             let Some(path) = socket else {
                 // No host door asked for: this is a `sync-mcp` somebody started
                 // to serve agents, and the port is the whole of it.
@@ -234,7 +241,9 @@ fn serve_http(
                     eprintln!("the agents' door did not open: {error}");
                 }
             });
-            socket::serve(host, path).await.map_err(Into::into)
+            socket::serve(host, application, path)
+                .await
+                .map_err(Into::into)
         })
 }
 

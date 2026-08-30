@@ -226,6 +226,10 @@ What a handler may call:
   operations `sync-mcp` already curates, not a second vocabulary.
 - **work** — `work.order`: order a piece of work and read the state of one this
   extension ordered. §6.
+- **vault** — `vault.read`, `vault.write` and `vault.forget`: the package's own
+  secrets, in its own namespace and behind one capability. Below.
+- **net** — `net.fetch`: one request against the hosts the manifest declared
+  (`extensions.md` §4), made in Rust.
 - **console** — routed to the host's log rather than to a terminal nobody is
   watching.
 
@@ -236,9 +240,34 @@ fall through.
 
 No filesystem, no process launching, no access to another extension's records,
 and no way to reach the window — a handler that could draw would be a second UI
-path with none of the first one's rules. The network is the window half's, where
-a request is made in Rust against the hosts the manifest declared
-(`extensions.md` §4); a handler does not get one.
+path with none of the first one's rules.
+
+**The last two are the same doors the window half has, not second ones.** A
+tool an agent calls runs with no screen mounted, so a package that could reach
+an API from its own panel and not from its handler would be a package whose
+permissions depended on whether somebody was looking. One implementation
+answers both halves: the same host list, the same secret namespace, the same
+words when either is refused. A second implementation here is what would let
+the two come to disagree, and the disagreement would be about *which hosts* and
+*whose secrets*.
+
+**A secret is never handed to an agent.** Not over MCP, not in the environment
+an agent is started with, not in a prompt, and not in a configuration file Sync
+writes for it. The package is the one participant a value is given to, and what
+it offers an agent is a *function that uses* the secret — sign this, fetch that
+— never the secret itself. Sync does not build the door that would hand one
+over, and an author who builds it themselves has decided to, which is a
+different thing from being handed it ready-made. The recommended path avoids
+holding a value at all: `net.secrets` in the manifest names an entry and Rust
+puts it in the header (`extensions.md` §4).
+
+**A value a handler read does not reach the host's log.** `console` goes
+somewhere that outlives the window, the afternoon and usually the debugging,
+and an author who prints a token while working out why an API said no is
+forgetting rather than abusing anything. The host knows every value it handed
+over, so it takes them back out of what it prints and says where one was. That
+is a mechanism rather than a rule, because a rule here would be advice nobody
+is reading at the moment it matters.
 
 ---
 
@@ -370,12 +399,33 @@ careful. What replaces the mark is a **switch, not a gate** — §5.
 
 ### 4.2 An agent
 
-The same surface reaches agents through `sync-mcp`: ordering work and asking for
-its state are tools on the curated allow-list, and one line of description each,
-which is the whole of what curation means here. An agent that has just read an
-issue can
-order the work that acts on it, and the chain closes with no extension knowing
-another exists.
+An agent calls a tool a package declared, by its full name — `<id>.<tool>`.
+
+**One tool in the catalogue, not one per contribution.** `sync_call` takes the
+name and the arguments; what the project's extensions offer is read on demand,
+from `sync_project` for the names and from `sync_instructions` with the topic
+`extension:<id>` for what each one does and takes. The reason is the agent's
+context: every entry in a catalogue is paid for in tokens by every agent on
+every turn, including the ones that will never call it, so a project with four
+extensions offering three tools each would cost twelve descriptions and twelve
+schemas to an agent that asked about none of them.
+
+The cost of that, named: a client cannot check the arguments before sending
+them, because the schema is not in the catalogue entry. `sync-mcp` holds it
+instead and checks against it, and its refusal names what exists and which topic
+describes it — which is more than a client's own check could have said.
+
+**The body runs in Sync, not in `sync-mcp`.** A tool reaches the keychain, the
+hosts its manifest declared, the artefact on this machine and `work.order`, and
+none of those exist in the engine's process. So the engine decides whether the
+call may be made — the project declares that extension, it offers that tool, the
+arguments fit its schema — and the application runs it, over a channel the
+application holds open from start-up. Sync spawns the engine and outlives it, so
+the call travels back down a connection Sync made rather than to a door of ours.
+
+The wait ends. A tool that has not answered within a minute is refused in words:
+by then the agent's own client has almost certainly abandoned the call, and an
+answer nobody is waiting for holds the machine's one handler at a time.
 
 ### 4.3 Lifecycle
 
@@ -396,13 +446,20 @@ what it does when nobody is watching.
 - `background` — may declare handlers at all. Without it a service module is
   refused rather than ignored.
 - `schedule` — may ask for the clock.
-- `work:agent` — may order work that runs an agent. This is the expensive one
+- `work.agent` — may order work that runs an agent. This is the expensive one
   and it is named separately for that reason: it spends somebody's tokens while
   they are asleep, and the card must say so before install, not after the first
   bill.
-- `net:<host>` — may reach that host, through Rust.
-- `memory.write:<prefix>` — already implied by the kind prefix rule; stated here
-  because a handler writes without a person present.
+- `net` — may reach the hosts the manifest names, through Rust. The list is the
+  permission; the capability without one is refused at parse.
+- `net.write` — may use a verb that changes something where it reaches. Reading
+  somebody's tracker and filing in it are two different agreements, and this is
+  the second (`extensions.md` §4).
+- `vault` — may read, replace and remove secrets in its own namespace. One
+  agreement for all three, because the flow that needs any of them needs the
+  rest: a package that signs somebody in ends up holding a token nobody could
+  have typed, and refreshes it before it expires.
+- `agent.tools` — may offer an agent tools to call.
 
 **Limits are mandatory, not configurable by the package.** A wall-clock timeout
 per call, a memory cap, a ceiling on concurrent handler calls, and one on how
@@ -591,8 +648,8 @@ into the project's memory because it ran.
 What the area looks like is Chat's own business, and it is an extension, so it
 is its author's decision and not this document's.
 
-**As built**, that decision was **a group per ordering extension**, not a caption
-on the row. It was argued the other way first — Login Items names the
+**As built**, that decision was **a group per record the work is under**, not a
+caption on the row. It was argued the other way first — Login Items names the
 responsible application on the row rather than grouping by it, Finder makes
 "Group By" a view option, and Mail keeps the sender as a field — and the
 counter-argument won on one point: **a caption has to be read row by row, a
@@ -600,22 +657,41 @@ heading answers once.** Somebody who set an extension working on five tickets is
 watching five conversations that belong to one thing, which is Notification
 Centre's condition for grouping rather than Login Items'.
 
-Two things make the split safe, and both were paid for before:
+The heading named the *extension* first, and the record is the better answer for
+a reason the extension could not give: **a conversation somebody opened from a
+record has no orderer at all.** Pressing `Send to agent` on a task is a person
+doing it, so there is no source to group by, and every one of those landed in
+the undifferentiated heap — which is most of what a section that hands work to
+an agent produces. A record also says more than the package that ordered it to
+somebody scanning the column, and it is a heading that can be opened.
+
+So a session carries two fields rather than one, and they answer two questions:
+`source` is who asked, `about` is which record the work is under. Only the first
+has a person as an ordinary answer, which is exactly why collapsing them left
+the second unanswerable for the conversations that most needed it.
+
+Three things make the split safe, and two of them were paid for before:
 
 - **Groups are ordered by their newest conversation, and rows within them by
   their own age.** Splitting the list must not cost the one order it always had,
   so "what happened last" is still the top of the top group.
-- **Who asked cannot change.** Chat had two groups once — `Running` and `Not
-  running` — and they were reverted because a conversation changed group the
-  moment it was continued, appearing in one before it left the other. A source is
-  set when the work is ordered and never edited (§6.3), so a row stays where it
-  is. That is the difference between the split that failed and this one.
+- **What a conversation is about cannot change.** Chat had two groups once —
+  `Running` and `Not running` — and they were reverted because a conversation
+  changed group the moment it was continued, appearing in one before it left the
+  other. `about` is set when the conversation is opened and never edited, so a
+  row stays where it is. That is the difference between the split that failed
+  and this one.
+- **A heading is a name, not an address.** `about` carries the record's kind and
+  its title beside the key: the title so a heading is drawn without reading the
+  corpus once per row of a list that is polled every few seconds — the bargain
+  `extension_name` and `agent_name` already make — and the kind because opening
+  a record takes both, since which section shows one is decided by its type.
 
-What nobody ordered stays under `Conversations` and leads. The heading names the
-extension, which is why a source carries `extensionName` beside `extensionId` —
-the same bargain `agent_name` makes in `conversations.json`, so a heading is
-drawn without a catalogue. Nothing on the row repeats it: the group says whose,
-and the title — required of every order for this reason — says which.
+What is under no record stays under `Conversations` and leads. Nothing on the
+row repeats the heading: the group says which record, and the row says which
+agent and how it is getting on. Opening the record is the heading's secondary
+click, because its plain click is spent — it collapses the group, which is what
+a heading in a source list on this system does.
 
 ---
 

@@ -40,6 +40,8 @@ mod common;
 /// below already knew this; the first two did not.
 const CROSSES: &str = "probe-vocabulary";
 const LANDS: &str = "probe-vocabulary-lands";
+const UNASKED: &str = "probe-vocabulary-unasked";
+const READS: &str = "probe-vocabulary-reads";
 
 fn app() -> (App<MockRuntime>, WebviewWindow<MockRuntime>) {
     let app = mock_builder()
@@ -51,6 +53,8 @@ fn app() -> (App<MockRuntime>, WebviewWindow<MockRuntime>) {
             sync_lib::memory::memory_open,
             sync_lib::memory::memory_extension_types_publish,
             sync_lib::memory::memory_types,
+            sync_lib::vault::extension_secret_read,
+            sync_lib::extensions::extension_fetch,
         ])
         .build(mock_context(noop_assets()))
         .expect("the mock application builds");
@@ -146,6 +150,23 @@ fn package(root: &Path, id: &str) {
     write(
         root.join("prompt/instructions.md"),
         "# Write it down\n\nOne claim per record.\n",
+    );
+}
+
+/// A package that reaches one host and asked only to read from it.
+fn reaching(root: &Path, id: &str) {
+    write(
+        root.join("manifest.json"),
+        &json!({
+            "manifestVersion": 1,
+            "id": id,
+            "version": "1.0.0",
+            "name": "Probe vocabulary",
+            "engines": { "syncApi": "^3.0" },
+            "capabilities": ["net"],
+            "net": { "hosts": ["api.example.com"] },
+        })
+        .to_string(),
     );
 }
 
@@ -366,4 +387,103 @@ fn a_stylesheet_crosses_to_the_window_as_a_url() {
     );
 
     invoke(&webview, "extension_forget", json!({ "id": DRAWS })).expect("it is forgotten");
+}
+
+/// **A door a package did not ask for is not a door it has.** The fixture asks
+/// for `records` and nothing else, which is the ordinary case: most packages
+/// never touch a secret, and the one that does says so on the card a person
+/// installs it from.
+///
+/// The refusal has to arrive before the keychain is opened, and this test is
+/// what says so — it runs on a machine whose system would otherwise put up a
+/// dialog and wait for somebody who is not there. What it can assert about that
+/// is the sentence: a refusal naming the package and the capability is one
+/// nothing reached the store to produce.
+#[test]
+fn a_package_that_did_not_ask_for_the_vault_is_refused_by_name() {
+    let folder = tempfile::tempdir().expect("a directory");
+    package(folder.path(), UNASKED);
+    let (_app, webview) = app();
+
+    installed(&webview, folder.path(), UNASKED);
+
+    let refused = invoke(
+        &webview,
+        "extension_secret_read",
+        json!({ "id": UNASKED, "name": "token" }),
+    )
+    .expect_err("a package that did not ask for the vault does not have it");
+
+    let said = refused.as_str().expect("a refusal in words");
+    assert!(
+        said.contains(UNASKED) && said.contains("vault"),
+        "the refusal names the package and the capability to add: {said}"
+    );
+
+    invoke(&webview, "extension_forget", json!({ "id": UNASKED })).expect("it is forgotten");
+}
+
+/// And a package this machine does not serve is named rather than answered.
+///
+/// The other half of the same check, and the reason it is worth its own test:
+/// the id is an argument at the invoke boundary, so what makes it mean anything
+/// is that it is resolved against what is installed here before a namespace is
+/// composed from it.
+#[test]
+fn a_secret_asked_for_under_an_id_nothing_serves_is_refused() {
+    let (_app, webview) = app();
+
+    let refused = invoke(
+        &webview,
+        "extension_secret_read",
+        json!({ "id": "probe-vocabulary-absent", "name": "token" }),
+    )
+    .expect_err("nothing on this machine serves it");
+
+    assert!(
+        refused
+            .as_str()
+            .expect("a refusal in words")
+            .contains("probe-vocabulary-absent"),
+        "the refusal names what was asked for: {refused}"
+    );
+}
+
+/// **Reading where it reaches and changing something there are two
+/// agreements.** This package asked for the first and gets exactly that: a
+/// method that changes something is refused in words that name the capability
+/// its author has to add and the person has to agree to.
+///
+/// The refusal has to arrive before anything leaves the machine, and the shape
+/// of this test is what says so — it runs with no network and names a host that
+/// would answer if one were reached.
+#[test]
+fn a_package_that_may_read_where_it_reaches_may_not_change_anything_there() {
+    let folder = tempfile::tempdir().expect("a directory");
+    reaching(folder.path(), READS);
+    let (_app, webview) = app();
+
+    installed(&webview, folder.path(), READS);
+
+    let refused = invoke(
+        &webview,
+        "extension_fetch",
+        json!({
+            "id": READS,
+            "request": {
+                "url": "https://api.example.com/tickets",
+                "method": "POST",
+                "body": "{}",
+            },
+        }),
+    )
+    .expect_err("it asked to read and this changes something");
+
+    let said = refused.as_str().expect("a refusal in words");
+    assert!(
+        said.contains("net.write") && said.contains("POST"),
+        "the refusal names the verb and the capability to add: {said}"
+    );
+
+    invoke(&webview, "extension_forget", json!({ "id": READS })).expect("it is forgotten");
 }

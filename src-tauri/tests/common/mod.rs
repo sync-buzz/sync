@@ -51,10 +51,18 @@ pub const NO_SIDECAR: &str = "skipping: no sync-mcp binary — build one with `c
 
 /// The sidecar this workspace built, wherever it put it.
 ///
-/// `binaries/` first, because that is the copy a bundle would ship and so the
-/// one worth testing; a release build second and a debug build third, for the
-/// loop where somebody is changing it. The same order `sync-memory`'s
-/// end-to-end tests use, and for the same reason.
+/// **The newest of them, not the first found.** These tests do not build
+/// anything — building this one links the engine and takes minutes, which is
+/// not a cost a test run may impose — so what they can do is refuse to prefer a
+/// binary that is older than one somebody has just made. Ordering by location
+/// was what this did before, and it made a stale release build shadow a debug
+/// build from a minute ago: the suite then tested an engine that had never
+/// heard of the field being added, and said so as a mismatched value rather
+/// than as a stale binary.
+///
+/// A copy in `binaries/` is what a bundle would ship, and it wins ties for that
+/// reason: it is staged deliberately, and the two builds under `target/` are
+/// whatever the last command happened to leave.
 fn built_sidecar() -> Option<PathBuf> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let staged = std::fs::read_dir(root.join("binaries"))
@@ -73,5 +81,10 @@ fn built_sidecar() -> Option<PathBuf> {
             root.join("target/release/sync-mcp"),
             root.join("target/debug/sync-mcp"),
         ])
-        .find(|path| path.is_file())
+        .filter(|path| path.is_file())
+        .max_by_key(|path| {
+            std::fs::metadata(path)
+                .and_then(|about| about.modified())
+                .ok()
+        })
 }

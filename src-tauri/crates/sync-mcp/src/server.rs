@@ -22,7 +22,7 @@ use rmcp::service::RequestContext;
 use rmcp::{ErrorData as McpError, RoleServer};
 use serde_json::{Map, Value, json};
 
-use crate::contributed::Registry;
+use crate::application::Application;
 use crate::projects::{PROJECT_ARGUMENT, Projects};
 use crate::{own, published};
 
@@ -34,12 +34,16 @@ use crate::{own, published};
 #[derive(Clone)]
 pub struct SyncMcp {
     projects: Arc<Projects>,
-    /// The tools extensions contributed to this server.
+    /// Sync, when it is on the other end.
     ///
-    /// Empty, and stays empty until something contributes: the runtime that
-    /// will is a later stage. The door is here so the day it arrives it walks
-    /// through one rather than cuts one — see [`crate::contributed`].
-    contributed: Arc<Registry>,
+    /// What runs an extension's tool: this process decides whether a call may
+    /// be made and the application makes it, because everything a tool's body
+    /// reaches — the keychain, the manifest's host list, the artefact — lives
+    /// there. See [`crate::application`].
+    ///
+    /// Empty for a `sync-mcp` somebody started themselves, and then every tool
+    /// call says so in words rather than hanging.
+    application: Arc<Application>,
 }
 
 /// What every session is told before it does anything.
@@ -91,6 +95,21 @@ Higher wins on conflict; lower fills gaps.
 
 Be proactive: run this unprompted. What is not written down dies with the conversation.
 
+## Name a record, never its key
+
+A key is an address, not a name. `d-3ad25f` tells a reader nothing about what it points \
+at, and nobody reading a sentence can open it. Every answer that hands you a key hands \
+you the title and the kind beside it, so write the name and let the link carry the \
+address:
+
+    [the record's title](sync://<kind>/<key>)
+
+This holds for what you say to a person exactly as much as for what you store — a \
+message is Markdown too, and a bare key in one is a dead end for whoever reads it. \
+Double brackets are not a link: they carry no kind, so nothing can route on one, and \
+`sync_apply` refuses a write that spells a record with them. A key left bare in a code \
+span comes back in the answer instead, with the link to write in its place.
+
 **Never write a secret.** A project's memory travels with its repository. Name where a \
 secret lives, never its value.";
 
@@ -109,7 +128,7 @@ impl SyncMcp {
 
     /// Serve `projects`.
     pub fn new(projects: Projects) -> Self {
-        Self::over(Arc::new(projects))
+        Self::over(Arc::new(projects), Arc::new(Application::new()))
     }
 
     /// Serve projects this process already holds.
@@ -117,10 +136,10 @@ impl SyncMcp {
     /// The door that shares. Where the host channel is open too, both doors are
     /// built over one [`Projects`], so a repository an agent asks about and one
     /// the window has open are the same memory rather than two.
-    pub fn over(projects: Arc<Projects>) -> Self {
+    pub fn over(projects: Arc<Projects>, application: Arc<Application>) -> Self {
         Self {
             projects,
-            contributed: Arc::new(Registry::new()),
+            application,
         }
     }
 
@@ -148,7 +167,6 @@ impl SyncMcp {
         // Sync's Voice page changes what this server publishes, without the
         // sidecar being restarted.
         tools.extend(own::tools(self.may_speak()));
-        tools.extend(self.contributed.tools());
         for tool in &mut tools {
             if tool.name != own::PROJECTS && tool.name != own::SPEAK {
                 require_project(tool);
@@ -186,14 +204,45 @@ impl SyncMcp {
                 "no project answers to `{key}` on this machine"
             )))));
         };
-        let contributed = Arc::clone(&self.contributed);
         let named = key.clone();
+
+        // An extension's tool is the one call that leaves this process, and
+        // the two halves are deliberately not in one `with_domain`. Reading the
+        // project's record needs the engine; running the tool needs the
+        // application and may sit there for twenty seconds waiting on somebody
+        // else's API. Holding this project's memory across that would stop
+        // every other call about the same repository — the window's included —
+        // for the length of a stranger's request.
+        if name == own::CALL {
+            let asked = key.clone();
+            let intent = project
+                .with_domain(move |domain| own::intended(domain, &asked, &arguments))
+                .await?;
+            let call = match intent {
+                Ok(intent) => {
+                    let answer = self
+                        .application
+                        .call(
+                            sync_memory::TOOL_CALL,
+                            json!({
+                                "project": project.path(),
+                                "extension": intent.extension,
+                                "tool": intent.tool,
+                                "arguments": intent.arguments,
+                            }),
+                        )
+                        .await;
+                    crate::engine::as_tool_call(answer)
+                }
+                Err(refused) => crate::engine::as_tool_call(Err(refused)),
+            };
+            return Ok(name_the_project(call, &named));
+        }
+
         let call = project
             .with_domain(move |domain| {
                 if own::is_ours(&name) {
-                    own::call(domain, &contributed, &name, &arguments)
-                } else if contributed.holds(&name) {
-                    crate::engine::as_tool_call(contributed.call(domain, &name, &arguments))
+                    own::call(domain, &name, &arguments)
                 } else {
                     domain.engine_tool(&name, &arguments)
                 }
@@ -271,8 +320,7 @@ impl ServerHandler for SyncMcp {
         let name = request.name.to_string();
         // Refused here rather than in the engine: a tool this server does not
         // publish is not a tool, whatever the engine thinks of the name.
-        if !published::is_published(&name) && !own::is_ours(&name) && !self.contributed.holds(&name)
-        {
+        if !published::is_published(&name) && !own::is_ours(&name) {
             return Err(McpError::invalid_params(
                 format!("no tool named `{name}`"),
                 None,

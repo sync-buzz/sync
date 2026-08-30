@@ -47,7 +47,7 @@ use crate::project::{ProjectError, configuration_file};
 use adapters::AdapterState;
 use catalog::AgentDescriptor;
 use event::{PastedImage, SessionEvent, Status};
-use live::{Pasted, Session, SessionHandler, Sessions, Source};
+use live::{About, HeldImage, Session, SessionHandler, Sessions, Source};
 use remembered::{Remembered, Store};
 
 /// A session as the window lists it — enough to say what is running and to
@@ -81,6 +81,14 @@ pub struct SessionRow {
     /// few that have one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<Source>,
+    /// The record this conversation is being held under, when there is one.
+    ///
+    /// The field a list groups by, and the reason it is here rather than inside
+    /// [`Self::source`]: a conversation somebody opened from a task has no
+    /// orderer and is still about that task. Grouping by who asked leaves every
+    /// one of those in the same undifferentiated heap.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub about: Option<About>,
 }
 
 /// Everything one session has said so far, read in one go.
@@ -200,6 +208,11 @@ pub async fn session_open<R: Runtime>(
     agent_id: String,
     cwd: String,
     model: Option<String>,
+    // The record this conversation is being opened under, when a screen opened
+    // it from one. The window is the only caller that can answer it: a person
+    // pressing `Send to agent` on a task is standing in the task, and nothing
+    // below this line can find that out afterwards.
+    about: Option<About>,
 ) -> Result<OpenedSession, ProjectError> {
     open(
         &app,
@@ -208,6 +221,7 @@ pub async fn session_open<R: Runtime>(
         &PathBuf::from(&cwd),
         model,
         None,
+        about,
     )
     .await
     .map(|(_, opened)| opened)
@@ -232,6 +246,10 @@ async fn open<R: Runtime>(
     // so that a poll landing between the insert and the raise cannot see a row
     // that is briefly nobody's.
     source: Option<Source>,
+    // What it is about, for the same reason and with the same timing: a row
+    // that appeared in the list before it knew which record it belonged to
+    // would be a row that changes group under somebody reading it.
+    about: Option<About>,
 ) -> Result<(Arc<Session>, OpenedSession), ProjectError> {
     let spec = catalog::spec(agent_id)
         .ok_or_else(|| ProjectError::new("agent_unknown", format!("no agent called {agent_id}")))?;
@@ -248,6 +266,7 @@ async fn open<R: Runtime>(
         spec.display_name.replace('`', ""),
         cwd.to_path_buf(),
         source,
+        about,
     );
     sessions.insert(Arc::clone(&session));
 
@@ -290,9 +309,10 @@ pub(crate) async fn raise_for_work<R: Runtime>(
     agent_id: &str,
     cwd: &std::path::Path,
     source: Source,
+    about: Option<About>,
 ) -> Result<Arc<Session>, ProjectError> {
     let sessions = app.state::<Sessions>();
-    open(app, &sessions, agent_id, cwd, None, Some(source))
+    open(app, &sessions, agent_id, cwd, None, Some(source), about)
         .await
         .map(|(session, _)| session)
 }
@@ -474,6 +494,7 @@ fn remember<R: Runtime>(app: &AppHandle<R>, session: &Arc<Session>) {
             opened_at_ms: session.opened_at_ms,
             last_seen_ms: event::now_ms(),
             source: session.source.clone(),
+            about: session.about.clone(),
             record_key: None,
         },
     );
@@ -605,8 +626,11 @@ pub async fn session_resume<R: Runtime>(
         // Carried by the pointer this resume was read from, which is what
         // makes `docs/background.md` §6.3 true across a restart: the session
         // that was raised for this conversation held its source in memory, and
-        // that memory ended with the process.
+        // that memory ended with the process. The record it is under travels
+        // the same way and for the same reason — a conversation that came back
+        // out of a different group is one somebody has to look for twice.
         held.source.clone(),
+        held.about.clone(),
     );
     // The name it already had. Nothing the agent replays carries one, and a
     // conversation coming back under a different title is a different
@@ -767,7 +791,7 @@ pub async fn session_prompt<R: Runtime>(
         let bytes = BASE64
             .decode(image.data.as_bytes())
             .map_err(|_| ProjectError::new("image_unreadable", "that image could not be read"))?;
-        decoded.push(Pasted {
+        decoded.push(HeldImage {
             name: image.name,
             mime_type: image.mime_type,
             bytes,
@@ -794,7 +818,7 @@ pub async fn session_prompt<R: Runtime>(
         })
         .collect();
 
-    let ids = session.keep_pasted(decoded).map_err(|held| {
+    let ids = session.keep_images(decoded).map_err(|held| {
         // Two different sentences, because they are two different problems. A
         // conversation that is already full is one a person can act on by
         // starting another; one picture too large for an empty conversation is
@@ -803,7 +827,7 @@ pub async fn session_prompt<R: Runtime>(
         let message = if held == 0 {
             format!(
                 "that is larger than the {} of images one conversation may hold",
-                megabytes(live::PASTED_LIMIT_BYTES)
+                megabytes(live::IMAGE_LIMIT_BYTES)
             )
         } else {
             format!(
@@ -953,12 +977,46 @@ pub fn session_image(
     id: String,
 ) -> Result<PastedView, ProjectError> {
     let image = lookup(&sessions, &key)?
-        .pasted(&id)
+        .image(&id)
         .ok_or_else(|| ProjectError::new("image_unknown", "that image is no longer held"))?;
     Ok(PastedView {
         mime_type: image.mime_type,
         data: BASE64.encode(&image.bytes),
     })
+}
+
+/// Writes one of a conversation's pictures to a file somebody chose.
+///
+/// The bytes go from the session straight to the path, and never through the
+/// window: it already has them as base64 to draw with, but base64 is a third
+/// larger and a file written from it would be this application decoding what it
+/// had encoded for a different purpose. What crosses is a path.
+///
+/// The path is not confined to the project. This is somebody saving a picture
+/// they were shown, and the desktop is where that goes; a save panel that
+/// refused everywhere but the repository would be answering a question nobody
+/// asked. It is the panel that chose it, so it is a place they can write.
+///
+/// Nothing is remembered about having done it. A picture saved is a file like
+/// any other from then on, and a conversation that tracked where its pictures
+/// went would be keeping a record of somebody's disk.
+///
+/// # Errors
+///
+/// [`ProjectError`] when the key names no session, the session no longer holds
+/// that picture, or the file cannot be written.
+#[tauri::command(async)]
+pub fn session_image_save(
+    sessions: State<'_, Sessions>,
+    key: String,
+    id: String,
+    path: String,
+) -> Result<(), ProjectError> {
+    let image = lookup(&sessions, &key)?
+        .image(&id)
+        .ok_or_else(|| ProjectError::new("image_unknown", "that image is no longer held"))?;
+    std::fs::write(&path, &image.bytes)
+        .map_err(|error| ProjectError::new("image_unwritable", error.to_string()))
 }
 
 /// A pasted image on its way back out.
@@ -1166,6 +1224,7 @@ fn row(session: &Arc<Session>) -> SessionRow {
         opened_at_ms: session.opened_at_ms,
         accepts_images: session.accepts_images(),
         source: session.source.clone(),
+        about: session.about.clone(),
     }
 }
 
@@ -1330,6 +1389,7 @@ mod tests {
             opened_at_ms: 1234,
             accepts_images: true,
             source: None,
+            about: None,
         };
 
         assert_eq!(
@@ -1365,6 +1425,7 @@ mod tests {
                 handler: "issues.poll".to_owned(),
                 about: Some("issue-4c1a".to_owned()),
             }),
+            about: None,
         };
 
         let json = serde_json::to_value(&row).expect("a row serialises");
@@ -1375,7 +1436,47 @@ mod tests {
             "the name a heading is drawn from, so no catalogue is needed to draw one"
         );
         assert_eq!(json["source"]["handler"], "issues.poll");
-        assert_eq!(json["source"]["about"], "issue-4c1a");
+        assert_eq!(
+            json["source"]["about"], "issue-4c1a",
+            "the key the order named, which is what a package matches its own work by"
+        );
+    }
+
+    /// The other half of the same boundary, and the field a list groups by.
+    ///
+    /// Asserted separately from the source because the two are independent now:
+    /// a conversation somebody opened from a task has no orderer and is still
+    /// about that task, which is the case grouping by who asked cannot see. All
+    /// three members are checked because a heading needs the title, opening the
+    /// record needs the kind, and grouping needs the key — a row missing any
+    /// one of them arrives as `undefined` and the group quietly disappears.
+    #[test]
+    fn a_row_says_which_record_it_is_under() {
+        let row = SessionRow {
+            key: "s2".to_owned(),
+            agent_id: "claude".to_owned(),
+            agent_name: "Claude Code".to_owned(),
+            title: None,
+            cwd: "/tmp/project".to_owned(),
+            status: Status::Working,
+            opened_at_ms: 1234,
+            accepts_images: true,
+            source: None,
+            about: Some(About {
+                key: "task-4c1a".to_owned(),
+                kind: "tasks.task".to_owned(),
+                title: "Support worktrees".to_owned(),
+            }),
+        };
+
+        let json = serde_json::to_value(&row).expect("a row serialises");
+        assert_eq!(json["about"]["key"], "task-4c1a");
+        assert_eq!(json["about"]["kind"], "tasks.task");
+        assert_eq!(json["about"]["title"], "Support worktrees");
+        assert!(
+            json.get("source").is_none(),
+            "and a person opening one from a record is still a person"
+        );
     }
 
     #[test]
@@ -1447,6 +1548,7 @@ mod tests {
             opened_at_ms: 0,
             accepts_images: false,
             source: None,
+            about: None,
         };
 
         // Null rather than absent: the window distinguishes "not named" from

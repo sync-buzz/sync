@@ -4,7 +4,7 @@ members = ["crates/*"]
 # it. Neither belongs in the window's build, and an ordinary `cargo check` here
 # is the window's build — so the sidecar is a member that is not a default one,
 # reached with `-p sync-mcp` when it is the thing being worked on.
-default-members = [".", "crates/sync-memory", "crates/sync-extensions", "crates/sync-handlers", "crates/sync-voice", "crates/acp-client", "crates/agent-bridge"]
+default-members = [".", "crates/sync-memory", "crates/sync-extensions", "crates/sync-handlers", "crates/sync-vault", "crates/sync-voice", "crates/acp-client", "crates/agent-bridge"]
 
 [package]
 name = "sync"
@@ -58,6 +58,11 @@ sync-extensions = { path = "crates/sync-extensions" }
 # neighbours: it takes a module and a name and answers, and everything it is
 # allowed to reach is decided in `handlers.rs`, where the project is known.
 sync-handlers = { path = "crates/sync-handlers" }
+# The keychain, and the only crate in the tree that opens one. Beside the
+# application rather than inside it for the reason its neighbours are: a crate
+# that cannot see the application cannot widen its own reach, so what it may do
+# is decided in `src/vault.rs` and how it is done is decided in the crate.
+sync-vault = { path = "crates/sync-vault" }
 sync-memory = { path = "crates/sync-memory" }
 # What the machine says out loud. Tauri-free like its neighbours: it takes a
 # sentence and says it, and who may ask for one is decided in `voice.rs`, where

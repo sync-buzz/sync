@@ -10,6 +10,7 @@ import type {
   ExtensionHost,
 } from "@/lib/extension-api/contract";
 import { netFor } from "@/lib/extension-api/net";
+import { vaultFor } from "@/lib/extension-api/vault";
 import { refuseIncompatible } from "@/lib/extension-api/version";
 import type {
   InstalledExtension,
@@ -293,7 +294,7 @@ export async function activate(extension: InstalledExtension): Promise<Activatio
 
   let produced: ActivationResult | AreaModule;
   try {
-    produced = loaded.default({ id, net: netFor(id) });
+    produced = loaded.default({ id, net: netFor(id), vault: vaultFor(id) });
   } catch (threw) {
     throw new ActivationFailure(
       id,

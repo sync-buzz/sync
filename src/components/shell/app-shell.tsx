@@ -52,7 +52,11 @@ export function AppShell() {
 
   return (
     <div className="h-full bg-window p-(--window-inset) text-fg">
-      <div className="relative flex h-full flex-col overflow-hidden rounded-(--radius-window) shadow-(--shadow-content)">
+      {/* `clip`, so the slab cannot hold a scroll offset of its own — the same
+          reason `body` is clipped rather than hidden, which `globals.css`
+          states in full: a hidden box goes on being scrolled by the browser,
+          and nothing is left to scroll it back. */}
+      <div className="relative flex h-full flex-col overflow-clip rounded-(--radius-window) shadow-(--shadow-content)">
         <LaunchScreen isLoading={isLoading} />
 
         {project ? (

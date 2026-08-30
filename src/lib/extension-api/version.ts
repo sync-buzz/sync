@@ -40,6 +40,178 @@ import { satisfies, valid, validRange } from "semver";
  * point of the number is that a manifest can state a range and be believed. The
  * cost is honest major bumps, which is the cost of meaning it.
  *
+ * **3.2.0** is the half of an extension with no screen reaching what the half
+ * with one already reaches: `@sync-buzz/extension-api/service` gains `vault`
+ * and `net`, so a handler may read, replace and forget its own secrets and make
+ * a request against the hosts its manifest declared.
+ *
+ * **The number moves although `api:check` says the surface is unchanged**, and
+ * that is the one thing to know about this entry. The service surface is
+ * published as a second file — it is what a handler compiles against, not what
+ * the window does — so API Extractor never sees it and the report never moves.
+ * What decides the number is what a package can name: an author who writes
+ * `import { vault } from "@sync-buzz/extension-api/service"` against a range
+ * that resolves to 3.1.0 gets a contract with no such export. Exports added, so
+ * a minor, and the check that cannot see them is stated here rather than
+ * trusted to be remembered.
+ *
+ * **3.1.0** is what an extension offers an agent, written where an agent can
+ * read it. `InstalledExtension` gains `tools` and `ToolDeclaration` is what one
+ * of them is: the name a call carries, the sentence the decision to call it is
+ * made on, and the schema its arguments are checked against.
+ *
+ * On the record rather than only in the manifest because the two are read by
+ * different processes. A manifest is on the machine that installed the package;
+ * the record travels with the repository, and the server an agent reaches has
+ * no view of the catalogue at all — so a declaration that stayed in the window
+ * would be one only the window could read, which is the same reason `prompt` is
+ * already there.
+ *
+ * The package's own name for the function behind a tool is deliberately absent.
+ * It is how the package finds its own code, it changes when its author renames
+ * something, and nothing outside the package can act on it.
+ *
+ * An optional field and an export added, so a minor.
+ *
+ * **3.0.0** is the network door made whole, and the first major since this
+ * number started. `ExtensionNet.read` is gone; `ExtensionNet.fetch` takes a
+ * `NetRequest` — a URL, a method, headers and a body — and answers a
+ * `NetResponse`, which carries the final URL, the status, `ok`, the response's
+ * headers and the body. `NetAnswer` is gone with `read`, and `net.write` joins
+ * the capability list.
+ *
+ * **Why a major rather than a second method beside the first.** `read(url)` and
+ * `fetch(request)` would have been two ways to make one request, which is how
+ * one of them comes to behave differently from the other; and the older one
+ * would have gone on being the shape an author copied, because it is the
+ * shorter. The surface is small and the number is what a range is stated
+ * against, so paying for the break here is cheaper than carrying a second door
+ * for as long as this package exists.
+ *
+ * **Why this vocabulary.** It is `fetch`'s, narrowed to what crosses a process
+ * boundary, so an author writing against somebody else's API is reading the
+ * same words in our documentation and in theirs. Stated as one object rather
+ * than a URL and an init, because that is the shape that actually crosses:
+ * Rust reads the same members back, and a request has one spelling instead of
+ * one per surface. What `fetch` has and this does not — streams, `Request` and
+ * `Response` objects, `signal`, `credentials`, `mode`, `cache`, `redirect` — is
+ * refused by name when it is passed rather than dropped, so an author hears
+ * about the timeout they thought they set.
+ *
+ * **Why `net.write` is its own capability.** Reading something nobody in this
+ * window wrote and writing something into somebody else's are two things to
+ * agree to, and a card that said only the first would describe the smaller of
+ * them. The line between them is the protocol's: `GET` and `HEAD` are defined
+ * as safe, everything else is defined as being allowed to have an effect. It is
+ * declared in the manifest, so the card is honest before anything runs, and
+ * refused at the call, because which verb a package uses on a given day is
+ * inside its JavaScript.
+ *
+ * **2.17.0** is a tool an agent calls. `agent.tools` joins the capability
+ * list, and a manifest declaring `tools` without it is refused when it is read.
+ *
+ * The list is the whole of the change: what a tool *is* — a handler, the name
+ * it is published under, the sentence it is chosen on and the shape of what it
+ * takes — is written in the manifest and read by the host, and there is nothing
+ * for a package's own code to say about it. The same shape `schedule` has, and
+ * for the same reason: a fact about the package that a person is shown before
+ * anything of it runs belongs in the file they are shown, not in a call.
+ *
+ * A capability added and nothing else, so a minor. Every package stating `^2.0`
+ * goes on installing, and one that offers no tools cannot tell this release
+ * from the last.
+ *
+ * **2.16.0** is a package's own corner of the system keychain.
+ * `ExtensionHost` gains `vault`, `ExtensionVault` is its shape — read, write,
+ * forget — and `vault` joins the capability list.
+ *
+ * Handed over rather than imported, exactly as `net` is, and for a sharper
+ * version of the same reason: the owner half of every entry is the id this
+ * machine resolved, so a package able to pass an id would be a package spelling
+ * somebody else's namespace. There is no function on this surface to call
+ * instead, and nothing to hold for a package that did not ask.
+ *
+ * The three calls are one capability rather than three, because the flow that
+ * needs any of them needs all of them: a package that signs somebody in holds a
+ * token nobody could have typed, replaces it before it expires, and drops it
+ * when they sign out. A choice every author makes the same way is not a choice.
+ *
+ * What the shape cannot say for itself is said in `ExtensionVault`'s own doc
+ * comment, where an author reads it rather than where it is archived: a secret
+ * is never handed to an agent, and this build does not check that.
+ *
+ * A member added to what a host hands over, an export added and a capability
+ * added, so a minor: nothing an existing package names has changed, and one
+ * that never asks for `vault` cannot tell this release from the last.
+ *
+ * **2.15.0** is the record a conversation is being held under. `SessionRow`
+ * and `RememberedConversation` gain `about`, `SessionAbout` is its shape — a
+ * key, a kind and a title — and `openSession` takes one.
+ *
+ * It is beside `source` rather than inside it because the two answer different
+ * questions and only one of them has a person as an ordinary answer. A
+ * conversation somebody opened from a task has no orderer and is still about
+ * that task, so a list grouped by who asked leaves every one of those in one
+ * undifferentiated heap — which is exactly what a section that hands work to an
+ * agent produces most of.
+ *
+ * All three members are on it because a heading needs all three: the key is
+ * what a list groups by, the kind is what opening the record takes beside it,
+ * and the title is what the heading says. The title is a snapshot, so a heading
+ * is drawn without reading the corpus once per row of a list that is polled
+ * every few seconds — the same bargain `extensionName` makes, going stale in
+ * the same direction.
+ *
+ * `SessionSource.about` stays where it is and keeps its meaning: the key the
+ * order named, kept with the rest of the order. Dropping it would narrow
+ * something already returned, which is a major by the table above, and the
+ * number would buy nothing a reader of `about` does not already have.
+ *
+ * `useOpenRecord` comes with it, because a heading naming a record and no way
+ * to reach it is a heading that lies about being one. It is the narrow half of
+ * what the shell's own bodies use: *show this one*, by key and kind, and
+ * nothing about parsing a body, finding a picture or spelling a link. It
+ * answers `null` where nothing can show anything — the settings window, a test
+ * — so a section leaves the command out rather than drawing one that does
+ * nothing.
+ *
+ * Optional fields added, two exports added, and one optional argument on a
+ * call, so a minor: every package stating `^2.0` goes on installing, and one
+ * that never reads `about` cannot tell this release from the last.
+ *
+ * **2.14.0** is a picture the agent answered with. `Entry` gains a `picture`
+ * block and `SentImage` is its shape: a media type, how many bytes it was, and
+ * the id the session holds those bytes under — which is `sessionImage`'s
+ * argument, the same call a pasted picture is already drawn by.
+ *
+ * The bytes are deliberately not in it, and that is the whole design rather
+ * than an economy. A session's history is replayed **whole** to every screen
+ * that comes back to the conversation, so base64 carried in an event is paid
+ * for on every return for as long as the session lives. The host takes it out
+ * of the update as it records it and holds it against the one ceiling a
+ * conversation has for pictures — the same ceiling what was pasted into it
+ * counts against, because an agent asked for twenty pictures in one turn fills
+ * the same conversation a person can. `imageId` is `null` when it would not
+ * fit, and the block stays: a turn that lost its picture entirely is a turn in
+ * which the agent answered with nothing.
+ *
+ * `saveSessionImage` and `imageFileName` come with it, and they exist because
+ * the webview's own image menu cannot be made to work here. WebKit draws `Save
+ * Image` and `Open Image in New Window` on any `img`; the source is a `data:`
+ * URL, saving one needs a download handler the shell does not install, and
+ * opening one is a navigation the content security policy refuses. Both were
+ * measured dead. Two menu items that look like the system offering something
+ * and then do nothing are worse than no menu, so a picture is given a native
+ * menu of its own and this is what its command calls. The bytes are not sent
+ * back to be written: the panel answers with a path and Rust writes what the
+ * session already holds.
+ *
+ * Exports added and a returned shape widened, so a minor by the table above,
+ * exactly as 2.10.0 was. A package that has never heard of `picture` goes on
+ * installing and goes on running: an unknown block falls out of its switch and
+ * draws nothing, which is what it did with the picture before this build, and
+ * what breaks is a compile it will only see when its author next builds it.
+ *
  * **2.13.0** is which repository this project is. `projectRemote` answers with
  * `origin` as git states it, or `null` where there is none.
  *
@@ -304,7 +476,7 @@ import { satisfies, valid, validRange } from "semver";
  * `AreaModule`, `ActivationResult` — arrived in the same commit, which on its
  * own would have been a minor.
  */
-export const SYNC_API_VERSION = "2.13.0" as const;
+export const SYNC_API_VERSION = "3.2.0" as const;
 
 /**
  * What this build can do, as opposed to what its surface looks like.
@@ -343,12 +515,52 @@ export const SYNC_CAPABILITIES = [
    * question a capability exists to answer.
    *
    * Named for what it is rather than for what it will be used for, as
-   * `background` is. It is not a token, not an account, and not writing: the
-   * surface has no header and no body on the way out, so a package that reaches
-   * a private repository is a further agreement rather than a wider reading of
-   * this one.
+   * `background` is. It is reaching and reading, and it is not changing
+   * anything at the other end: that is `net.write`, which is the agreement this
+   * one is deliberately not a wider reading of.
    */
   "net",
+  /**
+   * Changing something where this package reaches, rather than reading it.
+   *
+   * The second half of one permission rather than a permission of its own,
+   * which is why a manifest asking for it without `net` is refused: what a
+   * write is checked against is the list of hosts, and the list arrives with
+   * the other one.
+   *
+   * The line between the two is the protocol's own — `GET` and `HEAD` are
+   * defined as safe and everything else is defined as being allowed to have an
+   * effect — because a verb that is merely usually harmless is not a category
+   * anybody can be asked to agree to. Declared in the manifest so the card can
+   * say it before anything runs, and refused at the call, since which verb a
+   * package chooses on a given day is inside its JavaScript.
+   */
+  "net.write",
+  /**
+   * A package's own corner of the system keychain.
+   *
+   * The promise is a namespace and one door to it. The owner half of every
+   * entry is the id this machine resolved, so a package reads, writes and
+   * forgets its own secrets and has nothing to say about whose — and a build
+   * with nowhere to keep a secret publishes the same `ExtensionHost` type and
+   * refuses every call, which is the question a capability exists to answer.
+   *
+   * Checked when the call is made rather than when the manifest is read, as
+   * `work.agent` is: whether a package touches a secret at all is inside its
+   * built JavaScript, and the file a person installs says nothing about it.
+   *
+   * Reading, writing and forgetting are one agreement rather than three. A
+   * package that signs somebody in holds a token nobody could have typed,
+   * replaces it before it expires and drops it when they sign out; splitting
+   * that into choices nobody makes differently would be three cards saying the
+   * same thing.
+   *
+   * What a package may not do with a value it holds is not in this promise,
+   * because it is not something a promise could hold: a secret is never handed
+   * to an agent, and the reasoning is beside `ExtensionVault`, where the author
+   * who has to keep it reads it.
+   */
+  "vault",
   /**
    * Handlers: code the host calls with no screen mounted.
    *
@@ -395,6 +607,22 @@ export const SYNC_CAPABILITIES = [
    * built module for it, which is the earliest anyone can be told.
    */
   "work.agent",
+  /**
+   * Tools an agent may call, which this package answers.
+   *
+   * The fourth agreement about code that runs with no screen, and the one whose
+   * caller is not this application: `background` is the package running its own
+   * code, `schedule` is running it unattended, `work.agent` is spending money
+   * while somebody sleeps, and this is an agent being told the package is there
+   * and acting through it. A person shown only the first has agreed to
+   * something considerably narrower.
+   *
+   * Checked when the manifest is read rather than when the call is made, as
+   * `schedule` is and unlike `work.agent`: a tool is declared in the file — a
+   * handler, a name, a sentence and a schema — so a package offering one
+   * without asking for this is answerable before anything of it runs.
+   */
+  "agent.tools",
 ] as const;
 
 export type SyncCapability = (typeof SYNC_CAPABILITIES)[number];
