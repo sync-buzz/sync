@@ -50,8 +50,9 @@ use tokio::sync::{mpsc, oneshot};
 /// certainly abandoned the call — so waiting longer produces an answer nobody
 /// is listening for while holding this process's one handler slot.
 ///
-/// A ceiling rather than a policy: what a slow tool should *do* is
-/// `task-c60f38`'s question, and the number moves when that is measured. What
+/// A ceiling rather than a policy. What a slow tool should *do* — wait,
+/// refuse, or hand back something to poll — is a question nobody has measured
+/// against a live client yet, and the number moves when somebody does. What
 /// matters here is that the wait ends, and ends in a sentence.
 const PATIENCE: Duration = Duration::from_secs(60);
 
