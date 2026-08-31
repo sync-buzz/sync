@@ -1,10 +1,10 @@
 {
    "platforms" : {
       "darwin-aarch64" : {
-         "signature" : "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTSHNiQkIrSEkyQ0QvekxCdmNZV0RNZDJ4dUhDc2xrdy9IcFU4dTN2R0hueVJHUnFZT1dwOGFqQUVZaGRxMW5Cb1BOWE5tRG9kY3VpTzNRM2s5ZmxSSzhyekpHcUZqNkEwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4MTgxMDgwCWZpbGU6U3luYy5hcHAudGFyLmd6ClVGdUs1WFI5RmJJSTFxOElmV0hwOE43L3Z2eU1rUzRvVVA3S3ljY0YxWUU4bDlOaVpqVi9tbkJsb2FMeElRS3RWNStkTnIxV01hb2NEd1Y2ZW9xbkJRPT0K",
-         "url" : "https://github.com/sync-buzz/sync/releases/download/v0.10.2/Sync_macOS_aarch64.app.tar.gz"
+         "signature" : "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTSHNiQkIrSEkyQ0R4ak82QWZ6cTJ1dTBmcEllWkpNYjMzcGl4VDEzME81ZGptM2JXa0tIdndyam5DRmxieTRhdWJnVExvRkI3anBWdGFQeVNRSUhndjZZbnpFbVZQTndRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4MTg4MjA3CWZpbGU6U3luYy5hcHAudGFyLmd6CkRUSzhxR0RjU21La1ZZNUliYmVZRVVmaVozbnJBNXE5VzNobUMwK1VaWXpOSzJjZFVQamQ2cTBraUxXMVdHclAxYkc2QmpDRkVTeTVCM0xlVmxqa0NnPT0K",
+         "url" : "https://github.com/sync-buzz/sync/releases/download/v0.10.4/Sync_macOS_aarch64.app.tar.gz"
       }
    },
-   "pub_date" : "2026-08-31T13:02:38Z",
-   "version" : "0.10.2"
+   "pub_date" : "2026-08-31T15:29:32Z",
+   "version" : "0.10.4"
 }
