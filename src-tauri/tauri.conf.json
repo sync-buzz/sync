@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Sync",
-  "version": "0.10.2",
+  "version": "0.10.3",
   "identifier": "buzz.sync",
   "build": {
     "frontendDist": "../out",
