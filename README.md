@@ -2,6 +2,11 @@
 
 ### A desktop environment where agents do the work
 
+[![Latest release](https://img.shields.io/github/v/tag/sync-buzz/sync?label=release)](https://github.com/sync-buzz/sync/releases/latest)
+[![macOS 13+](https://img.shields.io/badge/macOS-13%2B%20Apple%20silicon-black)](#install)
+[![Licence: FSL-1.1-MIT](https://img.shields.io/badge/licence-FSL--1.1--MIT-blue)](./LICENSE)
+[![Extension API](https://img.shields.io/npm/v/%40sync-buzz%2Fextension-api?label=extension%20API)](https://www.npmjs.com/package/@sync-buzz/extension-api)
+
 **What kind of work is up to you.** Sync is a shell. It holds what every kind of
 work needs — projects, the agents that act on them, the permissions those agents
 run under, a clock that keeps going when the window is closed, and a store of
