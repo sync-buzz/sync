@@ -1,3 +1,5 @@
+<div align="center">
+
 # Sync
 
 ### A desktop environment where agents do the work
@@ -6,6 +8,20 @@
 [![macOS 13+](https://img.shields.io/badge/macOS-13%2B%20Apple%20silicon-black)](#install)
 [![Licence: FSL-1.1-MIT](https://img.shields.io/badge/licence-FSL--1.1--MIT-blue)](./LICENSE)
 [![Extension API](https://img.shields.io/npm/v/%40sync-buzz%2Fextension-api?label=extension%20API)](https://www.npmjs.com/package/@sync-buzz/extension-api)
+
+**[⬇&nbsp; Download for macOS](https://github.com/sync-buzz/sync/releases/latest/download/Sync_macOS_aarch64.dmg)**
+· [sync.buzz](https://sync.buzz)
+· [Write an extension](docs/extensions.md)
+· [How it is put together](docs/architecture.md)
+
+</div>
+
+<img src="assets/brand/window-anatomy.png" alt="The Sync window drawn as four labelled columns — the primary sidebar holding the areas a package added, the context navigator holding what belongs to the selected area, the workspace holding the record as the text it is, and the context inspector holding what is true of it. Beneath them: what a project knows is kept in the repository's own Git objects, agents reach it over MCP or are driven from the window over ACP, and every piece of subject matter arrives as a package.">
+
+**Open a folder on your Mac and it becomes a project.** The agent you already
+use works inside it, and everything the project learns is written to that
+folder's own Git repository — where it branches, merges, travels to whoever
+clones it, and belongs to you.
 
 **What kind of work is up to you.** Sync is a shell. It holds what every kind of
 work needs — projects, the agents that act on them, the permissions those agents
@@ -65,39 +81,9 @@ launch is the new version, and the menu bar item offers a restart to anybody who
 would rather not wait. Nothing about that flow is reachable from the window's
 content.
 
-### If you came here looking for the old Sync
-
-A different application used to live at this address. It is preserved,
-unmaintained, at **[sync-buzz/sync-legacy](https://github.com/sync-buzz/sync-legacy)**,
-and its releases are still downloadable there.
-
-**This is not a new version of it.** It is a different application with a
-different data format, and there is no migration — nothing here reads what that
-one wrote. If you are using it, it goes on working exactly as it does today:
-copies in the field will **not** be updated to this, deliberately and by three
-independent mechanisms. The two were signed with different keys, so a build from
-this repository is not merely unwanted by an old copy but unverifiable by it.
-The reasoning is in [docs/releasing.md](docs/releasing.md).
-
-**They do not share settings or data.** The two bundles carry different
-identifiers — `buzz.sync` here, `chat.sync.desktop` there — so macOS treats them
-as separate applications and neither reads the other's configuration directory.
-
-**Installing this one replaces that one.** Both bundle as `Sync.app` and want
-the same path in `/Applications`, so there is no side-by-side unless you rename
-one in Finder first. What gets replaced is the application; the old one's data
-sits under its own identifier and is untouched, though nothing here can read it.
-
-**One thing does break, and it is worth knowing before you install.** If you
-connected an agent to the old Sync, that agent's configuration names a program
-inside the bundle — `Sync.app/Contents/MacOS/git-sync` — and replacing the
-bundle takes it away. From the agent's side the server simply stops starting.
-This build serves the same purpose from a different program in the same place,
-`sync-mcp`, and it will **not** quietly rewrite the entry: an entry under Sync's
-name that points somewhere else is reported to you rather than overwritten,
-because somebody else's configuration file is not ours to tidy. Open
-**Settings → Agents** after installing and connect again; it is one control per
-agent.
+**Upgrading from the earlier Sync?** Read [If you came here looking for the old
+Sync](#if-you-came-here-looking-for-the-old-sync) first: the two share no
+settings and no data, and one thing does break on the agent's side.
 
 ## What that looks like in practice
 
@@ -212,6 +198,40 @@ a package nobody has written.
 is small, packages are not yet signed — the format and the verification are
 there, the key is not — and the memory engine is a young dependency on its own
 release cadence.
+
+## If you came here looking for the old Sync
+
+A different application used to live at this address. It is preserved,
+unmaintained, at **[sync-buzz/sync-legacy](https://github.com/sync-buzz/sync-legacy)**,
+and its releases are still downloadable there.
+
+**This is not a new version of it.** It is a different application with a
+different data format, and there is no migration — nothing here reads what that
+one wrote. If you are using it, it goes on working exactly as it does today:
+copies in the field will **not** be updated to this, deliberately and by three
+independent mechanisms. The two were signed with different keys, so a build from
+this repository is not merely unwanted by an old copy but unverifiable by it.
+The reasoning is in [docs/releasing.md](docs/releasing.md).
+
+**They do not share settings or data.** The two bundles carry different
+identifiers — `buzz.sync` here, `chat.sync.desktop` there — so macOS treats them
+as separate applications and neither reads the other's configuration directory.
+
+**Installing this one replaces that one.** Both bundle as `Sync.app` and want
+the same path in `/Applications`, so there is no side-by-side unless you rename
+one in Finder first. What gets replaced is the application; the old one's data
+sits under its own identifier and is untouched, though nothing here can read it.
+
+**One thing does break, and it is worth knowing before you install.** If you
+connected an agent to the old Sync, that agent's configuration names a program
+inside the bundle — `Sync.app/Contents/MacOS/git-sync` — and replacing the
+bundle takes it away. From the agent's side the server simply stops starting.
+This build serves the same purpose from a different program in the same place,
+`sync-mcp`, and it will **not** quietly rewrite the entry: an entry under Sync's
+name that points somewhere else is reported to you rather than overwritten,
+because somebody else's configuration file is not ours to tidy. Open
+**Settings → Agents** after installing and connect again; it is one control per
+agent.
 
 ## Building it
 

@@ -1,0 +1,79 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{--ink:#171719;--muted:#6f6f76;--faint:#a4a4ab;--line:#e4e4e7;--wash:#f7f7f8;--page:#ececee}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{width:1200px;height:470px;background:var(--page);
+       font-family:'Instrument Sans',-apple-system,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
+  .card{position:absolute;inset:14px;background:#fff;border-radius:22px;overflow:hidden;
+        padding:34px 42px 30px;display:flex;flex-direction:column}
+  .slash{position:absolute;right:-70px;top:-120px;width:280px;height:1000px;
+         background:linear-gradient(180deg,#f1f1f2,#fbfbfc);transform:rotate(24deg);border-radius:40px}
+  .head{display:flex;align-items:center;gap:12px;position:relative;z-index:1}
+  .glyph{width:29px;height:29px;border:1px solid var(--line);border-radius:9px;
+         display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px}
+  .name{font-weight:700;font-size:20px;letter-spacing:-.01em}
+  .lede{margin-left:auto;font-size:14px;color:var(--muted);text-align:right;line-height:1.5}
+  .win{margin-top:22px;border:1px solid var(--line);border-radius:13px;overflow:hidden;position:relative;z-index:1;
+       background:#fff;flex:1;display:flex;flex-direction:column;box-shadow:0 16px 34px -26px rgba(0,0,0,.4)}
+  .bar{height:32px;background:var(--wash);border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 12px;gap:6px}
+  .dot{width:8.5px;height:8.5px;border-radius:50%;background:#dedee2}
+  .cols{flex:1;display:grid;grid-template-columns:1fr 1.1fr 2.3fr 1.2fr}
+  .col{padding:15px 15px 17px;border-right:1px solid var(--line);display:flex;flex-direction:column}
+  .col:last-child{border-right:0}
+  .role{font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.12em;
+        text-transform:uppercase;color:var(--faint);margin-bottom:8px}
+  .what{font-size:13px;line-height:1.38;font-weight:600}
+  .skel{display:flex;flex-direction:column;gap:8px;margin-top:15px}
+  .s{height:7px;border-radius:4px;background:#f1f1f3}
+  .col.work .s.t{height:13px;width:58%;background:#e7e7eb;margin-bottom:3px}
+  .foot{padding-top:22px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:34px;position:relative;z-index:1}
+  .f{border-top:1px solid var(--line);padding-top:13px}
+  .f .k{font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.12em;
+        text-transform:uppercase;color:var(--faint);margin-bottom:7px}
+  .f .v{font-size:12.5px;line-height:1.48;color:var(--muted)}
+  .f .v b{color:var(--ink);font-weight:600}
+</style></head><body>
+<div class="card">
+  <div class="slash"></div>
+  <div class="head">
+    <div class="glyph">/</div><div class="name">Sync</div>
+    <div class="lede">A project is a folder you already have.<br>What fills the window comes from the packages installed into it.</div>
+  </div>
+  <div class="win">
+    <div class="bar"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
+    <div class="cols">
+      <div class="col">
+        <div class="role">Primary sidebar</div>
+        <div class="what">The areas a package added</div>
+        <div class="skel"><div class="s" style="width:78%"></div><div class="s" style="width:62%"></div><div class="s" style="width:70%"></div><div class="s" style="width:55%"></div></div>
+      </div>
+      <div class="col">
+        <div class="role">Context navigator</div>
+        <div class="what">What belongs to the selected area</div>
+        <div class="skel"><div class="s" style="width:86%"></div><div class="s" style="width:68%"></div><div class="s" style="width:78%"></div><div class="s" style="width:60%"></div><div class="s" style="width:74%"></div></div>
+      </div>
+      <div class="col work">
+        <div class="role">Workspace</div>
+        <div class="what">The record, as the text it is — no edit mode, no form</div>
+        <div class="skel"><div class="s t"></div><div class="s" style="width:95%"></div><div class="s" style="width:90%"></div><div class="s" style="width:96%"></div><div class="s" style="width:71%"></div></div>
+      </div>
+      <div class="col">
+        <div class="role">Context inspector</div>
+        <div class="what">What is true of it: fields, links, freshness</div>
+        <div class="skel"><div class="s" style="width:64%"></div><div class="s" style="width:82%"></div><div class="s" style="width:50%"></div><div class="s" style="width:70%"></div></div>
+      </div>
+    </div>
+  </div>
+  <div class="foot">
+    <div class="f"><div class="k">Where it is kept</div>
+      <div class="v"><b>The repository's own Git objects.</b> It branches, merges and travels to whoever clones it. No account, no server of ours.</div></div>
+    <div class="f"><div class="k">Who does the work</div>
+      <div class="v"><b>Agents, in both directions.</b> Five agent CLIs reach the project over MCP, or one is driven from the window over ACP.</div></div>
+    <div class="f"><div class="k">Where the subject matter comes from</div>
+      <div class="v"><b>Packages, every one of them.</b> The shell names no language, no file type and no section — CI fails the build if it does.</div></div>
+  </div>
+</div>
+</body></html>
