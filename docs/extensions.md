@@ -9,6 +9,15 @@ Read [`architecture.md`](architecture.md) first for the window, the process
 model and the memory integration. This document is about the seam between them
 and code the application did not compile.
 
+Two documents sit beside it and neither repeats it.
+[`extension-architecture.md`](extension-architecture.md) is the same subject
+drawn: the boundaries in order, the manifest field by field, each lifecycle as a
+sequence, and every refusal with the place it is heard.
+[`writing-an-extension.md`](writing-an-extension.md) builds one package from
+nothing, with every file it contains. This one is the reasoning under both —
+what was chosen, what it was chosen over, and what goes wrong when a rule is
+broken.
+
 This describes what this version does. Where a rule here replaces an earlier
 one, the earlier one is named — a reader who arrives at something that looks
 arbitrary is owed the thing it was chosen over. §12 is what the version
@@ -103,10 +112,12 @@ The shims read an object the host publishes on the global —
 the whole mechanism. An author writes `import { useState } from "react"`, which
 is resolved while the module is being evaluated; there is no way to hand
 anything to a module during its own evaluation, so the objects have to be
-somewhere it can look. What is passed to `activate` is only the extension's own
-id, which is the one thing a module cannot know about itself — an earlier draft
-passed React and the surface there as well, from before the shims existed, and
-two ways to reach one object is how one of them goes stale.
+somewhere it can look. What is passed to `activate` is what the module could not
+have found for itself: its own id, and the two doors built around that id —
+`net` and `vault`, each closed over it, so a call carries which package is
+making it rather than stating it. React and the surface are not among them, and
+an earlier draft that passed them there is retired: two ways to reach one object
+is how one of them goes stale.
 
 **`lucide-react` is bundled into the extension**, which reverses the earlier
 "marked external so there is one copy". One copy matters where identity does:
@@ -294,7 +305,10 @@ Four headers are refused by name — `host`, `content-length`, `connection`,
 `transfer-encoding`. Not as a boundary: the URL decides which machine is
 connected to and none of these change that. It is a refusal in place of a
 puzzle, because a request that sets its own `content-length` disagrees with
-itself and the server answers about something else entirely.
+itself and the server answers about something else entirely. `content-type`
+joins them for a request that sends a form, and for no other request: the
+boundary is generated where the parts are assembled, so the header naming it is
+written there too.
 
 **It is an agreement, and not a mechanism, and the difference belongs here
 rather than in somebody's head.** A package that reaches a host at all can put
@@ -322,6 +336,53 @@ members back, and `method` sits beside `url` where it is looked for. What
 rather than ignored**: a member dropped in silence is a timeout somebody
 believes they set.
 
+### What a package sends: text, bytes, or a form
+
+```ts
+await host.net.fetch({
+  url: "https://api.example.com/screenshots",
+  method: "POST",
+  form: [
+    { name: "title", text: "the login screen" },
+    {
+      name: "photo",
+      base64,                       // the encoding on its own
+      filename: "screenshot.png",
+      contentType: "image/png",
+    },
+  ],
+})
+```
+
+**One request sends one thing, and says which of the three it is.** `body` is
+text, `bodyBase64` is bytes and `form` is `multipart/form-data`; giving two of
+them is refused rather than resolved on the package's behalf, because a door
+that picked one would send whichever it happened to test for first.
+
+The three exist because one member cannot mean all three, and the one that was
+here first means text. A picture put in it would have been sent as the string of
+base64 it was written as — a body of ASCII no server was offered — so bytes are
+said differently and undone before the request leaves. What belongs in
+`bodyBase64` is the encoding alone: a `data:` URL pasted whole is refused by
+name, which is the mistake the member attracts and an afternoon otherwise.
+
+**The form is here because it cannot be composed above this line.** Its boundary
+is written into a header and repeated between the parts, so whatever assembles
+the body writes the header as well; a package doing it for itself would be
+naming a boundary in a request whose body it does not control. Nothing else
+about multipart is here: what a part is called, what it is called on disk and
+what it contains are the package's to say, and a part is one thing — `text` or
+`base64`, never both and never neither, refused by the part's own name.
+
+**Eight megabytes leave, two megabytes come back**, and the two numbers were one
+until a picture arrived. The symmetry was the whole argument for a single
+ceiling — what a package reads and what it sends are the same size of thing —
+and a photograph off a phone is three to five megabytes, so a door that read a
+page of a listing without complaint and refused every camera would be a door
+with an accident in it. The outgoing number is weighed against what is actually
+sent: the decoded bytes, and every part of a form added up, rather than the
+base64 that carried them, which is a third larger than what it encodes.
+
 What comes back is the final URL after any redirect, the status, `ok`, the
 response's headers and a text body of at most 2 MB. The headers are there
 because pagination and rate limits live in them, and a package polling somebody
@@ -343,9 +404,18 @@ package asks for, and where it reaches is a sentence in the package itself.
 deciding is deciding about a package, and a manifest that could read one host
 and write another would put a second table on the card to spare a reader one
 sentence. Request timeouts and redirect policy are the host's, for the reason
-every limit here is: a package that could raise its own has none.
+every limit here is: a package that could raise its own has none. A response
+that is not text is a refusal and not a member: a package can send a picture and
+cannot read one back, because sending is what an extension writing into
+somebody else's tracker needs and nothing installed here has yet needed the
+other direction.
 
 ### `vault` hands a value over, and one rule no check can hold
+
+*How the address is composed, who else may open the store, and what a call does
+when the system puts a dialog up are drawn in
+[`extension-architecture.md`](extension-architecture.md) §8a. This is why the
+door is shaped this way.*
 
 A package's secrets live in the system keychain, in a namespace of its own: the
 owner half of every entry is the id this machine resolved, and a call says only
@@ -693,11 +763,15 @@ Only what it was handed. Nothing is ambient.
   project's memory, reading only.
 - `work.order(order)` — raise an agent on something, and answer with a key
   before any of it has happened.
+- `vault.read(name)`, `vault.write(name, secret)`, `vault.forget(name)` — the
+  package's own secrets, in the namespace §4 describes.
+- `net.fetch(request)` — the door §4 describes, under the same two
+  capabilities and with the same three spellings of what is sent.
 - `console.*` — a line, which the host places.
 
 Asking for anything else is a refusal naming what *is* offered, which a handler
-can catch and carry on from. Writing to the corpus and the network are not
-offered by this build; each will arrive with the capability that gates it.
+can catch and carry on from. Writing to the corpus is not offered by this build;
+it will arrive with the capability that gates it.
 
 ### Ordering work
 

@@ -31,6 +31,22 @@
 //! end, because those are two things to agree to and a card that said only the
 //! first would be describing the smaller of them.
 //!
+//! **What a package sends is text, bytes or a form, and it says which.** One
+//! member cannot mean all three, and the one that was here first means text: a
+//! picture put in it would have been sent as the string of base64 it was
+//! written as, which is not what any server was asked for. So they are spelled
+//! apart and at most one is given — `body` is text, `bodyBase64` is bytes,
+//! encoded only because a process boundary carries no bytes, and `form` is
+//! `multipart/form-data`.
+//!
+//! **The form is here because it cannot be composed above this line.** Its
+//! boundary is written into a header and repeated between every part, so
+//! whatever builds the body has to write the header too; a package doing that
+//! for itself would be naming a boundary in a request whose body this door
+//! assembled. Nothing else about multipart needs to be here, and nothing else
+//! is: what a part is called, what it is called on disk and what it contains
+//! are the package's to say.
+//!
 //! **The verb is what is gated, and headers are not.** A header carries a token
 //! or a content type, and the argument that it is a body by another name proves
 //! too much: a package composes the URL, so it could put anything it wanted in
@@ -45,6 +61,9 @@ use std::collections::BTreeMap;
 use std::io::Read;
 use std::time::Duration;
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64;
+use reqwest::blocking::multipart;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -61,13 +80,21 @@ const TIMEOUT: Duration = Duration::from_secs(20);
 /// that costs a person their window.
 const LARGEST_RESPONSE: u64 = 2 * 1024 * 1024;
 
-/// The largest body a package may send, and deliberately the same number.
+/// The most a package may push out of this window in one request.
 ///
-/// Symmetry rather than a measurement: what a package may put into this window
-/// and what it may push out of it are the same size of thing, and two numbers
-/// would be two things to explain. A package that needs to send more than a
-/// listing's worth of text is doing something this door was not built for.
-const LARGEST_BODY: usize = 2 * 1024 * 1024;
+/// It was [`LARGEST_RESPONSE`] again, and the symmetry was the whole argument:
+/// what a package reads and what it sends are the same size of thing. A picture
+/// is where that stopped being true. A photograph off a phone is three to five
+/// megabytes, and a door that read a page of an API's listing without complaint
+/// and refused every camera would be a door with an accident in it, so the two
+/// numbers part company here and this one says why.
+///
+/// **Measured against what is actually sent.** Bytes arrive as base64 because a
+/// process boundary carries no bytes, and base64 is a third larger than what it
+/// encodes — a ceiling read off the string would be a ceiling a quarter below
+/// where it says it is. So it is the decoded length that is weighed, and for a
+/// form it is every part added up.
+const LARGEST_BODY: usize = 8 * 1024 * 1024;
 
 /// Headers the transport owns, which a package may not write.
 ///
@@ -109,6 +136,36 @@ pub enum NetError {
     BodyWithoutAVerb(Method),
     #[error("the body is larger than a package may send")]
     TooMuchToSend,
+    #[error(
+        "a request says once what it sends, and this one says it {0} times: `body` is text, `bodyBase64` is bytes and `form` is a multipart form, and one request carries one of the three"
+    )]
+    MoreThanOneBody(usize),
+    #[error(
+        "{0} was given as base64 and does not read as base64: what belongs there is the encoding on its own, and a `data:` prefix left on the front of it is the usual reason this is read"
+    )]
+    NotBase64(String),
+    #[error(
+        "a form with no parts in it sends nothing: a request with nothing to put in one carries no form"
+    )]
+    FormWithoutParts,
+    #[error(
+        "a part of a form has no name: every part is looked up at the other end by the name it was sent under, and one with none arrives somewhere nothing reads"
+    )]
+    PartWithoutAName,
+    #[error(
+        "the \"{0}\" part carries neither `text` nor `base64`: it is a name the other end is given with nothing under it"
+    )]
+    PartWithoutContent(String),
+    #[error(
+        "the \"{0}\" part carries both `text` and `base64`, and one part is one thing: say which of them is being sent"
+    )]
+    PartWithTwoContents(String),
+    #[error(
+        "\"{0}\" is the form's to write: multipart carries a boundary that is generated where the body is assembled, and a package naming its own would be describing a request it did not send"
+    )]
+    TheFormS(String),
+    #[error("\"{0}\" is not usable as the type of the \"{1}\" part: {2}")]
+    UnusableType(String, String, String),
     #[error(
         "\"{0}\" is the transport's to write: a request that sets its own would disagree with itself, and the server would answer about something else"
     )]
@@ -196,8 +253,52 @@ pub struct Request {
     /// leaving this door to decide which of the two it meant.
     #[serde(default)]
     pub headers: BTreeMap<String, String>,
+    /// What is sent, when it is text.
     #[serde(default)]
     pub body: Option<String>,
+    /// What is sent, when it is bytes: a picture, a signature, an archive.
+    ///
+    /// Base64 because the value crosses a process boundary as JSON and JSON has
+    /// no bytes. The encoding is undone here and the request carries what was
+    /// encoded — a package that leaves a `data:` prefix on the front of it is
+    /// refused rather than sending a body beginning with the word `data`.
+    #[serde(default)]
+    pub body_base64: Option<String>,
+    /// What is sent, when the other end asked for a form.
+    ///
+    /// The shape almost every *upload this file* API is written against, and
+    /// the one thing on this door a package could not have composed for itself:
+    /// see the note on the module.
+    #[serde(default)]
+    pub form: Option<Vec<Part>>,
+}
+
+/// One part of a form, as the package states it.
+///
+/// **A part is one thing.** `text` or `base64`, never both and never neither: a
+/// part carrying two values is a package that has not decided what it is
+/// sending, and one carrying none is a name the other end is handed with
+/// nothing under it.
+///
+/// `filename` is what makes a part a file rather than a field, and it is the
+/// package's to choose — most APIs keep it, some show it to a person later, and
+/// nothing here is in a position to know which. `contentType` is the same: what
+/// the bytes are is known where they came from and nowhere after.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Part {
+    /// What the other end looks this part up by.
+    pub name: String,
+    #[serde(default)]
+    pub text: Option<String>,
+    #[serde(default)]
+    pub base64: Option<String>,
+    /// The name the part carries as a file, when it is one.
+    #[serde(default)]
+    pub filename: Option<String>,
+    /// What is in it — `image/png` — for a server that does not guess.
+    #[serde(default)]
+    pub content_type: Option<String>,
 }
 
 /// What came back, as the package reads it.
@@ -269,14 +370,14 @@ pub fn fetch(
     sealed: &BTreeMap<String, String>,
 ) -> Result<Response, NetError> {
     let asked = admit(id, &request.url, allowed)?;
+    let sent = sent(request)?;
 
-    if let Some(body) = &request.body {
-        if !request.method.carries_a_body() {
-            return Err(NetError::BodyWithoutAVerb(request.method));
-        }
-        if body.len() > LARGEST_BODY {
-            return Err(NetError::TooMuchToSend);
-        }
+    // The form writes `content-type`, so nothing else may — including a
+    // manifest, which is the case a package cannot fix from its own code. It is
+    // named as the form's rather than as the transport's because it is only the
+    // form's: a package sending text says what its text is, and always could.
+    if matches!(sent, Some(Sending::Form(_))) && sealed.contains_key("content-type") {
+        return Err(NetError::TheFormS("content-type".to_owned()));
     }
 
     // Cloned into the redirect policy because the policy outlives this call's
@@ -305,6 +406,9 @@ pub fn fetch(
         if THE_TRANSPORT_S.contains(&lowered.as_str()) {
             return Err(NetError::TheTransportS(name.clone()));
         }
+        if lowered == "content-type" && matches!(sent, Some(Sending::Form(_))) {
+            return Err(NetError::TheFormS(name.clone()));
+        }
         // **A declared secret is not overwritten and not silently ignored.**
         // Either behaviour would be the same header meaning two things: one
         // sends a token the author thought they had replaced, the other drops a
@@ -328,8 +432,8 @@ pub fn fetch(
         value.set_sensitive(true);
         sending = sending.header(header_name(name)?, value);
     }
-    if let Some(body) = &request.body {
-        sending = sending.body(body.clone());
+    if let Some(sent) = sent {
+        sending = attach(sending, sent)?;
     }
 
     let response = sending
@@ -369,6 +473,166 @@ pub fn fetch(
         headers,
         body,
     })
+}
+
+/// The request with what it sends on it.
+///
+/// The last thing done to it, so that nothing above can have written a header
+/// this settles: the form's `content-type` is written here, out of a boundary
+/// that does not exist until the parts are assembled.
+///
+/// # Errors
+///
+/// When a part names a type that is not a media type.
+fn attach(
+    sending: reqwest::blocking::RequestBuilder,
+    sent: Sending,
+) -> Result<reqwest::blocking::RequestBuilder, NetError> {
+    Ok(match sent {
+        Sending::One(Payload::Text(text)) => sending.body(text),
+        Sending::One(Payload::Bytes(bytes)) => sending.body(bytes),
+        Sending::Form(parts) => {
+            let mut form = multipart::Form::new();
+            for part in parts {
+                let named = part.name.clone();
+                let mut piece = match part.content {
+                    Payload::Text(text) => multipart::Part::text(text),
+                    Payload::Bytes(bytes) => multipart::Part::bytes(bytes),
+                };
+                if let Some(filename) = part.filename {
+                    piece = piece.file_name(filename);
+                }
+                if let Some(kind) = part.content_type {
+                    piece = piece.mime_str(&kind).map_err(|error| {
+                        NetError::UnusableType(kind.clone(), named.clone(), error.to_string())
+                    })?;
+                }
+                form = form.part(named, piece);
+            }
+            sending.multipart(form)
+        }
+    })
+}
+
+/// What one request puts on the wire, once the package's three spellings of
+/// *what I am sending* have been resolved to the one thing that is sent.
+///
+/// Here rather than as three branches inside [`fetch`] because the size a
+/// request may be, the verb it needs and the decoding of it are the same three
+/// questions whichever spelling was used, and asking them once is what stops
+/// the answers drifting apart.
+#[derive(Debug)]
+enum Sending {
+    One(Payload),
+    Form(Vec<ReadyPart>),
+}
+
+/// Text or bytes, after base64 has been undone.
+#[derive(Debug)]
+enum Payload {
+    Text(String),
+    Bytes(Vec<u8>),
+}
+
+impl Payload {
+    /// What it weighs on the wire, which is not what it weighed as base64.
+    fn size(&self) -> usize {
+        match self {
+            Self::Text(text) => text.len(),
+            Self::Bytes(bytes) => bytes.len(),
+        }
+    }
+}
+
+/// One part of a form with its content decoded and its name settled.
+#[derive(Debug)]
+struct ReadyPart {
+    name: String,
+    content: Payload,
+    filename: Option<String>,
+    content_type: Option<String>,
+}
+
+/// What the request sends, or why it sends nothing.
+///
+/// `None` for a request with no body at all, which is most of them.
+///
+/// # Errors
+///
+/// When more than one of the three is given, when base64 is not base64, when a
+/// part of a form is not one thing, when the method carries no body, or when
+/// what is sent is larger than [`LARGEST_BODY`].
+fn sent(request: &Request) -> Result<Option<Sending>, NetError> {
+    let said = usize::from(request.body.is_some())
+        + usize::from(request.body_base64.is_some())
+        + usize::from(request.form.is_some());
+    if said > 1 {
+        return Err(NetError::MoreThanOneBody(said));
+    }
+
+    let sending = match (&request.body, &request.body_base64, &request.form) {
+        (Some(text), _, _) => Sending::One(Payload::Text(text.clone())),
+        (_, Some(encoded), _) => Sending::One(Payload::Bytes(decoded("`bodyBase64`", encoded)?)),
+        (_, _, Some(parts)) => Sending::Form(ready(parts)?),
+        _ => return Ok(None),
+    };
+
+    if !request.method.carries_a_body() {
+        return Err(NetError::BodyWithoutAVerb(request.method));
+    }
+    let size = match &sending {
+        Sending::One(payload) => payload.size(),
+        // The parts, and not the envelope around them: the boundaries and the
+        // names are this door's own writing, and a package cannot be refused
+        // for the length of something it did not compose.
+        Sending::Form(parts) => parts.iter().map(|part| part.content.size()).sum(),
+    };
+    if size > LARGEST_BODY {
+        return Err(NetError::TooMuchToSend);
+    }
+
+    Ok(Some(sending))
+}
+
+/// The bytes behind a package's base64, or a refusal naming where it was.
+///
+/// The refusal says which value it was reading, because a form has several and
+/// *that is not base64* about an unnamed one is a sentence an author cannot act
+/// on.
+fn decoded(what: &str, encoded: &str) -> Result<Vec<u8>, NetError> {
+    BASE64
+        .decode(encoded.as_bytes())
+        .map_err(|_| NetError::NotBase64(what.to_owned()))
+}
+
+/// A form's parts with their content decoded, or the first refusal among them.
+fn ready(parts: &[Part]) -> Result<Vec<ReadyPart>, NetError> {
+    if parts.is_empty() {
+        return Err(NetError::FormWithoutParts);
+    }
+    parts
+        .iter()
+        .map(|part| {
+            let name = part.name.trim();
+            if name.is_empty() {
+                return Err(NetError::PartWithoutAName);
+            }
+            let content = match (&part.text, &part.base64) {
+                (Some(_), Some(_)) => return Err(NetError::PartWithTwoContents(name.to_owned())),
+                (Some(text), None) => Payload::Text(text.clone()),
+                (None, Some(encoded)) => {
+                    Payload::Bytes(decoded(&format!("the \"{name}\" part"), encoded)?)
+                }
+                (None, None) => return Err(NetError::PartWithoutContent(name.to_owned())),
+            };
+            Ok(ReadyPart {
+                name: name.to_owned(),
+                content,
+                filename: part.filename.clone(),
+                content_type: part.content_type.clone(),
+            })
+        })
+        .collect()
 }
 
 /// A header name the client will accept, or a refusal naming it.
@@ -530,24 +794,38 @@ mod tests {
     /// sent, because a server's answer to this would be about something else.
     #[test]
     fn a_body_on_a_method_that_carries_none_is_refused() {
-        let mut request = asking(Method::Get);
-        request.body = Some("{}".to_owned());
+        let spellings: [fn(&mut Request); 3] = [
+            |request| request.body = Some("{}".to_owned()),
+            |request| request.body_base64 = Some(BASE64.encode("{}")),
+            |request| {
+                request.form = Some(vec![Part {
+                    name: "photo".to_owned(),
+                    base64: Some(BASE64.encode("{}")),
+                    ..Part::default()
+                }]);
+            },
+        ];
 
-        let refused = fetch(
-            "issues",
-            &request,
-            &only("api.github.com"),
-            &BTreeMap::new(),
-        )
-        .expect_err("a GET carries no body");
+        for say in spellings {
+            let mut request = asking(Method::Get);
+            say(&mut request);
 
-        assert!(
-            matches!(refused, NetError::BodyWithoutAVerb(Method::Get)),
-            "{refused}"
-        );
+            let refused = fetch(
+                "issues",
+                &request,
+                &only("api.github.com"),
+                &BTreeMap::new(),
+            )
+            .expect_err("a GET carries no body");
+
+            assert!(
+                matches!(refused, NetError::BodyWithoutAVerb(Method::Get)),
+                "{refused}"
+            );
+        }
     }
 
-    /// What a package may push out is the same size as what it may read in.
+    /// The ceiling on text, which is the same one the bytes are weighed against.
     #[test]
     fn a_body_larger_than_a_package_may_send_is_refused() {
         let mut request = asking(Method::Post);
@@ -562,6 +840,199 @@ mod tests {
         .expect_err("more than a package may send");
 
         assert!(matches!(refused, NetError::TooMuchToSend), "{refused}");
+    }
+
+    /// **Bytes cross as base64 and leave as bytes.** The encoding is only how a
+    /// picture gets through a boundary that carries JSON; a door that sent it
+    /// on would be sending the spelling rather than the thing spelled, and
+    /// every server would answer about a body of ASCII it was not offered.
+    #[test]
+    fn bytes_are_decoded_before_they_are_sent() {
+        let mut request = asking(Method::Post);
+        request.body_base64 = Some(BASE64.encode([0x89, b'P', b'N', b'G']));
+
+        match sent(&request).expect("it reads") {
+            Some(Sending::One(Payload::Bytes(bytes))) => {
+                assert_eq!(bytes, vec![0x89, b'P', b'N', b'G']);
+            }
+            _ => panic!("bytes were given and bytes are sent"),
+        }
+    }
+
+    /// The mistake this refusal is for. A `data:` URL is what a browser hands
+    /// somebody who copies an image, and the encoding is only the tail of it —
+    /// pasted whole it decodes to nothing, and the answer arrives from a server
+    /// as something about a malformed upload.
+    #[test]
+    fn base64_that_is_a_whole_data_url_is_refused_by_name() {
+        let mut request = asking(Method::Post);
+        request.body_base64 = Some("data:image/png;base64,iVBORw0KGgo=".to_owned());
+
+        let refused = sent(&request).expect_err("the prefix is not the encoding");
+
+        assert!(
+            matches!(&refused, NetError::NotBase64(what) if what.contains("bodyBase64")),
+            "{refused}"
+        );
+        assert!(
+            refused.to_string().contains("data:"),
+            "the refusal names the usual cause: {refused}"
+        );
+    }
+
+    /// One request sends one thing. Two members given is a package that has not
+    /// decided, and picking one for it would send whichever this door happened
+    /// to test for first.
+    #[test]
+    fn a_request_says_once_what_it_sends() {
+        let mut request = asking(Method::Post);
+        request.body = Some("{}".to_owned());
+        request.body_base64 = Some(BASE64.encode("x"));
+
+        let refused = sent(&request).expect_err("two spellings of one member");
+
+        assert!(matches!(refused, NetError::MoreThanOneBody(2)), "{refused}");
+    }
+
+    /// **The ceiling is what leaves the machine, not what was written down.**
+    /// Base64 is a third larger than what it encodes, so a limit read off the
+    /// string would sit a quarter below where it says it does — and the number
+    /// a person was told is the one about their photograph.
+    #[test]
+    fn what_is_weighed_is_the_bytes_and_not_the_base64_that_carried_them() {
+        let mut request = asking(Method::Post);
+        request.body_base64 = Some(BASE64.encode(vec![0u8; 7 * 1024 * 1024]));
+        assert!(
+            request.body_base64.as_ref().map_or(0, String::len) > LARGEST_BODY,
+            "the encoding is over the ceiling that the bytes are under"
+        );
+        assert!(sent(&request).is_ok(), "seven megabytes of picture is sent");
+
+        request.body_base64 = Some(BASE64.encode(vec![0u8; LARGEST_BODY + 1]));
+        assert!(
+            matches!(sent(&request), Err(NetError::TooMuchToSend)),
+            "and one byte past the ceiling is not"
+        );
+    }
+
+    /// A part is one thing, named. Every other shape is a package that has not
+    /// said what it is uploading, and the refusal says which part it was.
+    #[test]
+    fn a_part_of_a_form_is_one_named_thing() {
+        let named = |part: Part| {
+            let mut request = asking(Method::Post);
+            request.form = Some(vec![part]);
+            sent(&request).expect_err("a part this door cannot send")
+        };
+
+        assert!(matches!(
+            named(Part {
+                name: "photo".to_owned(),
+                text: Some("hello".to_owned()),
+                base64: Some(BASE64.encode("hello")),
+                ..Part::default()
+            }),
+            NetError::PartWithTwoContents(which) if which == "photo"
+        ));
+        assert!(matches!(
+            named(Part {
+                name: "photo".to_owned(),
+                ..Part::default()
+            }),
+            NetError::PartWithoutContent(which) if which == "photo"
+        ));
+        assert!(matches!(
+            named(Part {
+                name: "   ".to_owned(),
+                text: Some("hello".to_owned()),
+                ..Part::default()
+            }),
+            NetError::PartWithoutAName
+        ));
+
+        let mut empty = asking(Method::Post);
+        empty.form = Some(Vec::new());
+        assert!(matches!(
+            sent(&empty).expect_err("a form with nothing in it"),
+            NetError::FormWithoutParts
+        ));
+    }
+
+    /// A form is several things with their own names and types, and what it
+    /// weighs is what is in it rather than the envelope this door writes round
+    /// them.
+    #[test]
+    fn a_form_carries_its_parts_with_what_each_of_them_is() {
+        let mut request = asking(Method::Post);
+        request.form = Some(vec![
+            Part {
+                name: "title".to_owned(),
+                text: Some("the login screen".to_owned()),
+                ..Part::default()
+            },
+            Part {
+                name: "photo".to_owned(),
+                base64: Some(BASE64.encode([0x89, b'P', b'N', b'G'])),
+                filename: Some("screenshot.png".to_owned()),
+                content_type: Some("image/png".to_owned()),
+                ..Part::default()
+            },
+        ]);
+
+        match sent(&request).expect("it reads") {
+            Some(Sending::Form(parts)) => {
+                assert_eq!(parts.len(), 2);
+                assert_eq!(parts[1].filename.as_deref(), Some("screenshot.png"));
+                assert_eq!(parts[1].content_type.as_deref(), Some("image/png"));
+                assert_eq!(parts[1].content.size(), 4, "the bytes, not their base64");
+            }
+            _ => panic!("a form was given and a form is sent"),
+        }
+    }
+
+    /// **The boundary is written where the body is assembled, so the header
+    /// naming it is too.** A package that wrote its own — or a manifest that
+    /// sent one as a secret, which the package could not have overridden — would
+    /// describe a request that was never sent, and the server would answer about
+    /// a body it could not find.
+    #[test]
+    fn the_form_writes_the_content_type_and_nothing_else_may() {
+        let photo = || {
+            Some(vec![Part {
+                name: "photo".to_owned(),
+                base64: Some(BASE64.encode([0x89, b'P', b'N', b'G'])),
+                ..Part::default()
+            }])
+        };
+
+        let mut request = asking(Method::Post);
+        request.form = photo();
+        request
+            .headers
+            .insert("Content-Type".to_owned(), "image/png".to_owned());
+
+        let refused = fetch(
+            "issues",
+            &request,
+            &only("api.github.com"),
+            &BTreeMap::new(),
+        )
+        .expect_err("the form writes that one");
+        assert!(
+            matches!(&refused, NetError::TheFormS(name) if name == "Content-Type"),
+            "{refused}"
+        );
+
+        let mut declared = asking(Method::Post);
+        declared.form = photo();
+        let sealed = BTreeMap::from([("content-type".to_owned(), "image/png".to_owned())]);
+
+        let refused = fetch("issues", &declared, &only("api.github.com"), &sealed)
+            .expect_err("not even one a manifest declared");
+        assert!(
+            matches!(&refused, NetError::TheFormS(name) if name == "content-type"),
+            "{refused}"
+        );
     }
 
     /// A header the transport writes for itself is refused by name, so that a

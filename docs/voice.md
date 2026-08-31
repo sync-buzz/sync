@@ -160,18 +160,14 @@ travels to a colleague with a different set.
 
 ## 5. Who may speak, and how they ask
 
-Three callers, one implementation, and each reaches it by the door already open
-to them.
+Two callers, one implementation, and each reaches it by the door already open
+to them. A package's screen is not one of them — §6.
 
 **The window.** Tauri commands — `voice_status`, `voice_choose`, `voice_speak`,
 `voice_stop`. The settings page is their only caller today. `voice_status` is
 one command rather than the two this first said, because the voices and the
 choice are read together and neither means anything alone: a stored identifier
 with no list to find it in is not a voice, it is a string.
-
-**A package's screen.** A function on `@sync-buzz/extension-api`, behind the
-`voice` capability. A card says *this extension can speak*, before it is
-installed, which is the whole purpose of the capability list.
 
 **An agent.** The door the first real case needed. `sync_speak` is a tool on Sync's own MCP surface, beside
 `sync_apply`: one string to say, an optional `interrupt`, and no `project` —
@@ -196,15 +192,15 @@ Three things about it are decisions rather than details:
   so that trying again is not the next thing it does.
 
 ```ts
-await voice.speak({ text: "The nightly review is done.", interrupt: false })
+await speak("The nightly review is done.", false)
 ```
 
-**What is asked for, and what is not.** `text` and nothing else is required. A
-caller may name a `voice`, and one that does not gets the person's own choice —
-which is the case that matters: a package should not have to know what is
-installed on this Mac, and a person who chose a voice chose it for everything.
+**What is asked for, and what is not.** `text` and nothing else is required.
+Neither caller names a voice: what is said is said in the person's own choice,
+which is the case that matters — a caller should not have to know what is
+installed on this Mac, and somebody who chose a voice chose it for everything.
 `interrupt` decides between the two things a second sentence can mean while one
-is still being said.
+is still being said, and it is the only other member either door takes.
 
 **One queue for the machine.** Utterances are said in the order they were asked
 for; `interrupt: true` clears what is waiting and stops what is speaking.
@@ -228,8 +224,9 @@ Named so they are not re-proposed.
   Nothing about it assumes it is alone — `Engine` is a trait and `engines()`
   answers with what this build and platform actually offer — but a build with
   one implementation is what this is.
-- **One extension handing another text to speak.** A package asks the host, and
-  the host is the only speaker. Nothing here needs a package-to-package path.
+- **One extension handing another text to speak.** The host is the only
+  speaker, and no package reaches it, so there is not even a first half for a
+  package-to-package path to be the second of.
 - **Speech as a notification channel.** A banner is gated by three conditions
   (`extensions.md` §9a) and a sentence said aloud in an open-plan office is
   louder than a banner, not quieter. Whoever asks for a sentence is responsible
@@ -237,10 +234,14 @@ Named so they are not re-proposed.
 - **Reading a record aloud from the window.** A control on a record that reads
   it out is a feature of the reader, not of the speaker, and it is a separate
   decision about the record page. The mechanism does not prejudge it.
-- **A handler that speaks.** A screen may ask and an agent may ask; a function
-  running with no screen mounted has no occasion that needs a voice, and the
-  capability would have to be enforced at the call rather than read off the
-  manifest.
+- **A package speaking at all**, from a screen or from a handler. The surface
+  publishes no `voice` function and `SYNC_CAPABILITIES` names no `voice`, so
+  there is nothing a card could say and nothing a manifest could ask for. What
+  the shape would be is settled — a function behind a capability, so a card says
+  *this extension can speak* before it is installed — and the extension that
+  wants it has not arrived. A handler is the harder half of the two: it runs
+  with no screen mounted, so the capability would have to be enforced at the
+  call rather than read off the manifest.
 - **Listening.** §2.
 - **A volume control.** §4.
 - **Per-project voices.** §4.

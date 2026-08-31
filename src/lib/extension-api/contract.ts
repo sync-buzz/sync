@@ -54,11 +54,62 @@ export interface NetRequest {
    * The four the transport writes for itself — `host`, `content-length`,
    * `connection`, `transfer-encoding` — are refused: a request that set its own
    * would disagree with itself, and the server would answer about something
-   * else entirely.
+   * else entirely. `content-type` joins them for a request sending `form`, and
+   * only for that one: the boundary is written where the parts are assembled.
    */
   readonly headers?: Readonly<Record<string, string>>;
-  /** What is sent, for a method that carries one. Text, and at most 2 MB. */
+  /**
+   * What is sent, when it is text.
+   *
+   * **One of three, and a request carries one of them.** This is the spelling
+   * that was here first and it means text; a picture put in it would be sent as
+   * the base64 it was written as, which is nothing any server was asked for. So
+   * bytes and forms are said differently, and saying two of the three is
+   * refused rather than resolved for the package.
+   */
   readonly body?: string;
+  /**
+   * What is sent, when it is bytes: a picture, a signature, an archive.
+   *
+   * Base64 because this crosses a process boundary as JSON and JSON has no
+   * bytes. The encoding is undone before the request leaves, so what the server
+   * receives is the bytes — and what belongs here is the encoding on its own. A
+   * `data:` URL pasted whole is refused, which is the mistake this member
+   * attracts.
+   */
+  readonly bodyBase64?: string;
+  /**
+   * What is sent, when the other end asked for a `multipart/form-data` form.
+   *
+   * The shape almost every *upload a file* API is written against, and the one
+   * thing here a package could not have composed for itself: the boundary lives
+   * in a header and repeats between the parts, so the body and the header have
+   * to be written by the same code or they describe different requests.
+   */
+  readonly form?: readonly NetPart[];
+}
+
+/**
+ * One part of a form.
+ *
+ * **A part is one thing.** `text` or `base64`, never both and never neither:
+ * two values is a package that has not decided what it is sending, and none is
+ * a name the other end is handed with nothing under it. Both are refused by the
+ * part's own name, because a form has several and a refusal about an unnamed
+ * one cannot be acted on.
+ *
+ * `filename` is what makes a part a file rather than a field, and `contentType`
+ * is what the bytes are. Both are the package's to say: what a picture is
+ * called and what it is are known where it came from, and nowhere after.
+ */
+export interface NetPart {
+  /** What the other end looks this part up by. */
+  readonly name: string;
+  readonly text?: string;
+  readonly base64?: string;
+  readonly filename?: string;
+  /** `image/png`, for a server that does not guess. */
+  readonly contentType?: string;
 }
 
 /**

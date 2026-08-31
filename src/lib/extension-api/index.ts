@@ -318,6 +318,7 @@ export type {
   ExtensionNet,
   ExtensionVault,
   NetMethod,
+  NetPart,
   NetRequest,
   NetResponse,
 } from "@/lib/extension-api/contract";

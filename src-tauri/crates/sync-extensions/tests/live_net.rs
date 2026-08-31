@@ -1,20 +1,29 @@
 //! A package's own door out, over the network.
 //!
 //! Ignored by default, for the reason `live_registry.rs` is: `cargo test` is a
-//! statement about this code, and this file is a statement about GitHub. It
-//! earns its place because the unit tests beside `net.rs` prove what is
-//! *refused* and can prove nothing about what is admitted — a rule that
-//! refused everything would pass all of them.
+//! statement about this code, and this file is a statement about two servers
+//! nobody here runs. It earns its place because the unit tests beside `net.rs`
+//! prove what is *refused* and can prove nothing about what is admitted — a
+//! rule that refused everything would pass all of them, and so would a door
+//! that sent every picture as the base64 it was written as.
 //!
 //! ```text
 //! cargo test -p sync-extensions --test live_net -- --ignored --nocapture
 //! ```
 #![allow(clippy::expect_used)]
 
-use sync_extensions::{Net, NetRequest, net};
+use sync_extensions::{Net, NetMethod, NetPart, NetRequest, net};
 
 /// The host to read from, and it is the one the Issues package declares.
 const DECLARED: &str = "api.github.com";
+
+/// A host that says back what it was sent.
+///
+/// Reading proves itself against any public API; sending proves nothing unless
+/// something repeats the request, and no API worth reading will describe the
+/// bytes it was handed. So the half of this door that writes is measured
+/// against a service whose whole purpose is to echo.
+const ECHO: &str = "httpbin.org";
 
 fn declaring(host: &str) -> Net {
     Net {
@@ -97,4 +106,117 @@ fn an_undeclared_host_is_refused_before_anything_leaves() {
     assert!(refusal.contains(DECLARED), "{refusal}");
     assert!(refusal.contains("example.com"), "{refusal}");
     assert!(refusal.contains("issues"), "{refusal}");
+}
+
+/// A picture leaves as bytes and a form arrives with its parts intact.
+///
+/// **The one thing no unit test beside `net.rs` can say.** Those weigh what is
+/// sent and refuse what cannot be, and every one of them would still pass if
+/// the base64 went out as the string it was written as, or if the boundary in
+/// the header named something the body does not contain. What settles it is a
+/// server reading the request back: the four bytes of a PNG's signature come
+/// back as four bytes, the field beside the file comes back as a field, and the
+/// name on disk survives the trip.
+#[test]
+#[ignore = "talks to an echo service"]
+fn a_form_arrives_as_the_parts_it_was_given() {
+    // The first four bytes of every PNG, and the point of using them is that
+    // they are not text: a door that sent the base64 on would echo back the
+    // letters `iVBORw`, and a door that mangled the bytes would echo neither.
+    let signature = [0x89_u8, b'P', b'N', b'G'];
+    let answer = net::fetch(
+        "uploads",
+        &NetRequest {
+            url: format!("https://{ECHO}/post"),
+            method: NetMethod::Post,
+            form: Some(vec![
+                NetPart {
+                    name: "title".to_owned(),
+                    text: Some("the login screen".to_owned()),
+                    ..NetPart::default()
+                },
+                NetPart {
+                    name: "photo".to_owned(),
+                    base64: Some(base64_of(&signature)),
+                    filename: Some("screenshot.png".to_owned()),
+                    content_type: Some("image/png".to_owned()),
+                    ..NetPart::default()
+                },
+            ]),
+            ..NetRequest::default()
+        },
+        &declaring(ECHO),
+        &std::collections::BTreeMap::new(),
+    )
+    .expect("the echo service is reachable");
+
+    assert_eq!(answer.status, 200, "it answered {}", answer.status);
+    let said: serde_json::Value =
+        serde_json::from_str(&answer.body).expect("the echo answers with JSON");
+
+    assert_eq!(
+        said["form"]["title"], "the login screen",
+        "the field beside the file: {}",
+        answer.body
+    );
+    // Echoed as a `data:` URL, which is how this service writes bytes it cannot
+    // put in JSON — so the assertion is on what follows the comma.
+    let photo = said["files"]["photo"]
+        .as_str()
+        .expect("the file came back as a string");
+    assert!(
+        photo.ends_with(&base64_of(&signature)),
+        "the bytes made the trip whole: {photo}"
+    );
+    assert!(
+        said["headers"]["Content-Type"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("multipart/form-data; boundary="),
+        "the boundary is written where the body is assembled: {}",
+        said["headers"]
+    );
+}
+
+/// The same bytes with no form around them, which is what a presigned upload is.
+#[test]
+#[ignore = "talks to an echo service"]
+fn bytes_with_no_form_around_them_arrive_as_bytes() {
+    let signature = [0x89_u8, b'P', b'N', b'G'];
+    let answer = net::fetch(
+        "uploads",
+        &NetRequest {
+            url: format!("https://{ECHO}/put"),
+            method: NetMethod::Put,
+            headers: std::collections::BTreeMap::from([(
+                "content-type".to_owned(),
+                "image/png".to_owned(),
+            )]),
+            body_base64: Some(base64_of(&signature)),
+            ..NetRequest::default()
+        },
+        &declaring(ECHO),
+        &std::collections::BTreeMap::new(),
+    )
+    .expect("the echo service is reachable");
+
+    assert_eq!(answer.status, 200, "it answered {}", answer.status);
+    let said: serde_json::Value =
+        serde_json::from_str(&answer.body).expect("the echo answers with JSON");
+    let sent = said["data"].as_str().expect("it says what it was sent");
+
+    assert!(
+        sent.ends_with(&base64_of(&signature)),
+        "the body was the bytes rather than their spelling: {sent}"
+    );
+    assert_eq!(
+        said["headers"]["Content-Type"], "image/png",
+        "a request with no form says what its own body is"
+    );
+}
+
+/// The encoding as a package writes it, so the test states it once.
+fn base64_of(bytes: &[u8]) -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD.encode(bytes)
 }

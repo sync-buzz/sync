@@ -20,9 +20,13 @@ minisign-verify = "0.2"
 # and `blocking` because everything else in this crate is a plain function over
 # a path, and one async island would spread through the command layer above it.
 # `rustls` rather than the platform's TLS: one behaviour to reason about, and
-# the same one the updater already verifies a download with.
+# the same one the updater already verifies a download with. `multipart` is what
+# a package uploads a file through: the boundary is written into a header and
+# repeated between the parts, so the body and the header have to be composed by
+# the same code or they describe different requests.
 reqwest = { version = "0.12", default-features = false, features = [
     "blocking",
+    "multipart",
     "rustls-tls",
 ] }
 # Parsing a URL rather than splitting one. An artefact's address is pinned to a
@@ -31,6 +35,10 @@ reqwest = { version = "0.12", default-features = false, features = [
 # port — is a parser's business, not a substring's. Already in the tree under
 # reqwest, so this costs no new dependency graph either.
 url = "2"
+# Bytes across a process boundary. What a package sends as a picture arrives as
+# JSON, JSON has no bytes, and the same spelling is what the memory engine
+# already hands a document over in.
+base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"

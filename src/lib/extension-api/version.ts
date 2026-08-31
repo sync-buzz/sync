@@ -40,6 +40,17 @@ import { satisfies, valid, validRange } from "semver";
  * point of the number is that a manifest can state a range and be believed. The
  * cost is honest major bumps, which is the cost of meaning it.
  *
+ * **3.3.0** is a package sending something that is not text. `NetRequest` gains
+ * `bodyBase64` for bytes and `form` for `multipart/form-data`, and `NetPart` is
+ * what one part of a form is. Members added and none changed, so a minor: a
+ * package that sends JSON is compiled by this the way it was before.
+ *
+ * The three are spelled apart rather than `body` being widened, and that is the
+ * decision the number is really recording. One member meaning text or bytes
+ * would be a member whose meaning is guessed from its contents — a base64
+ * string is text, and a package sending one as text would go on being right
+ * until the day it wasn't.
+ *
  * **3.2.0** is the half of an extension with no screen reaching what the half
  * with one already reaches: `@sync-buzz/extension-api/service` gains `vault`
  * and `net`, so a handler may read, replace and forget its own secrets and make
@@ -476,7 +487,7 @@ import { satisfies, valid, validRange } from "semver";
  * `AreaModule`, `ActivationResult` — arrived in the same commit, which on its
  * own would have been a minor.
  */
-export const SYNC_API_VERSION = "3.2.0" as const;
+export const SYNC_API_VERSION = "3.3.0" as const;
 
 /**
  * What this build can do, as opposed to what its surface looks like.

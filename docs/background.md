@@ -213,17 +213,18 @@ else's machine.
 
 ### 3.3 What a handler is handed
 
-The second argument is the surface, and it is deliberately not the window's.
-`@sync-buzz/extension-api` publishes React components, panels and hooks; none of
-that means anything without a document. The service surface is functions over
-data, versioned on the same clock and by the same rules as the UI one, reported
-by API Extractor and checked in CI the same way.
+What a handler imports is a surface of its own, and it is deliberately not the
+window's. `@sync-buzz/extension-api` publishes React components, panels and
+hooks; none of that means anything without a document. The service surface is
+functions over data, versioned on the same clock and by the same rules as the UI
+one, reported by API Extractor and checked in CI the same way.
 
 What a handler may call:
 
 - **memory** — `memory.record`, `memory.list` and `memory.content`: read the
-  project's corpus, and write under this extension's own kind prefix. The same
-  operations `sync-mcp` already curates, not a second vocabulary.
+  project's corpus. The same operations `sync-mcp` already curates, not a second
+  vocabulary. Reading only — a handler that has found something worth recording
+  orders work, and whoever performs it writes through their own door.
 - **work** — `work.order`: order a piece of work and read the state of one this
   extension ordered. §6.
 - **vault** — `vault.read`, `vault.write` and `vault.forget`: the package's own

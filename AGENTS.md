@@ -21,7 +21,13 @@ there to keep it that way.
 - [docs/architecture.md](docs/architecture.md) — the process model, the command
   layer, where a fact lives, and the repository map.
 - [docs/extensions.md](docs/extensions.md) — the package format, capabilities,
-  the loader, the registry, updates.
+  the loader, the registry, updates. Why the seam is shaped this way.
+- [docs/extension-architecture.md](docs/extension-architecture.md) — the same
+  subject drawn rather than argued: the four boundaries in order, the manifest
+  field by field, each lifecycle as a sequence, and every refusal with the place
+  it is heard. Start here if you are changing the host or reading the seam cold.
+- [docs/writing-an-extension.md](docs/writing-an-extension.md) — one package
+  built from nothing, with every file it contains.
 - [docs/background.md](docs/background.md) — service modules, clocks, work
   orders: the half of an extension with no screen.
 - [docs/voice.md](docs/voice.md), [docs/releasing.md](docs/releasing.md).

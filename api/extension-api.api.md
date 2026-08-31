@@ -741,8 +741,22 @@ export interface NativeMenuItem {
 export type NetMethod = "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 // @public
+export interface NetPart {
+    // (undocumented)
+    readonly base64?: string;
+    readonly contentType?: string;
+    // (undocumented)
+    readonly filename?: string;
+    readonly name: string;
+    // (undocumented)
+    readonly text?: string;
+}
+
+// @public
 export interface NetRequest {
     readonly body?: string;
+    readonly bodyBase64?: string;
+    readonly form?: readonly NetPart[];
     readonly headers?: Readonly<Record<string, string>>;
     readonly method?: NetMethod;
     // (undocumented)
@@ -1360,7 +1374,7 @@ export function stopSession(key: string): Promise<void>;
 export function supportsApiRange(range: string): boolean;
 
 // @public
-export const SYNC_API_VERSION: "3.2.0";
+export const SYNC_API_VERSION: "3.3.0";
 
 // @public
 export const SYNC_CAPABILITIES: readonly ["records", "agents.acp", "markdown.plugins", "native-menu", "folders", "sheets", "net", "net.write", "vault", "background", "schedule", "work.agent", "agent.tools"];

@@ -43,7 +43,9 @@ pub use manifest::{
     AGENT_TOOLS_CAPABILITY, Manifest, ManifestError, NET_CAPABILITY, NET_WRITE_CAPABILITY, Net,
     SUPPORTED_MANIFEST_VERSION, Secret, Tool,
 };
-pub use net::{Method as NetMethod, NetError, Request as NetRequest, Response as NetResponse};
+pub use net::{
+    Method as NetMethod, NetError, Part as NetPart, Request as NetRequest, Response as NetResponse,
+};
 pub use registry::{Artefact, Fetched, Index, Ledger, Listed, Registry, RegistryError, Release};
 pub use store::{Installed, Pointer, Source, Store, StoreError};
 pub use vocabulary::{TypeDefinition, VocabularyError, read_prompt, read_types};

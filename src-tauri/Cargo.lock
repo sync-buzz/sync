@@ -7902,6 +7902,7 @@ dependencies = [
 name = "sync-extensions"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "hex",
  "minisign-verify",
  "reqwest 0.12.28",

@@ -10,7 +10,11 @@ their own and are only pointed at from here:
 and why, [`extensions.md`](extensions.md) for what a package is and how one is
 loaded, [`background.md`](background.md) for the half of an extension that runs
 with no window open, and [`voice.md`](voice.md) for what the application says
-out loud.
+out loud. The seam has two more:
+[`extension-architecture.md`](extension-architecture.md) draws it — the
+boundaries in order, the manifest field by field, each lifecycle as a sequence —
+and [`writing-an-extension.md`](writing-an-extension.md) builds one package from
+nothing.
 
 ## Tauri is the desktop adapter
 
@@ -106,7 +110,7 @@ The new version starts on the next launch rather than by interrupting one. Sync 
 
 This is the rule the rest of the design rests on, and the one a compiler cannot hold, so CI holds it instead: there is no `src/extensions/` directory, and a job fails the build if one appears or if anything resolves a path into it. Records, Chat and Project memory are packages like any other — built elsewhere, delivered as archives, installed through the path a stranger's extension is installed through. A window that could name one section in a type or a constant would be a window that treats that section differently from the next one, and the difference would not show until the day somebody else's package needed the same thing.
 
-What the shell keeps for itself is what a project cannot choose to be without: the window, the columns, the project flow, the search palette, the settings, and the seam. Everything else is a decision somebody makes per project. [`extensions.md`](extensions.md) is the whole of how that works — the manifest, the capabilities, the loader, the registry, updates.
+What the shell keeps for itself is what a project cannot choose to be without: the window, the columns, the project flow, the search palette, the settings, and the seam. Everything else is a decision somebody makes per project. [`extensions.md`](extensions.md) is the whole of how that works — the manifest, the capabilities, the loader, the registry, updates — and [`extension-architecture.md`](extension-architecture.md) is the same thing as a map, for a reader who wants the shape before the reasoning.
 
 **Sync publishes one interface to agents**, over MCP, and the settings window connects one by writing a single server entry into that agent's own configuration. The write is a Rust command with a fixed policy — this server, in that file, for this project — rather than a filesystem capability handed to the webview, and it splices rather than reformats: somebody's other servers, their comments and their formatting are not ours to tidy.
 
@@ -189,7 +193,7 @@ The first two are commands in `src-tauri/src/project.rs`; nothing in the fronten
 
 A secret is in none of the four stores above. It is in the system keychain, under one service for the whole application, and the item's name is composed of the package the secret belongs to and whatever that package calls it. The two halves are joined in Rust and neither the whole name nor the service is ever taken from a caller, which is what makes the second half a namespace rather than a convention.
 
-`sync-vault` is the only crate that opens a store and `src-tauri/src/vault.rs` is the only module that calls it, so *how* a secret is kept and *who may ask for one* stay two questions with two answers. That module answers two callers and tells them apart by whose entry it is: the settings window, which lists and edits entries belonging to any package and is never given a value, and a package asking for its own, which is given one — under a capability, and with the owner half of the name taken from what this machine has installed rather than from the call. What a package may then do with the value is the one thing neither half can hold, and it is stated where its author reads it: `docs/extensions.md` §4. Nothing is kept beside the keychain: what Sync is holding is answered by searching it under that one service, and an entry somebody deleted in Keychain Access is simply gone from the answer. The service is stated in that search and asked for again on the way back — a search without it matches every generic password the person has, which on the machine this was measured on is 126 of them, most of them their own.
+`sync-vault` is the only crate that opens a store and `src-tauri/src/vault.rs` is the only module that calls it, so *how* a secret is kept and *who may ask for one* stay two questions with two answers. That module answers two callers and tells them apart by whose entry it is: the settings window, which lists and edits entries belonging to any package and is never given a value, and a package asking for its own, which is given one — under a capability, and with the owner half of the name taken from what this machine has installed rather than from the call. What a package may then do with the value is the one thing neither half can hold, and it is stated where its author reads it: `docs/extensions.md` §4, with the mechanism drawn in `docs/extension-architecture.md` §8a. Nothing is kept beside the keychain: what Sync is holding is answered by searching it under that one service, and an entry somebody deleted in Keychain Access is simply gone from the answer. The service is stated in that search and asked for again on the way back — a search without it matches every generic password the person has, which on the machine this was measured on is 126 of them, most of them their own.
 
 Not the project's memory, because that memory travels on a Git remote: what has left this machine cannot be called back, and a token that has been revoked has to be gone. Not the webview's storage, because that is a file every process running as this person can read.
 
