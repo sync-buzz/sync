@@ -79,10 +79,17 @@ export function WorktreesSection() {
           disabled={busy}
           onClick={() => {
             void (async () => {
-              const chosen = await chooseFolder();
-              // Dismissing the panel is an outcome, not a failure: nothing was
-              // chosen and nothing needs saying about it.
-              if (chosen !== null) await choose(chosen);
+              try {
+                const chosen = await chooseFolder();
+                // Dismissing the panel is an outcome, not a failure: nothing
+                // was chosen and nothing needs saying about it.
+                if (chosen !== null) await choose(chosen);
+              } catch (error: unknown) {
+                // A panel that never opened is a refusal like any other, and
+                // one thrown away here is a button that does nothing with no
+                // sentence anywhere saying why.
+                setFailure(explain(error));
+              }
             })();
           }}
         >
