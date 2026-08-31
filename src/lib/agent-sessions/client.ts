@@ -74,6 +74,16 @@ export interface SessionRow {
    * the agent's name is the only thing there is to call it.
    */
   readonly title: string | null;
+  /**
+   * The project this conversation belongs to.
+   *
+   * Beside `cwd` rather than instead of it, because they answer two questions:
+   * this is whose conversation it is, and `cwd` is where the agent is working.
+   * They differ exactly when the work is being done in a disposable tree, so a
+   * screen picking out its own conversations matches on this — matching on
+   * `cwd` loses every conversation in a tree the moment it is made.
+   */
+  readonly project: string;
   readonly cwd: string;
   readonly status: SessionStatus;
   readonly openedAtMs: number;

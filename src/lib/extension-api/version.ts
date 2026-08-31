@@ -40,6 +40,13 @@ import { satisfies, valid, validRange } from "semver";
  * point of the number is that a manifest can state a range and be believed. The
  * cost is honest major bumps, which is the cost of meaning it.
  *
+ * **3.5.0** is one field, and it is the field 3.4.0 needed and did not have.
+ * `SessionRow` carries `project` beside `cwd`: whose conversation it is, and
+ * where the agent is working. The two are the same until a conversation is held
+ * in a working tree, and a section picking out its own conversations by `cwd` —
+ * which was the only thing it could do — lost every one of them the moment it
+ * was made. Added, so a minor.
+ *
  * **3.4.0** is where a conversation happens. `startSession` takes a `worktree`,
  * which is either `"new"` or a tree that already exists, and a `SessionRow`
  * carries the tree it is being held in; `worktreesIn`, `adoptWorktree` and
@@ -504,7 +511,7 @@ import { satisfies, valid, validRange } from "semver";
  * `AreaModule`, `ActivationResult` — arrived in the same commit, which on its
  * own would have been a minor.
  */
-export const SYNC_API_VERSION = "3.4.0" as const;
+export const SYNC_API_VERSION = "3.5.0" as const;
 
 /**
  * What this build can do, as opposed to what its surface looks like.

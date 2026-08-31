@@ -62,6 +62,15 @@ pub struct SessionRow {
     /// somebody renamed it to. `None` before anything has been said, which is
     /// when the agent's name is the only thing there is to call it.
     pub title: Option<String>,
+    /// The project this conversation belongs to.
+    ///
+    /// Beside [`Self::cwd`] rather than instead of it, because they answer two
+    /// questions: this is whose conversation it is, and `cwd` is where the
+    /// agent is working. They differ exactly when the work is being done in a
+    /// disposable tree — and a screen that filtered its own conversations by
+    /// `cwd` would lose every one of those the moment it was made, which is
+    /// what it did before this field existed.
+    pub project: String,
     pub cwd: String,
     pub status: Status,
     pub opened_at_ms: u64,
@@ -1284,6 +1293,7 @@ fn row(session: &Arc<Session>) -> SessionRow {
         agent_id: session.agent_id.clone(),
         agent_name: session.agent_name.clone(),
         title: session.title(),
+        project: session.project.to_string_lossy().into_owned(),
         cwd: session.cwd.to_string_lossy().into_owned(),
         status: session.status(),
         opened_at_ms: session.opened_at_ms,
@@ -1450,6 +1460,7 @@ mod tests {
             agent_id: "opencode".to_owned(),
             agent_name: "OpenCode".to_owned(),
             title: Some("Why does reconcile run twice?".to_owned()),
+            project: "/tmp/project".to_owned(),
             cwd: "/tmp/project".to_owned(),
             status: Status::Working,
             opened_at_ms: 1234,
@@ -1461,7 +1472,7 @@ mod tests {
 
         assert_eq!(
             serde_json::to_string(&row).expect("a row serialises"),
-            r#"{"key":"s0","agentId":"opencode","agentName":"OpenCode","title":"Why does reconcile run twice?","cwd":"/tmp/project","status":"working","openedAtMs":1234,"acceptsImages":true}"#,
+            r#"{"key":"s0","agentId":"opencode","agentName":"OpenCode","title":"Why does reconcile run twice?","project":"/tmp/project","cwd":"/tmp/project","status":"working","openedAtMs":1234,"acceptsImages":true}"#,
             "a conversation a person started says nothing about a source, rather than saying null"
         );
     }
@@ -1481,6 +1492,7 @@ mod tests {
             agent_id: "claude".to_owned(),
             agent_name: "Claude Code".to_owned(),
             title: None,
+            project: "/tmp/project".to_owned(),
             cwd: "/tmp/project".to_owned(),
             status: Status::Working,
             opened_at_ms: 1234,
@@ -1525,6 +1537,7 @@ mod tests {
             agent_id: "claude".to_owned(),
             agent_name: "Claude Code".to_owned(),
             title: None,
+            project: "/tmp/project".to_owned(),
             cwd: "/tmp/project".to_owned(),
             status: Status::Working,
             opened_at_ms: 1234,
@@ -1612,6 +1625,7 @@ mod tests {
             agent_id: "opencode".to_owned(),
             agent_name: "OpenCode".to_owned(),
             title: None,
+            project: "/tmp/project".to_owned(),
             cwd: "/tmp/project".to_owned(),
             status: Status::Ready,
             opened_at_ms: 0,

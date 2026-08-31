@@ -212,6 +212,11 @@ fn a_conversation_in_a_working_tree_says_where_it_is() {
 
     let row = listed(&webview)[0].clone();
     assert_eq!(
+        row["project"],
+        project.to_string_lossy().into_owned(),
+        "whose conversation it is — a screen filtering by `cwd` loses it: {row}"
+    );
+    assert_eq!(
         row["worktree"]["path"],
         tree.to_string_lossy().into_owned(),
         "what naming the work and discarding it are both addressed by: {row}"
