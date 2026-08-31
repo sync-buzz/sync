@@ -353,6 +353,15 @@ export function fidelity(editor: SlateEditor, markdown: string): Fidelity {
  * what the editor is allowed to change: a bullet that was `*` and is now `-`, an
  * escape the serialiser added, a paragraph that stopped being wrapped. What it
  * is not allowed to change is a word.
+ *
+ * An escape is *deleted* rather than turned into a space, and that difference is
+ * the whole of whether this holds: punctuation stands between words, an escape
+ * stands inside one. A body written elsewhere may escape what this serialiser
+ * does not — a colon after `https` is the common one, because it stops a bare
+ * link becoming an autolink — and the round trip drops that escape, which is
+ * formatting and allowed. Spelled as a space it is not: `https\://example.com`
+ * becomes two words where the round trip has one, `https` is reported lost, and
+ * a record that would have survived editing untouched is refused.
  */
 function missingWords(before: string, after: string): string | null {
   const remaining = new Map<string, number>();
@@ -369,7 +378,8 @@ function missingWords(before: string, after: string): string | null {
 
 function words(markdown: string): string[] {
   return markdown
-    .replace(/[#*_`>|~\-[\]()!\\]/g, " ")
+    .replace(/\\/g, "")
+    .replace(/[#*_`>|~\-[\]()!]/g, " ")
     .split(/\s+/)
     .filter(Boolean);
 }
