@@ -16,6 +16,13 @@
  * `useSearch` the palette in the title bar uses — and what it submits is still
  * the plugin's `submitFloatingLink`.
  *
+ * The field takes one of two questions and answers one at a time. Words are a
+ * search; an address — a scheme, `sync://`, or a path — is an address, and is
+ * offered as the row it is rather than as a query, because search has no
+ * relevance floor and a url torn into words matches a hundred records that
+ * share one of them. Every one of those is the wrong answer to the question
+ * that was asked.
+ *
  * How the url is *spelled* is not offered as a choice, because it is not one: a
  * record whose body is a file is linked by its path, the way GitHub reads one,
  * and a record with no file is named with the scheme. That is decided from the
@@ -47,7 +54,7 @@ import {
   useFloatingLinkInsert,
   useFloatingLinkInsertState,
 } from "@platejs/link/react";
-import { ArrowUpRight, Link2Off, Pencil } from "lucide-react";
+import { ArrowUpRight, Link2, Link2Off, Pencil } from "lucide-react";
 import { KEYS, type TLinkElement } from "platejs";
 import {
   useEditorPlugin,
@@ -70,6 +77,10 @@ import { cn } from "@/lib/utils";
 
 /** How many records are offered at once. A list to pick from, not a report. */
 const SHOWN = 6;
+
+/** A row of the panel, whether it offers a record or the address itself. */
+const ROW =
+  "flex w-full items-center gap-2.5 rounded-(--radius-control) px-2 py-1.5 text-left transition-colors duration-(--motion-duration-fast) ease-shell hover:bg-hover data-[active=true]:bg-selected";
 
 const PLACEMENT = {
   middleware: [
@@ -284,12 +295,31 @@ function LinkField({ placeholder }: { placeholder: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const answer = useSearch(links?.project ?? "", url, [], links !== null);
+  /**
+   * An address in the field is an address, and the corpus is not asked about it.
+   *
+   * Not a refinement of the ranking but a different question: search has no
+   * relevance floor, so a pasted url is torn into ordinary words — `https`,
+   * `docs`, the host — and comes back with a hundred records that share one of
+   * them. Every one of those is a wrong answer to "link to this address", and
+   * offering them cost the right one: the list was never empty, so the row the
+   * keyboard was on was always a record, and Return put a stranger's record
+   * where somebody meant to put a url. There was no way to insert one at all.
+   */
+  const address = looksLikeAddress(url);
+  const answer = useSearch(
+    links?.project ?? "",
+    url,
+    [],
+    links !== null && !address,
+  );
   // The record being written is not one of its own answers. Filtered before the
   // list is cut to length, or excluding it would cost the row at the bottom.
-  const hits = answer.hits
-    .filter((hit) => hit.id !== origin?.key)
-    .slice(0, SHOWN);
+  // Empty for an address, and emptied here rather than at every place that
+  // reads it: a paused search still holds the answer to the previous question.
+  const hits = address
+    ? []
+    : answer.hits.filter((hit) => hit.id !== origin?.key).slice(0, SHOWN);
   const stamp = url.trim();
   const cursor = cursorAt.stamp === stamp ? cursorAt.index : 0;
   const at = Math.min(cursor, Math.max(hits.length - 1, 0));
@@ -317,6 +347,17 @@ function LinkField({ placeholder }: { placeholder: string }) {
       .catch(() => undefined);
   };
 
+  /**
+   * Put the address in, which is the plugin's own submit and nothing else.
+   *
+   * Nothing is read and nothing is resolved: an address is already the url, and
+   * where it goes is the system's question rather than this window's. The text
+   * is left alone — with a selection those are the words the link is made over,
+   * and with none the plugin writes the url itself, which is what a url with no
+   * name should read as.
+   */
+  const putAddress = () => submitFloatingLink(editor);
+
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "ArrowDown" && hits.length > 0) {
       event.preventDefault();
@@ -330,16 +371,22 @@ function LinkField({ placeholder }: { placeholder: string }) {
     }
     if (event.key === "Enter") {
       event.preventDefault();
+      // The row the panel is showing, and the two cases cannot both be on
+      // screen: an address is offered alone, and records are offered when there
+      // is no address. So Return is the row somebody is looking at either way.
+      if (address) {
+        putAddress();
+        return;
+      }
       const hit = hits[at];
       if (hit) {
         pick(hit.id, hit.kind ?? "", hit.title ?? hit.id);
         return;
       }
-      // Only when what is in the field is an address. Otherwise it is the words
-      // somebody selected, and making a link out of those would point at a
-      // document named after them — a dead link created by pressing Return on a
-      // search that found nothing.
-      if (looksLikeAddress(url)) submitFloatingLink(editor);
+      // Nothing else is a link. What is in the field is the words somebody
+      // selected, and making a link out of those would point at a document
+      // named after them — a dead link created by pressing Return on a search
+      // that found nothing.
     }
   };
 
@@ -360,8 +407,30 @@ function LinkField({ placeholder }: { placeholder: string }) {
         className="h-(--control-height-lg) w-full bg-transparent px-2 text-sm text-fg outline-none placeholder:text-fg-tertiary"
       />
 
-      {hits.length === 0 && stamp !== "" && !answer.isSearching &&
-      !looksLikeAddress(url) ? (
+      {address ? (
+        <div className="mt-1 border-t border-separator pt-1">
+          <button
+            type="button"
+            data-active="true"
+            // Before the click, or the panel closes on its way out.
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={putAddress}
+            className={ROW}
+          >
+            <span
+              aria-hidden="true"
+              className="flex size-6 shrink-0 items-center justify-center rounded-(--radius-control) bg-hover text-fg-secondary"
+            >
+              <Link2 className="size-3.5" />
+            </span>
+            <span className="min-w-0 flex-1 truncate text-sm text-fg">
+              {stamp}
+            </span>
+          </button>
+        </div>
+      ) : null}
+
+      {hits.length === 0 && stamp !== "" && !answer.isSearching && !address ? (
         <p className="border-t border-separator px-2 pt-1.5 pb-1 text-xs text-fg-tertiary">
           No records match. Paste an address to link outside the project.
         </p>
@@ -378,7 +447,7 @@ function LinkField({ placeholder }: { placeholder: string }) {
               // Before the click, or the panel closes on its way out.
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => pick(hit.id, hit.kind ?? "", hit.title ?? hit.id)}
-              className="flex w-full items-center gap-2.5 rounded-(--radius-control) px-2 py-1.5 text-left transition-colors duration-(--motion-duration-fast) ease-shell hover:bg-hover data-[active=true]:bg-selected"
+              className={ROW}
             >
               <KindMark icon={links?.iconOf(hit.kind ?? "") ?? null} />
               <span className="min-w-0 flex-1 truncate text-sm text-fg">
