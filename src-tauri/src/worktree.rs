@@ -41,7 +41,10 @@
 //! room is a fact about a machine, and a path remembered in a repository would
 //! be wrong on the next machine that cloned it. Each project gets a directory
 //! of its own underneath, named after its folder, so that a person looking at
-//! the location sees which project they are looking at.
+//! the location sees which project they are looking at. The trees themselves
+//! are named in words rather than keyed, because two of them made from `main`
+//! this afternoon are otherwise the same in every fact anybody holds about
+//! them — see [`name_in`].
 //!
 //! Git is driven through its own command line, for the reason
 //! [`crate::project`] gives: the engine already requires git, and a linked
@@ -252,9 +255,10 @@ pub fn find(project: &Path, path: &str) -> Result<Worktree, ProjectError> {
 
 /// Make a tree for one conversation, detached at the project's `HEAD`.
 ///
-/// `key` names the directory: one of this application's own minted keys, never
-/// anything a person typed. A directory name is not a branch name — nobody has
-/// a convention for it, and it has to be unique without anybody being asked.
+/// The directory is named by [`name_in`], never by anything a person typed. A
+/// directory name is not a branch name — nobody has a convention for it, and it
+/// has to be unique without anybody being asked. `key` is one of this
+/// application's own minted keys, and it is what the name falls back to.
 ///
 /// # Errors
 ///
@@ -286,13 +290,17 @@ pub fn create_at(location: &Path, project: &Path, key: &str) -> Result<Worktree,
     // failure — the commit above is what the tree is made from either way.
     let base = branch_at_head(project);
 
-    let path = location.join(directory_for(project)).join(key);
-    std::fs::create_dir_all(path.parent().unwrap_or(&path)).map_err(|error| {
+    // Made before a name is asked for, because asking is reading the directory:
+    // a name is free when nothing of that name is in there, and a directory
+    // that is not there yet answers that for every name at once.
+    let parent = location.join(directory_for(project));
+    std::fs::create_dir_all(&parent).map_err(|error| {
         ProjectError::new(
             "worktree_location",
-            format!("could not use {}: {error}", path.display()),
+            format!("could not use {}: {error}", parent.display()),
         )
     })?;
+    let path = parent.join(name_in(&parent, key));
 
     let output = run_git(
         project,
@@ -551,6 +559,32 @@ fn directory_for(project: &Path) -> String {
     format!("{name}-{:016x}", fingerprint(project))
 }
 
+/// What one tree is called, inside the directory its project's trees live in.
+///
+/// Three words, because a tree has to be told apart from the tree beside it and
+/// nothing else about it can do that: two made from `main` this afternoon carry
+/// the same branch, the same commit and the same emptiness, so a menu offering
+/// them has the name and nothing more. A key — `s4` — is unique and says
+/// nothing, which makes it a fine identity and a poor answer to *which one*.
+///
+/// **The name is the directory, not a label kept beside it.** A word shown in
+/// the window while the path stayed keyed would be two names for one tree: the
+/// one somebody chose in a menu, and the one git lists, the settings show and
+/// the agent's shell is standing in. One name is worth the collisions.
+///
+/// And they do collide — the lists are finite — so a name already taken here is
+/// dropped and another asked for. The key ends it, because a tree that could
+/// not be made is a worse outcome than a tree called something unpronounceable.
+fn name_in(parent: &Path, key: &str) -> String {
+    (0..NAMES_ASKED_FOR)
+        .filter_map(|_| petname::petname(3, "-"))
+        .find(|name| !parent.join(name).exists())
+        .unwrap_or_else(|| key.to_owned())
+}
+
+/// How many names are asked for before the key is used instead.
+const NAMES_ASKED_FOR: u8 = 8;
+
 /// FNV-1a over the path's bytes. Not a security property: this only has to
 /// separate two folders with the same name and be the same number tomorrow.
 fn fingerprint(path: &Path) -> u64 {
@@ -615,7 +649,7 @@ fn parse_list(output: &str) -> Vec<Worktree> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Worktree, directory_for, parse_list};
+    use super::{Worktree, directory_for, name_in, parse_list};
     use std::path::Path;
 
     #[test]
@@ -625,6 +659,35 @@ mod tests {
         assert_ne!(first, second);
         assert!(first.starts_with("sync-"), "{first}");
         assert!(second.starts_with("sync-"), "{second}");
+    }
+
+    /// The name a tree gets is free at the moment it is given.
+    ///
+    /// Nothing else enforces this: git would refuse to add a second tree at a
+    /// path that is taken, so a name handed out twice is a tree that could not
+    /// be made rather than a tree with a confusing name.
+    #[test]
+    fn a_name_is_never_one_already_standing_in_the_directory() {
+        let parent = tempfile::tempdir().expect("a temporary folder");
+        let first = name_in(parent.path(), "s1");
+        std::fs::create_dir(parent.path().join(&first)).expect("a tree of that name");
+        let second = name_in(parent.path(), "s1");
+        assert_ne!(first, second, "{first} was taken");
+    }
+
+    /// The key is the last resort and not the ordinary answer.
+    ///
+    /// Exhausting the real word lists in a test is not possible, so what is
+    /// checked is the other end: a directory where the key is the one name
+    /// taken still gets words, because the words are what a person reads.
+    #[test]
+    fn a_tree_is_called_by_words_rather_than_by_the_key_it_was_made_for() {
+        let parent = tempfile::tempdir().expect("a temporary folder");
+        // A file rather than a directory, because `exists` is what the minting
+        // asks and a name is taken either way.
+        std::fs::write(parent.path().join("s1"), "").expect("the key, taken too");
+        let name = name_in(parent.path(), "s1");
+        assert_eq!(name.split('-').count(), 3, "a minted name: {name}");
     }
 
     #[test]

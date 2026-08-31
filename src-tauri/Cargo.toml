@@ -51,6 +51,17 @@ async-trait = "0.1.92"
 base64 = "0.22"
 getrandom = "0.3"
 jsonc-parser = { version = "0.33.1", features = ["serde"] }
+# The words a working tree is named with. Two trees made from `main` on the
+# same afternoon are identical in everything git holds about them, so the name
+# is the only thing anybody can choose between them by — and a word list is
+# exactly the kind of thing that is worse when written by hand: ours would be
+# fifty words long, repeat itself by the third tree, and be nobody's job to
+# extend. The command line half of the crate is left out; only the lists and
+# the generator are wanted here.
+petname = { version = "3.2.0", default-features = false, features = [
+    "default-rng",
+    "default-words",
+] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sync-extensions = { path = "crates/sync-extensions" }

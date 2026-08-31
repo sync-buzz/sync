@@ -428,3 +428,43 @@ fn a_tree_whose_directory_is_gone_is_left_out_and_left_alone() {
         "and git still holds it: reading a list did not prune anything"
     );
 }
+
+/// Two trees of one project, and the only thing that tells them apart.
+///
+/// Both are made from `main`, at the same commit, with nothing committed in
+/// either — which is every fact a menu has about them apart from the name. So
+/// the names have to differ, and they have to be the same names git lists:
+/// a directory keyed by the conversation while the window showed a word would
+/// leave a person holding two spellings of one tree.
+#[test]
+fn two_trees_of_one_project_are_told_apart_by_their_names() {
+    if !git_is_installed() {
+        eprintln!("skipping: git is not installed");
+        return;
+    }
+    let project = tempfile::tempdir().expect("a temporary folder");
+    let trees = tempfile::tempdir().expect("a temporary folder");
+    repository(project.path());
+
+    // The same key for both, which is what a caller does when the two trees
+    // belong to one conversation — and what used to be a collision.
+    let first = create_at(trees.path(), project.path(), "s1").expect("a working tree");
+    let second = create_at(trees.path(), project.path(), "s1").expect("a second working tree");
+
+    assert_ne!(first.path, second.path, "two trees, two directories");
+    for tree in [&first, &second] {
+        let name = Path::new(&tree.path)
+            .file_name()
+            .and_then(std::ffi::OsStr::to_str)
+            .expect("a directory name");
+        assert_eq!(
+            name.split('-').count(),
+            3,
+            "a name somebody can say out loud rather than a key: {name}"
+        );
+        assert!(
+            git(project.path(), &["worktree", "list", "--porcelain"]).contains(name),
+            "and it is the name git lists, not a second one kept beside it: {name}"
+        );
+    }
+}
