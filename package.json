@@ -13,7 +13,6 @@
     "api:publish": "node scripts/api-surface.mjs && node scripts/api-publish.mjs",
     "tauri": "tauri",
     "tauri:build": "PATH=/usr/bin:$PATH tauri build",
-    "extensions:seed": "node scripts/seed-extensions.mjs",
     "icons": "node scripts/generate-icons.mjs"
   },
   "dependencies": {

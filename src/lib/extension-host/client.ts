@@ -174,10 +174,11 @@ export interface Manifest {
 /**
  * Where a package came from, and therefore how much it is trusted.
  *
- * `seeded` is what shipped with the application: not fetched, as old as this
- * build, and replaced by an ordinary registry install the moment there is a
- * newer one. It is its own word rather than `registry` because the card is
- * where somebody reads what came through which door.
+ * `seeded` is read and never written. Builds through v0.9.0 carried the
+ * recommended archives inside the bundle and unpacked them on a first launch;
+ * nothing ships with the application now. The word stays because those pointers
+ * are still on machines, and a card has to be able to say what it is looking
+ * at — one of them moves to `registry` the moment it is updated.
  */
 export type ExtensionSource = "registry" | "file" | "folder" | "seeded";
 

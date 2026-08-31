@@ -27,7 +27,6 @@ use sync_extensions::{
     TypeDefinition, read_prompt, read_types,
 };
 use tauri::http::{Request, Response, StatusCode};
-use tauri::path::BaseDirectory;
 use tauri::{AppHandle, Manager, Runtime, UriSchemeContext};
 
 /// The scheme an unpacked extension's files are served under.
@@ -124,60 +123,6 @@ fn extensions_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
         .app_data_dir()
         .map(|dir| dir.join("extensions"))
         .map_err(|error| error.to_string())
-}
-
-/// Where the archives this build ships with live inside the bundle.
-///
-/// Filled by `pnpm extensions:seed` before a release, from the published
-/// registry, and empty in a checkout where nobody has run it. Empty is not an
-/// error: the archives are release artefacts of another repository, and a
-/// developer's build is allowed to be without them.
-const SEEDED: &str = "resources/extensions";
-
-/// Unpack the extensions this build ships with, on a machine that lacks them.
-///
-/// The reason this exists is a first launch with no network. Nothing here is
-/// built into the application — the code is not in this tree, the archives were
-/// compiled by the registry's CI, and they install through the ordinary path
-/// and update from the registry afterwards. Seeding is only about *when* the
-/// bytes arrive, which is why the archives are resources rather than modules.
-///
-/// An id something already serves is left alone; see `Store::seed`. Answers
-/// with what was unpacked, which is empty on every launch after the first.
-///
-/// # Errors
-///
-/// When the artefact directory cannot be reached, or an archive this build
-/// ships with is not readable — which is a defect in the build rather than
-/// anything a person did, and is why it is not swallowed.
-pub fn seed<R: Runtime>(app: &AppHandle<R>) -> Result<Vec<String>, String> {
-    let directory = app
-        .path()
-        .resolve(SEEDED, BaseDirectory::Resource)
-        .map_err(|error| error.to_string())?;
-    let Ok(entries) = std::fs::read_dir(&directory) else {
-        return Ok(Vec::new());
-    };
-
-    let store = store(app)?;
-    let mut seeded = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(std::ffi::OsStr::to_str) != Some("syncext") {
-            continue;
-        }
-        let archive = Archive::open(&path, SIGNING_KEY)
-            .map_err(|error| format!("{} is not a readable package: {error}", path.display()))?;
-        let id = archive.manifest().id.clone();
-        if store
-            .seed(&archive)
-            .map_err(|error| format!("{id} could not be unpacked: {error}"))?
-            .is_some()
-        {
-            seeded.push(id);
-        }
-    }
-    Ok(seeded)
 }
 
 // ---------------------------------------------------------------------------
@@ -795,66 +740,6 @@ mod tests {
             assert!(
                 refused.contains(said),
                 "the refusal names what to put where: {said} missing from {refused}"
-            );
-        }
-    }
-
-    /// The archives in the tree, without Tauri's idea of where resources are.
-    ///
-    /// [`seed`] answers that question at runtime and cannot be called without an
-    /// application; what is checked here is the half that can be wrong in the
-    /// repository — an archive committed corrupt, truncated, or built by a
-    /// packer this build no longer reads.
-    fn shipped() -> Vec<PathBuf> {
-        let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join(SEEDED);
-        let Ok(entries) = std::fs::read_dir(directory) else {
-            return Vec::new();
-        };
-        entries
-            .flatten()
-            .map(|entry| entry.path())
-            .filter(|path| path.extension().and_then(std::ffi::OsStr::to_str) == Some("syncext"))
-            .collect()
-    }
-
-    /// Every archive this build ships with is one this build can open.
-    ///
-    /// The failure this catches is a release that seeds nothing on every machine
-    /// it installs on, which no other test would notice: seeding is allowed to
-    /// find no archives, so an unreadable one and an absent one look the same
-    /// from inside [`seed`].
-    #[test]
-    fn the_archives_this_build_ships_with_are_readable_and_seed_once() {
-        let shipped = shipped();
-        assert!(
-            !shipped.is_empty(),
-            "no archives are shipped — run `pnpm extensions:seed`"
-        );
-
-        let root = tempfile::tempdir().expect("a directory to seed into");
-        let store = Store::at(root.path().to_path_buf());
-
-        for path in &shipped {
-            let archive = Archive::open(path, SIGNING_KEY)
-                .unwrap_or_else(|error| panic!("{} is not readable: {error}", path.display()));
-            let seeded = store
-                .seed(&archive)
-                .unwrap_or_else(|error| panic!("{} did not seed: {error}", path.display()));
-            assert!(
-                seeded.is_some(),
-                "{} was skipped on a machine holding nothing",
-                path.display()
-            );
-        }
-
-        // The second pass is the guard that keeps a launch from undoing an
-        // update: everything is already served, so nothing is seeded again.
-        for path in &shipped {
-            let archive = Archive::open(path, SIGNING_KEY).expect("readable a second time");
-            assert!(
-                store.seed(&archive).expect("seeded").is_none(),
-                "{} seeded over what was already there",
-                path.display()
             );
         }
     }

@@ -99,8 +99,9 @@ single place.
   `cargo test -p sync-extensions --test live_registry -- --ignored`.
 - **Changing what a project record carries means rebuilding the sidecar**, or
   the window talks to an engine that has never heard of the field.
-- **Extensions are linked, not compiled in.** Reseed the bundled archives with
-  `pnpm extensions:seed` when the packages they came from move.
+- **The application ships no packages.** Nothing is bundled and nothing is
+  unpacked at launch: an extension arrives from the registry or from a folder,
+  which is what makes *installed* a thing a person did.
 
 ## Contributing an extension rather than core
 

@@ -70,9 +70,6 @@
       "minimumSystemVersion": "13.0",
       "signingIdentity": "Developer ID Application: Nikolai Evseev (5YBHMN5PDS)"
     },
-    "resources": [
-      "resources/extensions/*.syncext"
-    ],
     "externalBin": [
       "binaries/sync-mcp"
     ]

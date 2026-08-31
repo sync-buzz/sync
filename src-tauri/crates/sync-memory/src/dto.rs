@@ -525,7 +525,7 @@ pub struct InstalledExtension {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub integrity: Option<String>,
     /// Where the package came from: `registry`, `file`, `folder` or
-    /// `seeded` — the last being an archive the build shipped with.
+    /// `seeded` — the last written only by builds that shipped archives in the bundle.
     ///
     /// Kept because it is the difference between a dependency and a working
     /// tree. A project declaring one that came from a folder was composed

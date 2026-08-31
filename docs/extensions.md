@@ -1003,14 +1003,20 @@ hosts are the package's rather than the build's, out of its own manifest, and
 the webview still gains nothing. See §4 — a package reaching outside this window
 is a permission with an extent, not a switch.
 
-### Nothing is built in, and a fresh install still works
+### Nothing is built in, and nothing rides along
 
-The recommended extensions are **seeded**: their `.syncext` archives are bundle
-resources, unpacked into the artefact cache on first launch. They are not built
-into the application — the code is not in this tree, they are compiled by the
-registry's CI, they install through the ordinary path, and they update from the
-registry independently of the application. A first launch with no network can
-compose a project; a first launch with one gets whatever is newer.
+The application ships no packages. A fresh install has an empty window until
+somebody installs something, and everything arrives through the one door: the
+registry, or a folder somebody is writing in.
+
+Builds through v0.9.0 did carry the recommended archives as bundle resources and
+unpacked them on a first launch, so that a machine with no network could compose
+a project. That is gone, and what it cost is worth stating because the trade was
+made deliberately. **A package that arrived with the application is
+indistinguishable from one somebody chose**, which is the whole question the
+marketplace answers — and the archives went stale in the bundle, so every
+package release meant refreshing them and shipping seven of them to everybody to
+update one. The install a person makes is now the only install there is.
 
 ## 8. Installing, and what it writes
 
@@ -1112,7 +1118,7 @@ needs a Sync this build is below is one whose older releases may still install.
 whoever is writing them, so replacing it with a published artefact would stop
 serving somebody's working copy from the one screen that exists to make writing
 an extension possible. Everything else may be moved, including a package that
-arrived as a file or came seeded with the build.
+arrived as a file, and one an older build unpacked from its own bundle.
 
 **The mark says news, not a number.** A dot on the pinned Extensions row, by
 rule 11 in `design-foundation.md`, and only for what could actually be moved

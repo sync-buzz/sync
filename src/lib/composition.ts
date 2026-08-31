@@ -109,7 +109,7 @@ interface Resolved {
   readonly version: string | null;
   /** The artefact's sha256, and `undefined` for a folder being written in. */
   readonly integrity: string | undefined;
-  /** `registry`, `file`, `folder`, or `seeded` for one the build shipped. */
+  /** `registry`, `file`, `folder`, or `seeded` — the last from an older build. */
   readonly source: string | undefined;
   readonly types: readonly ExtensionTypeInput[];
   readonly prompt: string | undefined;

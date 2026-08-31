@@ -91,19 +91,6 @@ pub fn run() {
             if let Err(error) = tray::install(app) {
                 eprintln!("the menu bar item could not be created: {error}");
             }
-            // The archives this build ships with, so a machine that has never
-            // had a network can still compose a project. Local, so a launch
-            // waits on nothing, and nothing already serving an id is touched.
-            match extensions::seed(&handle) {
-                Ok(seeded) if !seeded.is_empty() => {
-                    println!("unpacked the extensions this build ships with: {seeded:?}");
-                }
-                Ok(_) => {}
-                // A defect in the build rather than in this machine, so it is
-                // said out loud — and not fatal, because everything else about
-                // Sync works without it and the registry is still a door.
-                Err(error) => eprintln!("the extensions this build ships with: {error}"),
-            }
             // The clock, in the process that survives every window being
             // closed. It is started here rather than beside a window because
             // that is the whole point of it: a project ticks whether or not

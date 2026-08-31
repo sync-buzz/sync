@@ -55,10 +55,13 @@ pub enum Source {
     /// Unpacked from the archives this build ships with, on a machine that had
     /// nothing under that id yet.
     ///
-    /// Its own word rather than [`Source::Registry`], because it is a different
-    /// claim: these bytes were not fetched, they came with the application, and
-    /// they are as old as it is. What replaces one is an ordinary registry
-    /// install, and then the pointer says so.
+    /// **Read, never written.** Builds through v0.9.0 shipped the recommended
+    /// archives inside the bundle and unpacked them on a first launch; nothing
+    /// does now, and a package arrives from the registry or from a folder. The
+    /// word stays because pointers written by those builds are still on disk,
+    /// and a variant removed from this enum is a pointer `serde` cannot read —
+    /// an installed extension disappearing from the window with no account of
+    /// why.
     Seeded,
 }
 
@@ -169,28 +172,6 @@ impl Store {
             pointer,
             root: destination,
         })
-    }
-
-    /// Install `archive` only where nothing serves its id yet.
-    ///
-    /// What seeding is: a build ships with the recommended archives so that a
-    /// machine which has never had a network can still compose a project, and
-    /// unpacks them on the machines that have nothing under those ids.
-    ///
-    /// The condition is the whole point. Installing unconditionally would put
-    /// this build's age back over whatever somebody had updated to, on every
-    /// launch, and quietly — a pointer moving backwards looks exactly like a
-    /// pointer that never moved. So a seeded archive loses to anything already
-    /// there, including an older one somebody pinned deliberately.
-    ///
-    /// # Errors
-    ///
-    /// Whatever reading the current pointer or unpacking the archive refused.
-    pub fn seed(&self, archive: &Archive) -> Result<Option<Installed>, StoreError> {
-        if self.resolve(&archive.manifest().id)?.is_some() {
-            return Ok(None);
-        }
-        self.install(archive, Source::Seeded).map(Some)
     }
 
     /// Points an id at a folder somebody is writing in.
@@ -556,53 +537,5 @@ mod tests {
 
         std::fs::write(home.path().join("refs/ghost.json"), "{ not json").expect("writes");
         assert_eq!(store.list().expect("lists").len(), 1);
-    }
-
-    #[test]
-    fn seeding_a_machine_with_nothing_unpacks_the_archive() {
-        let root = tempfile::tempdir().expect("a directory");
-        let store = Store::at(root.path().to_path_buf());
-        let file = pack("export const a = 1;");
-
-        let archive = Archive::open(file.path(), None).expect("a readable archive");
-        let seeded = store.seed(&archive).expect("seeded").expect("something");
-
-        assert_eq!(seeded.pointer.source, Source::Seeded);
-        assert_eq!(seeded.pointer.version, "1.0.0");
-        assert_eq!(
-            store
-                .resolve("probe")
-                .expect("resolved")
-                .map(|held| held.pointer.source),
-            Some(Source::Seeded)
-        );
-    }
-
-    /// The rule that keeps a launch from undoing an update: whatever is already
-    /// there wins, however it got there and whatever its version.
-    #[test]
-    fn seeding_leaves_an_id_something_already_serves() {
-        let root = tempfile::tempdir().expect("a directory");
-        let store = Store::at(root.path().to_path_buf());
-
-        let chosen = pack("export const chosen = true;");
-        let chosen = Archive::open(chosen.path(), None).expect("a readable archive");
-        store
-            .install(&chosen, Source::Registry)
-            .expect("installed from the registry");
-
-        let shipped = pack("export const shipped = true;");
-        let shipped = Archive::open(shipped.path(), None).expect("a readable archive");
-        assert!(
-            store.seed(&shipped).expect("seeded").is_none(),
-            "seeding replaced what was already serving the id"
-        );
-
-        let held = store
-            .resolve("probe")
-            .expect("resolved")
-            .expect("something");
-        assert_eq!(held.pointer.source, Source::Registry);
-        assert_eq!(held.pointer.integrity.as_deref(), Some(chosen.digest()));
     }
 }

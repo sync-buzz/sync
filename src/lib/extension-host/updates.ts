@@ -60,7 +60,7 @@ export interface AvailableUpdate {
  * artefact would offer to stop serving somebody's working copy from the one
  * screen that is meant to make writing an extension possible. Everything else
  * is a fixed artefact that the registry can have a newer version of, including
- * one that arrived as a file or came seeded with this build.
+ * one that arrived as a file, and one an older build unpacked from its bundle.
  */
 function mayBeUpdated(source: string | undefined): boolean {
   return source !== undefined && source !== "folder";

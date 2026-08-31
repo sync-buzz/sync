@@ -114,8 +114,8 @@ export interface InstalledExtension {
    */
   readonly integrity?: string;
   /**
-   * Where the package came from: `registry`, `file`, `folder`, or `seeded`
-   * for an archive the build shipped with.
+   * Where the package came from: `registry`, `file`, `folder`, or `seeded` —
+   * the last written only by builds that shipped archives inside the bundle.
    *
    * The difference between a dependency and somebody's working tree. A project
    * declaring one that came from a folder was composed against code being
