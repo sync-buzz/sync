@@ -1,6 +1,7 @@
 import {
   AudioLines,
   Bot,
+  GitBranch,
   KeyRound,
   Palette,
   Radio,
@@ -12,10 +13,11 @@ import {
  * The sections of the settings window.
  *
  * Settings are the installation's: what is true of this machine whatever project
- * is open, and whatever project is not. Six things are — how the window is
+ * is open, and whatever project is not. Seven things are — how the window is
  * painted, how a record's text is set, what serves every project this machine
- * holds, which agents reach Sync, what it says out loud, and the secrets it
- * keeps on a package's behalf.
+ * holds, which agents reach Sync, where work happens when it happens somewhere
+ * disposable, what it says out loud, and the secrets it keeps on a package's
+ * behalf.
  *
  * Text is its own section rather than a part of Appearance, because the two are
  * different questions asked by different people. Appearance is what the window
@@ -71,6 +73,12 @@ export const SETTINGS_SECTIONS = [
     label: "Agents",
     icon: Bot,
     headline: "Agents reach a project's knowledge through Sync.",
+  },
+  {
+    id: "worktrees",
+    label: "Working trees",
+    icon: GitBranch,
+    headline: "Where a conversation works when it works somewhere disposable.",
   },
   {
     id: "vault",

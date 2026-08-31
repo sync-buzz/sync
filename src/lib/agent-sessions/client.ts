@@ -17,6 +17,8 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 
+import type { Worktree, WorktreeChoice } from "@/lib/worktrees/client";
+
 /** One agent, and whether this machine can raise it. */
 export interface AgentDescriptor {
   readonly id: string;
@@ -93,6 +95,17 @@ export interface SessionRow {
    * deliberately — a list already answers it.
    */
   readonly source?: SessionSource;
+  /**
+   * The working tree this conversation is being held in, when it is not being
+   * held in the project's own.
+   *
+   * `undefined` is the ordinary answer. When it is there, it is what both
+   * gestures a tree offers are addressed by — keeping the work under a name,
+   * and throwing it away — and it is why the row carries the tree rather than
+   * only the directory: `cwd` says where the agent is working, this says that
+   * the place is disposable and where it came from.
+   */
+  readonly worktree?: Worktree;
   /**
    * The record this conversation is being held under, when there is one.
    *
@@ -453,12 +466,23 @@ export function openSession(args: {
    * find that out afterwards.
    */
   about?: SessionAbout | null;
+  /**
+   * Where to work: the project itself when this is absent, a tree made now, or
+   * one that is already there.
+   *
+   * Answered when the conversation is opened and never afterwards. The
+   * directory goes to the agent in `session/new` and it reads files from there,
+   * so a caller that could move it later would be moving the ground under an
+   * agent that has already answered about what it found.
+   */
+  worktree?: WorktreeChoice | null;
 }): Promise<OpenedSession> {
   return call<OpenedSession>("session_open", {
     agentId: args.agentId,
     cwd: args.cwd,
     model: args.model ?? null,
     about: args.about ?? null,
+    worktree: args.worktree ?? null,
   });
 }
 
@@ -486,6 +510,15 @@ export interface RememberedConversation {
   readonly agentId: string;
   readonly agentName: string;
   readonly cwd: string;
+  /**
+   * The working tree it was held in, when it was held in one.
+   *
+   * Kept with the pointer because resuming has to land in the same files, and a
+   * tree is the one part of a conversation somebody can delete from underneath
+   * it: a pointer naming a tree that is gone is refused rather than quietly
+   * resumed in the project.
+   */
+  readonly worktree?: Worktree;
   readonly title: string | null;
   readonly openedAtMs: number;
   readonly lastSeenMs: number;

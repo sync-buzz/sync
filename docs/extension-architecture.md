@@ -519,7 +519,7 @@ the thing* — a platform with no bundled ACP sidecar publishes the same
 | Capability | What a person agrees to | Checked | Pairs with |
 | --- | --- | --- | --- |
 | `records` | The corpus: types, records, freshness, the editor, the metadata panel | manifest | |
-| `agents.acp` | Agents driven over ACP, as processes on this machine | manifest | |
+| `agents.acp` | Agents driven over ACP, as processes on this machine, and where each conversation works | manifest | §8b |
 | `markdown.plugins` | Replacing how one block of stored prose is drawn | manifest | |
 | `native-menu` | Secondary click opens a system menu rather than a drawn one | manifest | |
 | `folders` | The repository's own folders, as a hierarchy records are filed in | manifest | |
@@ -731,6 +731,32 @@ on, most of them their own.
 
 ---
 
+## 8b. Where a conversation works
+
+A conversation is held in the project's own working tree unless the package
+opening it says otherwise. `startSession` takes a `worktree`: `"new"` makes one,
+or a tree that already exists is named by its path. The tree is made before the
+agent is raised, so a tree that cannot be made is a conversation that never
+opens rather than one that quietly opened somewhere else.
+
+**The tree is detached and carries no branch.** Nothing is added to the
+repository while the work is being done, because branch naming is a convention
+of whoever owns the repository. `adoptWorktree` is where a name is asked for and
+a branch is created; `discardWorktree` removes the tree, and the commits in it
+go too. A row says which tree it is in — `SessionRow.worktree` — and that is
+what both gestures are addressed by.
+
+Two things a package cannot do, and both are the same rule. It cannot name a
+directory that is not one of this project's trees: paths are checked against
+git's own list, so where trees live stays the installation's choice. And it
+cannot move a running conversation to another tree: the directory reached the
+agent in `session/new` and it has read files from there.
+
+What this buys is reversibility, not safety. An agent in a tree has a shell like
+any other, and §9 of `docs/background.md` promises no sandbox.
+
+---
+
 ## 9. Where each fact lives
 
 | Fact | Where | Travels with the repository | Why there |
@@ -741,6 +767,8 @@ on, most of them their own.
 | What a package tells an agent, and the tools it offers | Beside the declaration, rewritten from the package when they disagree | **yes** | Read by something that cannot see the catalogue |
 | A package's secrets | The system keychain, under one service, the owner half composed in Rust | no | It has to be able to disappear; a copy on a Git remote cannot be called back |
 | Which clocks somebody switched off | A file in the app config directory, by project | no | The clock reads it with every window closed |
+| Where working trees are made | A file in the app config directory | no | Which disk has room is a fact about a machine, and a path in a repository would be wrong on the next one that cloned it |
+| What a working tree was made from | A note in that tree's own administrative directory | no | Git removes the directory with the tree, so the note lives exactly as long as what it describes |
 | The last time each handler ran | Beside that file | no | It is this machine's history, not the project's |
 | Which area is selected, and every panel width | React state | no | It is this run of the window's |
 
@@ -856,6 +884,7 @@ a statement rather than a gate.
 | *This build cannot do that* at a call | `net.write` for a verb that is not `GET` or `HEAD`, `vault` without the capability, or `work.order` without `work.agent` | Rust, at the call |
 | A request refused before it leaves | A host the manifest does not name, on the first request or on any redirect after it | `sync-extensions/src/net.rs` |
 | A handler that fails at five seconds | The wall clock. It is not configurable, because an extension that could raise its own ceiling has none | `sync-handlers` |
+| A conversation that will not open in a tree | The folder is not a repository, has no commit yet, or the path named is not one of this project's trees | `src-tauri/src/worktree.rs`, at the call |
 | A field written and read back as absent | The window and the engine agree on a shape, and an unknown member is dropped without an error | Write it, read it back, and cover it with a test that does both |
 | A field that will not write at all | A product field named after an envelope member — `title`, `folder`, `tags` | §5 |
 
@@ -920,6 +949,7 @@ a red build; the rest are held in review.
 | What is the isolate, and what is in it? | `src-tauri/crates/sync-handlers/src/lib.rs` |
 | Who may ask a handler for what? | `src-tauri/src/handlers.rs` |
 | What ticks with no window open? | `src-tauri/src/schedule.rs` |
+| Where is a conversation held, and what becomes of the tree? | `src-tauri/src/worktree.rs` |
 | What serves `syncext://`? | `src-tauri/src/extensions.rs` |
 | Who may ask the keychain, and for whose secret? | `src-tauri/src/vault.rs` |
 | How is a secret kept, and how is its address composed? | `src-tauri/crates/sync-vault/src/lib.rs` |

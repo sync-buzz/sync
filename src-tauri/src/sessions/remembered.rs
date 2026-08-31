@@ -63,11 +63,23 @@ pub struct Remembered {
     pub agent_id: String,
     /// What that agent is called, so a row can be drawn without the catalogue.
     pub agent_name: String,
-    /// The directory the conversation was held in. Checked before resuming: the
+    /// The project the conversation was held in. Checked before resuming: the
     /// same repository cloned elsewhere is a different working tree, and an
     /// agent asked to resume into it is being asked about files that are not
     /// the ones it read.
+    ///
+    /// Where the agent actually worked is [`Self::worktree`] when that was not
+    /// the project's own tree.
     pub cwd: String,
+    /// The disposable tree it was held in, when it was held in one.
+    ///
+    /// Written down because resuming has to land in the same files, and a tree
+    /// is the one thing about a conversation that a person can delete from
+    /// underneath it. A pointer naming a tree that is gone is refused rather
+    /// than quietly resumed in the project — the agent would answer about files
+    /// it never read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree: Option<crate::worktree::Worktree>,
     /// What the conversation is called, or `None` before anything was said.
     pub title: Option<String>,
     pub opened_at_ms: u64,
@@ -232,6 +244,7 @@ mod tests {
             agent_id: "claude".to_owned(),
             agent_name: "Claude Code".to_owned(),
             cwd: "/work/repo".to_owned(),
+            worktree: None,
             title: Some("Why is it slow?".to_owned()),
             opened_at_ms: 1_000,
             last_seen_ms: seen,

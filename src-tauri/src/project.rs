@@ -480,7 +480,7 @@ fn repository_root(path: &Path) -> Result<Option<String>, ProjectError> {
     Ok((!root.is_empty()).then_some(root))
 }
 
-fn run_git(directory: &Path, arguments: &[&str]) -> Result<Output, ProjectError> {
+pub(crate) fn run_git(directory: &Path, arguments: &[&str]) -> Result<Output, ProjectError> {
     Command::new("git")
         .current_dir(directory)
         .args(arguments)
@@ -496,7 +496,7 @@ fn run_git(directory: &Path, arguments: &[&str]) -> Result<Output, ProjectError>
 
 /// What git said about a failure, or a sentence of our own when it said
 /// nothing worth repeating.
-fn git_message(output: &Output, fallback: &str) -> String {
+pub(crate) fn git_message(output: &Output, fallback: &str) -> String {
     let reported = String::from_utf8_lossy(&output.stderr).trim().to_owned();
     if reported.is_empty() {
         fallback.to_owned()

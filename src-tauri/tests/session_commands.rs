@@ -24,7 +24,8 @@
 //! conversation was ordered by an extension.
 
 use serde_json::Value;
-use sync_lib::sessions::live::{About, Session, Sessions, Source};
+use sync_lib::sessions::live::{About, Place, Session, Sessions, Source};
+use sync_lib::worktree::Worktree;
 use tauri::test::{
     INVOKE_KEY, MockRuntime, get_ipc_response, mock_builder, mock_context, noop_assets,
 };
@@ -77,7 +78,7 @@ fn a_conversation_an_extension_ordered_says_so_across_the_boundary() {
         sessions.mint_key(),
         "claude".to_owned(),
         "Claude Code".to_owned(),
-        std::env::temp_dir(),
+        Place::project(std::env::temp_dir()),
         Some(Source {
             work: "w1787673512158-1".to_owned(),
             extension_id: "issues".to_owned(),
@@ -116,7 +117,7 @@ fn a_conversation_held_under_a_record_says_which_one() {
         sessions.mint_key(),
         "claude".to_owned(),
         "Claude Code".to_owned(),
-        std::env::temp_dir(),
+        Place::project(std::env::temp_dir()),
         None,
         Some(About {
             key: "task-4c1a".to_owned(),
@@ -160,7 +161,7 @@ fn a_conversation_a_person_started_says_nothing_about_a_source() {
         sessions.mint_key(),
         "claude".to_owned(),
         "Claude Code".to_owned(),
-        std::env::temp_dir(),
+        Place::project(std::env::temp_dir()),
         None,
         None,
     ));
@@ -174,6 +175,75 @@ fn a_conversation_a_person_started_says_nothing_about_a_source() {
         row["agentId"], "claude",
         "and the rest of the row is unaffected: {row}"
     );
+}
+
+/// The tree a conversation is being held in, read back the way the window
+/// reads it.
+///
+/// Here for the reason the source is: a field the window never receives is a
+/// gesture the window cannot offer, and this one carries the two a tree exists
+/// for — naming the work, and throwing it away. Both take the path, so a row
+/// that lost it would leave a tree on disk with nothing pointing at it.
+///
+/// `cwd` is asserted beside it because the pair is the whole claim: the agent
+/// is working in the tree, and the conversation still belongs to the project.
+#[test]
+fn a_conversation_in_a_working_tree_says_where_it_is() {
+    let (app, webview) = app();
+    let sessions = tauri::Manager::state::<Sessions>(&app);
+    let project = std::env::temp_dir().join("a-project");
+    let tree = project.join("worktrees").join("s1");
+    sessions.insert(Session::new(
+        sessions.mint_key(),
+        "claude".to_owned(),
+        "Claude Code".to_owned(),
+        Place {
+            project: project.clone(),
+            worktree: Some(Worktree {
+                path: tree.to_string_lossy().into_owned(),
+                base: Some("main".to_owned()),
+                base_commit: "1111111111111111111111111111111111111111".to_owned(),
+                head: "1111111111111111111111111111111111111111".to_owned(),
+            }),
+        },
+        None,
+        None,
+    ));
+
+    let row = listed(&webview)[0].clone();
+    assert_eq!(
+        row["worktree"]["path"],
+        tree.to_string_lossy().into_owned(),
+        "what naming the work and discarding it are both addressed by: {row}"
+    );
+    assert_eq!(
+        row["worktree"]["base"], "main",
+        "and where the work was aimed, which is all a person has to decide against: {row}"
+    );
+    assert_eq!(
+        row["cwd"],
+        tree.to_string_lossy().into_owned(),
+        "the agent works in the tree: {row}"
+    );
+}
+
+/// And a conversation in the project's own tree says nothing about one, for the
+/// reason a person's conversation says nothing about a source.
+#[test]
+fn a_conversation_in_the_project_carries_no_tree() {
+    let (app, webview) = app();
+    let sessions = tauri::Manager::state::<Sessions>(&app);
+    sessions.insert(Session::new(
+        sessions.mint_key(),
+        "claude".to_owned(),
+        "Claude Code".to_owned(),
+        Place::project(std::env::temp_dir()),
+        None,
+        None,
+    ));
+
+    let row = listed(&webview)[0].clone();
+    assert!(row.get("worktree").is_none(), "absent, not null: {row}");
 }
 
 /// Both kinds in one list, which is what Chat is actually handed.
@@ -207,7 +277,7 @@ fn one_list_carries_both_and_they_can_be_told_apart() {
             sessions.mint_key(),
             "claude".to_owned(),
             "Claude Code".to_owned(),
-            std::env::temp_dir(),
+            Place::project(std::env::temp_dir()),
             source,
             None,
         ));

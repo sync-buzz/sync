@@ -24,7 +24,7 @@ nothing.
 - `src-tauri/capabilities/default.json` grants `core:default`, the window commands the header's drag region and the launch sequence need, and `dialog:allow-open` — not the dialog plugin's save, message or ask commands. It applies to the main window alone.
 - The settings window has a capability of its own, `src-tauri/capabilities/settings.json`: `core:default` plus `show` and `set-focus`. It opens no folder, borrows no memory session and drags no title bar, so none of the main window's other permissions reach it; closing it is the menu bar's own Close Window, which is not an IPC call.
 - The menu bar is built in `src/lib/app-menu.ts` from Tauri's menu API and installed once, from the main window, with `setAsAppMenu`. Nothing is granted for it: `core:default` already covers `core:menu`.
-- The `invoke` commands are declared in one list in `src-tauri/src/lib.rs`, and there are a hundred-odd of them across nine modules: `memory.rs` and `project.rs`, then `sessions.rs` for agent conversations, `extensions.rs` and `handlers.rs` for packages, `schedule.rs` for their clocks, `connect.rs` and `server.rs` for the MCP interface, `settings.rs`, `voice.rs` and `windows.rs`. Each parses its input, calls a domain function, and maps the result — no branching, no policy. The list being one list is the point: what the webview may ask for is readable in a single place.
+- The `invoke` commands are declared in one list in `src-tauri/src/lib.rs`, and there are a hundred-odd of them across ten modules: `memory.rs` and `project.rs`, then `sessions.rs` for agent conversations, `worktree.rs` for the disposable trees they can be held in, `extensions.rs` and `handlers.rs` for packages, `schedule.rs` for their clocks, `connect.rs` and `server.rs` for the MCP interface, `settings.rs`, `voice.rs` and `windows.rs`. Each parses its input, calls a domain function, and maps the result — no branching, no policy. The list being one list is the point: what the webview may ask for is readable in a single place.
 - A Content-Security-Policy is set for the packaged application. It allows only same-origin assets and the Tauri IPC endpoint.
 
 ### The style directives are not redundant
@@ -229,6 +229,7 @@ src/
     editor/           the plugin list, the Markdown round trip and its fidelity check
     memory/           typed client over the memory commands
     project/          typed client over the project commands, and what a project is
+    worktrees/        typed client over the working-tree commands
     settings/         appearance, typography, voice, agents, the window's role
     shell-layout.ts   panel roles, geometry and collapse rules
 src-tauri/
@@ -238,6 +239,7 @@ src-tauri/
   src/extensions.rs         the `syncext://` scheme and the package commands
   src/handlers.rs           calling into a package's service module
   src/schedule.rs           the clock that ticks with no window open
+  src/worktree.rs           a working tree made for one conversation, and thrown away with it
   src/connect.rs            writing Sync into an agent's own MCP configuration
   src/server.rs             the MCP interface other agents reach
   src/vault.rs              who may ask the keychain, and for whose secret

@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import type { WorktreeChoice } from "@/lib/worktrees/client";
+
 import {
   Channel,
   cancel as cancelTurn,
@@ -277,6 +279,15 @@ export async function startSession(args: {
   model?: string | null;
   /** The record it is being opened under, for a screen that opened it from one. */
   about?: SessionAbout | null;
+  /**
+   * Where to work: the project itself when this is absent, a working tree made
+   * now (`"new"`), or one that already exists, by its path.
+   *
+   * Chosen when the conversation is opened and fixed for its life — the
+   * directory has gone to the agent by the time there is anything to change it
+   * from.
+   */
+  worktree?: WorktreeChoice | null;
 }): Promise<OpenedSession> {
   return openSession(args);
 }

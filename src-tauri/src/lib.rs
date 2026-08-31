@@ -34,6 +34,7 @@ pub mod vault;
 pub mod voice;
 pub mod windows;
 pub mod work;
+pub mod worktree;
 
 pub fn run() {
     tauri::Builder::default()
@@ -152,6 +153,11 @@ pub fn run() {
             sessions::session_set_mode,
             sessions::session_close,
             sessions::session_forget,
+            worktree::worktree_location,
+            worktree::worktree_set_location,
+            worktree::worktree_list,
+            worktree::worktree_adopt,
+            worktree::worktree_discard,
             connect::agents_list,
             connect::agent_connect,
             connect::agent_disconnect,

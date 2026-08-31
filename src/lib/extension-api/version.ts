@@ -40,6 +40,23 @@ import { satisfies, valid, validRange } from "semver";
  * point of the number is that a manifest can state a range and be believed. The
  * cost is honest major bumps, which is the cost of meaning it.
  *
+ * **3.4.0** is where a conversation happens. `startSession` takes a `worktree`,
+ * which is either `"new"` or a tree that already exists, and a `SessionRow`
+ * carries the tree it is being held in; `worktreesIn`, `adoptWorktree` and
+ * `discardWorktree` are the list and the two decisions a tree ends in. Added,
+ * nothing changed, so a minor.
+ *
+ * A tree is chosen when a conversation is opened and not afterwards, which is
+ * the shape of the addition rather than an omission from it: the directory
+ * reaches the agent in `session/new` and it reads files from there, so a
+ * conversation whose tree could be changed under it would be an agent answering
+ * about files it never saw. What a package offers on a running conversation is
+ * therefore the two gestures, never the choice again.
+ *
+ * The path of an existing tree is checked against git's own list of this
+ * project's trees. Where trees live is the installation's choice, and a caller
+ * that could name any directory would have taken that choice away.
+ *
  * **3.3.0** is a package sending something that is not text. `NetRequest` gains
  * `bodyBase64` for bytes and `form` for `multipart/form-data`, and `NetPart` is
  * what one part of a form is. Members added and none changed, so a minor: a
@@ -487,7 +504,7 @@ import { satisfies, valid, validRange } from "semver";
  * `AreaModule`, `ActivationResult` — arrived in the same commit, which on its
  * own would have been a minor.
  */
-export const SYNC_API_VERSION = "3.3.0" as const;
+export const SYNC_API_VERSION = "3.4.0" as const;
 
 /**
  * What this build can do, as opposed to what its surface looks like.

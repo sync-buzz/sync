@@ -149,13 +149,64 @@ pub struct About {
     pub title: String,
 }
 
+/// Where a conversation happens.
+///
+/// One value rather than two arguments travelling together, because they are
+/// only ever meaningful as a pair: a tree without the project it belongs to
+/// cannot say whose conversation it is, and a project with a tree that is not
+/// inside it is a state nothing should be able to construct.
+#[derive(Clone, Debug)]
+pub struct Place {
+    /// The repository's own working tree.
+    pub project: PathBuf,
+    /// The tree made for this one conversation, when one was.
+    pub worktree: Option<crate::worktree::Worktree>,
+}
+
+impl Place {
+    /// The project itself.
+    #[must_use]
+    pub fn project(project: PathBuf) -> Self {
+        Self {
+            project,
+            worktree: None,
+        }
+    }
+
+    /// Where the agent is raised: the tree when there is one, the project
+    /// otherwise.
+    #[must_use]
+    pub fn cwd(&self) -> PathBuf {
+        self.worktree
+            .as_ref()
+            .map_or_else(|| self.project.clone(), |tree| PathBuf::from(&tree.path))
+    }
+}
+
 pub struct Session {
     /// This application's own name for the session. The ACP session id is the
     /// agent's bookkeeping and never leaves Rust.
     pub key: String,
     pub agent_id: String,
     pub agent_name: String,
+    /// The project this conversation belongs to: the repository's own working
+    /// tree, whichever tree the agent was actually raised in.
+    ///
+    /// Held apart from [`Self::cwd`] because a conversation in a disposable
+    /// tree is still that project's conversation. Everything keyed by project
+    /// — the pointer written for it, the list it comes back in — reads this,
+    /// and reading `cwd` instead would file the work under a directory that is
+    /// about to be thrown away.
+    pub project: PathBuf,
+    /// Where the agent works. The project itself, or a tree made for this one
+    /// conversation ([`crate::worktree`]).
     pub cwd: PathBuf,
+    /// The tree made for this conversation, when one was.
+    ///
+    /// Beside the other immutable fields: where an agent works is decided when
+    /// it is raised and cannot change under it. `None` is a conversation in the
+    /// project's own tree, which is the ordinary answer.
+    pub worktree: Option<crate::worktree::Worktree>,
     pub opened_at_ms: u64,
     /// Who asked for this session, when it was not a person.
     ///
@@ -276,15 +327,18 @@ impl Session {
         key: String,
         agent_id: String,
         agent_name: String,
-        cwd: PathBuf,
+        place: Place,
         source: Option<Source>,
         about: Option<About>,
     ) -> Arc<Self> {
+        let cwd = place.cwd();
         Arc::new(Self {
             key,
             agent_id,
             agent_name,
+            project: place.project,
             cwd,
+            worktree: place.worktree,
             opened_at_ms: now_ms(),
             source,
             about,
@@ -955,7 +1009,7 @@ mod tests {
             "s0".to_owned(),
             "opencode".to_owned(),
             "OpenCode".to_owned(),
-            std::env::temp_dir(),
+            Place::project(std::env::temp_dir()),
             None,
             None,
         )

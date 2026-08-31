@@ -12,6 +12,7 @@ import {
 import { TypographySection } from "@/components/settings/typography-section";
 import { VaultSection } from "@/components/settings/vault-section";
 import { VoiceSection } from "@/components/settings/voice-section";
+import { WorktreesSection } from "@/components/settings/worktrees-section";
 import { SourceList } from "@/components/shell/source-list";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useWindowReveal } from "@/lib/window-reveal";
@@ -68,6 +69,8 @@ export function SettingsWindow() {
             <TypographySection />
           ) : sectionId === "server" ? (
             <ServerSection />
+          ) : sectionId === "worktrees" ? (
+            <WorktreesSection />
           ) : sectionId === "vault" ? (
             <VaultSection />
           ) : sectionId === "voice" ? (

@@ -443,6 +443,17 @@ export {
   useLiveSessions,
   type Agent,
 } from "@/lib/agent-sessions/use-agents";
+// Where a conversation is held, for a section that offers the choice. The
+// window itself makes no use of these: it opens no conversations and lists
+// none, so a tree is only ever chosen from a screen a package drew.
+export {
+  WorktreeError,
+  adoptWorktree,
+  discardWorktree,
+  worktreesIn,
+  type Worktree,
+  type WorktreeChoice,
+} from "@/lib/worktrees/client";
 export {
   useAgentSession,
   startSession,

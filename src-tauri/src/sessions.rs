@@ -47,7 +47,7 @@ use crate::project::{ProjectError, configuration_file};
 use adapters::AdapterState;
 use catalog::AgentDescriptor;
 use event::{PastedImage, SessionEvent, Status};
-use live::{About, HeldImage, Session, SessionHandler, Sessions, Source};
+use live::{About, HeldImage, Place, Session, SessionHandler, Sessions, Source};
 use remembered::{Remembered, Store};
 
 /// A session as the window lists it — enough to say what is running and to
@@ -89,6 +89,14 @@ pub struct SessionRow {
     /// one of those in the same undifferentiated heap.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub about: Option<About>,
+    /// The disposable tree this conversation is being held in, when it is not
+    /// being held in the project's own.
+    ///
+    /// On the row because this list is the only place an unattended
+    /// conversation is visible at all, and because the two gestures a tree
+    /// offers — name the work, throw it away — need the path it is at.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub worktree: Option<crate::worktree::Worktree>,
 }
 
 /// Everything one session has said so far, read in one go.
@@ -206,6 +214,9 @@ pub async fn session_open<R: Runtime>(
     app: AppHandle<R>,
     sessions: State<'_, Sessions>,
     agent_id: String,
+    // The project. Named `cwd` because that is what it has always been called
+    // on this call and renaming it would move a surface for no gain — where the
+    // agent is actually raised is answered below.
     cwd: String,
     model: Option<String>,
     // The record this conversation is being opened under, when a screen opened
@@ -213,18 +224,40 @@ pub async fn session_open<R: Runtime>(
     // pressing `Send to agent` on a task is standing in the task, and nothing
     // below this line can find that out afterwards.
     about: Option<About>,
+    // Where to work: the project itself when this is absent, a fresh tree, or
+    // one that is already there. A person's choice and nothing else's —
+    // `docs/background.md` §9 does not promise a sandbox, so a tree buys the
+    // right to throw the work away rather than any kind of safety.
+    worktree: Option<crate::worktree::Choice>,
 ) -> Result<OpenedSession, ProjectError> {
-    open(
-        &app,
-        &sessions,
-        &agent_id,
-        &PathBuf::from(&cwd),
-        model,
-        None,
-        about,
-    )
-    .await
-    .map(|(_, opened)| opened)
+    let project = PathBuf::from(&cwd);
+    let made = match worktree {
+        Some(choice) => Some(crate::worktree::resolve(
+            &app,
+            &project,
+            &sessions.mint_key(),
+            choice,
+        )?),
+        None => None,
+    };
+    let place = Place {
+        project: project.clone(),
+        worktree: made.clone(),
+    };
+    let opened = open(&app, &sessions, &agent_id, place, model, None, about).await;
+
+    // A tree made for a conversation that never opened is a directory nobody
+    // will ever look at: the agent did not start, so nothing was written in it
+    // and nothing is lost by removing it. Quiet, and only what this call made —
+    // a tree that was chosen rather than created belongs to whoever made it.
+    if opened.is_err()
+        && let Some(tree) = made
+    {
+        let _ =
+            crate::worktree::worktree_discard(project.to_string_lossy().into_owned(), tree.path);
+    }
+
+    opened.map(|(_, opened)| opened)
 }
 
 /// Opening a session, for callers that need the session and not only the answer.
@@ -239,7 +272,7 @@ async fn open<R: Runtime>(
     app: &AppHandle<R>,
     sessions: &Sessions,
     agent_id: &str,
-    cwd: &std::path::Path,
+    place: Place,
     model: Option<String>,
     // Who asked. `None` is the window, where a person is the answer by
     // construction. It is taken here rather than set on the session afterwards
@@ -264,13 +297,14 @@ async fn open<R: Runtime>(
         sessions.mint_key(),
         agent_id.to_owned(),
         spec.display_name.replace('`', ""),
-        cwd.to_path_buf(),
+        place,
         source,
         about,
     );
     sessions.insert(Arc::clone(&session));
 
-    match raise(app, spec, program, model, None, &session, cwd).await {
+    let cwd = session.cwd.clone();
+    match raise(app, spec, program, model, None, &session, &cwd).await {
         // No pointer yet, deliberately. A session that has been opened and not
         // spoken in is not a conversation, and an agent does not necessarily
         // keep one: writing a pointer here filled the list with rows that had
@@ -312,9 +346,21 @@ pub(crate) async fn raise_for_work<R: Runtime>(
     about: Option<About>,
 ) -> Result<Arc<Session>, ProjectError> {
     let sessions = app.state::<Sessions>();
-    open(app, &sessions, agent_id, cwd, None, Some(source), about)
-        .await
-        .map(|(session, _)| session)
+    // In the project's own tree. An order does not choose where it is
+    // performed — `docs/background.md` §6.2 — and giving ordered work a
+    // disposable tree is a decision about unattended work, taken separately
+    // from making one available at all.
+    open(
+        app,
+        &sessions,
+        agent_id,
+        Place::project(cwd.to_path_buf()),
+        None,
+        Some(source),
+        about,
+    )
+    .await
+    .map(|(session, _)| session)
 }
 
 /// The part of opening that can fail, so the caller has one place to record why.
@@ -481,7 +527,7 @@ fn remember<R: Runtime>(app: &AppHandle<R>, session: &Arc<Session>) {
     let Ok(path) = configuration_file(app, remembered::FILE) else {
         return;
     };
-    let project = session.cwd.to_string_lossy().into_owned();
+    let project = session.project.to_string_lossy().into_owned();
     let mut store = Store::read(&path);
     store.remember(
         &project,
@@ -490,6 +536,7 @@ fn remember<R: Runtime>(app: &AppHandle<R>, session: &Arc<Session>) {
             agent_id: session.agent_id.clone(),
             agent_name: session.agent_name.clone(),
             cwd: project.clone(),
+            worktree: session.worktree.clone(),
             title: session.title(),
             opened_at_ms: session.opened_at_ms,
             last_seen_ms: event::now_ms(),
@@ -617,12 +664,29 @@ pub async fn session_resume<R: Runtime>(
         )
     })?;
 
-    let cwd = PathBuf::from(&project);
+    // The tree it was held in has to still be there. One that was thrown away
+    // took the conversation's files with it, and resuming into the project
+    // instead would be an agent answering about a tree it never saw.
+    if let Some(tree) = held.worktree.as_ref()
+        && !std::path::Path::new(&tree.path).is_dir()
+    {
+        return Err(ProjectError::new(
+            "worktree_missing",
+            format!(
+                "that conversation was held in a working tree at {}, and it is no longer there",
+                tree.path
+            ),
+        ));
+    }
+
     let session = Session::new(
         sessions.mint_key(),
         held.agent_id.clone(),
         spec.display_name.replace('`', ""),
-        cwd.clone(),
+        Place {
+            project: PathBuf::from(&project),
+            worktree: held.worktree.clone(),
+        },
         // Carried by the pointer this resume was read from, which is what
         // makes `docs/background.md` §6.3 true across a restart: the session
         // that was raised for this conversation held its source in memory, and
@@ -640,6 +704,7 @@ pub async fn session_resume<R: Runtime>(
     }
     sessions.insert(Arc::clone(&session));
 
+    let cwd = session.cwd.clone();
     match raise(
         &app,
         spec,
@@ -685,7 +750,7 @@ pub fn session_kept_as<R: Runtime>(
         return Ok(false);
     };
     let path = configuration_file(&app, remembered::FILE)?;
-    let project = session.cwd.to_string_lossy().into_owned();
+    let project = session.project.to_string_lossy().into_owned();
     let mut store = Store::read(&path);
     let linked = store.kept_as(&project, &acp_session.0, &record_key);
     store.write(&path)?;
@@ -1225,6 +1290,7 @@ fn row(session: &Arc<Session>) -> SessionRow {
         accepts_images: session.accepts_images(),
         source: session.source.clone(),
         about: session.about.clone(),
+        worktree: session.worktree.clone(),
     }
 }
 
@@ -1390,6 +1456,7 @@ mod tests {
             accepts_images: true,
             source: None,
             about: None,
+            worktree: None,
         };
 
         assert_eq!(
@@ -1426,6 +1493,7 @@ mod tests {
                 about: Some("issue-4c1a".to_owned()),
             }),
             about: None,
+            worktree: None,
         };
 
         let json = serde_json::to_value(&row).expect("a row serialises");
@@ -1462,6 +1530,7 @@ mod tests {
             opened_at_ms: 1234,
             accepts_images: true,
             source: None,
+            worktree: None,
             about: Some(About {
                 key: "task-4c1a".to_owned(),
                 kind: "tasks.task".to_owned(),
@@ -1549,6 +1618,7 @@ mod tests {
             accepts_images: false,
             source: None,
             about: None,
+            worktree: None,
         };
 
         // Null rather than absent: the window distinguishes "not named" from

@@ -37,6 +37,13 @@ export interface AdapterState {
 }
 
 // @public
+export function adoptWorktree(args: {
+    project: string;
+    path: string;
+    branch: string;
+}): Promise<void>;
+
+// @public
 export interface Agent extends AgentDescriptor {
     // (undocumented)
     readonly adapterReady: boolean | null;
@@ -208,6 +215,12 @@ export interface Dependents {
 
 // @public
 export function describeMemoryFolder(project: string, folder: string, kind: string): Promise<MemoryDocument>;
+
+// @public
+export function discardWorktree(args: {
+    project: string;
+    path: string;
+}): Promise<void>;
 
 // @public
 export interface DocumentDraft {
@@ -1011,6 +1024,7 @@ export interface RememberedConversation {
     readonly source?: SessionSource;
     // (undocumented)
     readonly title: string | null;
+    readonly worktree?: Worktree;
 }
 
 // @public
@@ -1249,6 +1263,7 @@ export interface SessionRow {
     // (undocumented)
     readonly status: SessionStatus;
     readonly title: string | null;
+    readonly worktree?: Worktree;
 }
 
 // @public
@@ -1359,6 +1374,7 @@ export function startSession(args: {
     cwd: string;
     model?: string | null;
     about?: SessionAbout | null;
+    worktree?: WorktreeChoice | null;
 }): Promise<OpenedSession>;
 
 // @public
@@ -1374,7 +1390,7 @@ export function stopSession(key: string): Promise<void>;
 export function supportsApiRange(range: string): boolean;
 
 // @public
-export const SYNC_API_VERSION: "3.3.0";
+export const SYNC_API_VERSION: "3.4.0";
 
 // @public
 export const SYNC_CAPABILITIES: readonly ["records", "agents.acp", "markdown.plugins", "native-menu", "folders", "sheets", "net", "net.write", "vault", "background", "schedule", "work.agent", "agent.tools"];
@@ -1590,6 +1606,29 @@ export interface WindowCommands {
 
 // @public
 export function withDropped(transcript: Transcript, dropped: number): Transcript;
+
+// @public
+export interface Worktree {
+    readonly base?: string;
+    readonly baseCommit: string;
+    readonly head: string;
+    readonly path: string;
+}
+
+// @public
+export type WorktreeChoice = "new" | {
+    readonly path: string;
+};
+
+// @public
+export class WorktreeError extends Error {
+    constructor(kind: string, message: string);
+    // (undocumented)
+    readonly kind: string;
+}
+
+// @public
+export function worktreesIn(project: string): Promise<readonly Worktree[]>;
 
 // (No @packageDocumentation comment for this package)
 
