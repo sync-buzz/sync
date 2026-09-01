@@ -359,6 +359,23 @@ pub struct Entity {
     pub folder: Option<String>,
     /// Whether this record *is* the folder it is filed in.
     pub is_folder: bool,
+    /// Whether the record is put away.
+    ///
+    /// Stated rather than optional, because an entity is the whole record: by
+    /// the time one is built, somebody has decided what the flag is. Where the
+    /// caller had nothing to say about it, the decision is *what the record
+    /// already said* — which is a question for the store and is answered
+    /// before the entity is made, never here.
+    pub archived: bool,
+    /// Whether whoever wrote this checked the claim against the code it covers.
+    ///
+    /// The only route to `fresh`. The engine derives every other state — stale
+    /// when the code under the scope moves, unverified when the text changes —
+    /// and derives this one from nothing, because reading code and finding a
+    /// claim still true is a judgement. A record with no scope paths cannot
+    /// carry it: nothing would ever take the flag away again, and a claim
+    /// permanently marked checked is a lie with a delay on it.
+    pub verified: bool,
 }
 
 /// A typed relation between two entities.
@@ -389,8 +406,8 @@ impl Entity {
                 "observed": self.paths_observed,
                 "scope": self.scope_paths,
             },
-            "archive": {"archived": false},
-            "freshness": {"state": "unverified"},
+            "archive": {"archived": self.archived},
+            "freshness": {"state": if self.verified { "fresh" } else { DEFAULT_FRESHNESS }},
         });
         // Written only when they say something. An envelope carrying
         // `"folder": null` and `"is_folder": false` on every record would be
@@ -2235,6 +2252,8 @@ mod tests {
             extensions,
             folder: None,
             is_folder: false,
+            archived: false,
+            verified: false,
         };
 
         let envelope = entity.to_envelope();

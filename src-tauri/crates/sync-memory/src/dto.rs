@@ -613,6 +613,25 @@ pub struct EntityInput {
     /// Whether this record *is* the folder it is filed in.
     #[serde(default)]
     pub is_folder: bool,
+    /// Whether the record is put away, or `None` to leave it as it is.
+    ///
+    /// A write states the whole record, so a flag left out of one would be a
+    /// flag cleared by it: a record archived last week would come back into
+    /// every listing because somebody corrected a sentence in it. `None` is
+    /// what keeps that from happening — the writer says nothing about the
+    /// archive and nothing about it changes.
+    #[serde(default)]
+    pub archived: Option<bool>,
+    /// Whether the writer checked this claim against the code it covers.
+    ///
+    /// The one way a record becomes `fresh`. Everything else about freshness is
+    /// derived — the engine marks a record stale when the code under its scope
+    /// moves, and marks it unverified when its text changes — but nothing
+    /// derives *somebody read the code and the claim still holds*, because that
+    /// is a judgement rather than a diff. So it is stated, by whoever made it,
+    /// on the write that carries it.
+    #[serde(default)]
+    pub verified: bool,
 }
 
 /// One typed link, as the interface states it.
@@ -643,6 +662,11 @@ impl From<EntityInput> for crate::mapping::Entity {
             extensions: input.fields,
             folder: input.folder,
             is_folder: input.is_folder,
+            // Absent means "leave it alone", and an entity carries a flag
+            // rather than a question — so what fills it in is whoever knows
+            // what the record already says. See `Entity::archived`.
+            archived: input.archived.unwrap_or(false),
+            verified: input.verified,
         }
     }
 }

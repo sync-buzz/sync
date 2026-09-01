@@ -135,7 +135,46 @@ fn serve(orders: &Receiver<Order>) {
     }
 }
 
-/// Every voice this Mac has, including the ones it downloaded.
+/// The identifier family macOS gives the voices it reads text in.
+///
+/// Named as a prefix rather than as a list of voices, because the list is the
+/// thing that changes: a language Sync has never heard of and every Enhanced or
+/// Premium download a person makes in System Settings arrive under it, and this
+/// constant does not have to hear about any of them.
+const READING_VOICES: &str = "com.apple.voice.";
+
+/// Whether a voice is one a sentence would be read in.
+///
+/// A free function over the identifier so the rule can be checked against the
+/// real ones without a synthesiser — and so the rule is one line rather than a
+/// condition buried in a mapping.
+fn reads_text(identifier: &str) -> bool {
+    identifier.starts_with(READING_VOICES)
+}
+
+/// The voices this Mac has that a sentence would be read in.
+///
+/// Measured on this machine: the system lists **180** and this answers with
+/// **49**. The 131 left out are two families, and neither is anybody's choice
+/// for hearing that a job finished. `com.apple.speech.synthesis.voice.*` is the
+/// novelty set — Zarvox, Trinoids, Bells, Boing — with four voices from the
+/// eighties among them. `com.apple.eloquence.*` is nine formant
+/// synthesis personas repeated across fourteen languages: 112 rows, all of them
+/// the same robot, and 62% of the list a person scrolls past looking for the
+/// voice that speaks their language.
+///
+/// **`voiceTraits` was tried first and does not divide them.** `isNoveltyVoice`
+/// is the platform's own flag for precisely this question, and measured against
+/// the 180 it marks 15: it misses Fred, Junior, Kathy and Ralph, and it says
+/// nothing at all about any of the 112. A filter built on the documented flag
+/// would leave 116 of the 131 where they were, which is the same list with a
+/// rounding error taken off it. The family in the identifier is the only thing
+/// measured here that separates the three groups cleanly.
+///
+/// **This decides what is offered, not what may be said.** A voice chosen
+/// before this rule existed still speaks — [`say`] asks the system for the
+/// identifier it was given and does not consult this. Refusing it would be
+/// telling somebody that the voice they are listening to is not on their Mac.
 fn installed_voices() -> Vec<Voice> {
     // SAFETY: a class method that reads the system's voice registry.
     let listed = unsafe { AVSpeechSynthesisVoice::speechVoices() };
@@ -145,15 +184,16 @@ fn installed_voices() -> Vec<Voice> {
     listed
         .to_vec()
         .into_iter()
-        .map(|voice| {
+        .filter_map(|voice| {
             // SAFETY: property reads on a voice the system just handed over.
             unsafe {
-                Voice {
-                    id: voice.identifier().to_string(),
+                let id = voice.identifier().to_string();
+                reads_text(&id).then(|| Voice {
+                    id,
                     name: voice.name().to_string(),
                     language: voice.language().to_string(),
                     quality: graded(voice.quality()),
-                }
+                })
             }
         })
         .collect()
@@ -253,6 +293,71 @@ mod tests {
             assert!(
                 !voice.language.is_empty(),
                 "a voice with no language: {voice:?}"
+            );
+        }
+    }
+
+    /// The rule, against the identifiers the three families actually use.
+    ///
+    /// Written out rather than derived, because the whole filter is this one
+    /// comparison and a test that recomputed it would agree with itself.
+    #[test]
+    fn the_families_that_nothing_is_read_in_are_not_offered() {
+        for offered in [
+            "com.apple.voice.compact.ru-RU.Milena",
+            "com.apple.voice.super-compact.de-DE.Anna",
+            "com.apple.voice.enhanced.en-US.Ava",
+            "com.apple.voice.premium.en-US.Zoe",
+        ] {
+            assert!(reads_text(offered), "{offered} is a voice for reading");
+        }
+        for left_out in [
+            "com.apple.eloquence.en-US.Grandma",
+            "com.apple.eloquence.ru-RU.Eddy",
+            "com.apple.speech.synthesis.voice.Zarvox",
+            "com.apple.speech.synthesis.voice.Fred",
+        ] {
+            assert!(!reads_text(left_out), "{left_out} is not one to read in");
+        }
+    }
+
+    /// Every voice offered is one of the reading family — the claim the list
+    /// makes, checked against the machine rather than against the constant.
+    #[test]
+    fn nothing_outside_the_reading_family_reaches_the_list() {
+        for voice in engine().voices().expect("the system engine answers") {
+            assert!(
+                reads_text(&voice.id),
+                "{} ({}) is offered and should not be",
+                voice.name,
+                voice.id
+            );
+        }
+    }
+
+    /// **The filter takes voices away, never a language.** It is the one way
+    /// this could quietly hurt somebody: a language whose only voice happens to
+    /// sit in a family left out is a language that vanishes from the page, and
+    /// the person who speaks it is the last to find out.
+    #[test]
+    fn no_language_is_lost_by_leaving_a_family_out() {
+        // SAFETY: a class method that reads the system's voice registry, the
+        // same one `installed_voices` asks.
+        let listed = unsafe { AVSpeechSynthesisVoice::speechVoices() };
+        let mut every: Vec<String> = listed
+            .to_vec()
+            .into_iter()
+            // SAFETY: a property read on a voice the system just handed over.
+            .map(|voice| unsafe { voice.language().to_string() })
+            .collect();
+        every.sort_unstable();
+        every.dedup();
+
+        let offered = engine().voices().expect("the system engine answers");
+        for language in every {
+            assert!(
+                offered.iter().any(|voice| voice.language == language),
+                "{language} has voices on this Mac and none of them is offered"
             );
         }
     }

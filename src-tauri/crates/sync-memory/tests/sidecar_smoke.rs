@@ -110,6 +110,8 @@ fn spec(key: &str, title: &str, content: &str) -> Entity {
         extensions,
         folder: None,
         is_folder: false,
+        archived: false,
+        verified: false,
     }
 }
 
@@ -1102,6 +1104,8 @@ fn a_project_is_addressed_by_a_key_in_its_own_script() {
                 extensions,
                 folder: None,
                 is_folder: false,
+                archived: false,
+                verified: false,
             }
             .to_put()],
         )
@@ -1149,6 +1153,8 @@ fn the_project_record_is_edited_but_never_created_or_deleted() {
                 extensions,
                 folder: None,
                 is_folder: false,
+                archived: false,
+                verified: false,
             }
             .to_put()],
         )

@@ -221,6 +221,17 @@ fn opened_in_sync(project: &Path) -> (sync_memory::MemoryClient, tempfile::TempD
     client
         .create_type("ticket", "Ticket", "Work coming in", "ticket")
         .expect("a type of the project's own is published");
+    // And a kind the package brought, which is the ordinary shape of one: the
+    // id, a dot, and a word the package chose. The prefix is the whole of what
+    // joins a kind to the instructions describing it.
+    client
+        .create_type(
+            "acme.tracker.watch",
+            "Watch",
+            "Something to keep an eye on",
+            "eye",
+        )
+        .expect("a type an extension published");
     // The log directory is handed back with the client: dropping it would take
     // the engine's log file out from under a session that is still running.
     (client, logs)
@@ -1114,5 +1125,317 @@ fn a_call_with_no_application_behind_it_says_so_rather_than_hanging() {
     assert!(
         said.contains("Sync is not on the other end"),
         "the refusal says what is missing rather than blaming the package: {said}"
+    );
+}
+
+/// Two things about a record that are not its text: where it is filed away, and
+/// whether anybody has checked it.
+///
+/// A write states the whole record, which is what makes an unstated archive
+/// flag dangerous — correcting a sentence in a record somebody put away would
+/// bring it back into every listing, and nothing would say so. So the flag is
+/// read off the store when the write is silent about it, and only a write that
+/// names it moves it.
+///
+/// Freshness is stated the other way round, and deliberately: a text that
+/// changed is a claim nobody has checked since. Silence there means
+/// `unverified`, and `fresh` is reachable only by saying you read the code.
+#[test]
+fn an_archive_survives_a_write_and_a_check_has_to_be_claimed() {
+    let project = repository();
+    let _sync = opened_in_sync(project.path());
+    let mut agent = Agent::open(project.path());
+
+    let write = |agent: &mut Agent, record: Value| {
+        agent.call("sync_apply", &json!({"project": "PROBE", "save": [record]}))
+    };
+    let envelope = |agent: &mut Agent| {
+        let revision = agent.call("sync_project", &json!({"project": "PROBE"}))["revision"]
+            .as_str()
+            .expect("a revision")
+            .to_owned();
+        agent.call(
+            "memory_get_record",
+            &json!({"project": "PROBE", "key": "d-standing", "revision": revision}),
+        )["record"]["envelope"]
+            .clone()
+    };
+
+    write(
+        &mut agent,
+        json!({
+            "key": "d-standing",
+            "kind": "decision",
+            "title": "What was decided",
+            "content": "The first version.",
+            "scope_paths": ["src/"],
+            "archived": true,
+        }),
+    );
+    let stored = envelope(&mut agent);
+    assert_eq!(stored["archive"]["archived"], true, "{stored}");
+    assert_eq!(
+        stored["freshness"]["state"], "unverified",
+        "a write that claims nothing has checked nothing: {stored}"
+    );
+
+    // The sentence moved and the archive did not, because the write said
+    // nothing about it.
+    write(
+        &mut agent,
+        json!({
+            "key": "d-standing",
+            "kind": "decision",
+            "title": "What was decided",
+            "content": "The second version.",
+            "scope_paths": ["src/"],
+        }),
+    );
+    let stored = envelope(&mut agent);
+    assert_eq!(stored["content"], "The second version.");
+    assert_eq!(
+        stored["archive"]["archived"], true,
+        "an unstated flag leaves the record filed as it was: {stored}"
+    );
+
+    write(
+        &mut agent,
+        json!({
+            "key": "d-standing",
+            "kind": "decision",
+            "title": "What was decided",
+            "content": "The second version.",
+            "scope_paths": ["src/"],
+            "archived": false,
+            "verified": true,
+        }),
+    );
+    let stored = envelope(&mut agent);
+    assert_eq!(stored["archive"]["archived"], false, "{stored}");
+    assert_eq!(
+        stored["freshness"]["state"], "fresh",
+        "the one route to fresh is somebody saying they read the code: {stored}"
+    );
+
+    // Nothing to have read, so nothing to claim — and nothing that would ever
+    // take the flag off again.
+    let refused = write(
+        &mut agent,
+        json!({
+            "key": "d-unscoped",
+            "kind": "decision",
+            "title": "A claim about nothing in particular",
+            "content": "No paths.",
+            "verified": true,
+        }),
+    );
+    assert_eq!(refused["error"]["kind"], "invalid_argument", "{refused}");
+    assert!(
+        refused["error"]["message"]
+            .as_str()
+            .is_some_and(|said| said.contains("scope_paths")),
+        "the refusal says what to add: {refused}"
+    );
+}
+
+/// A package's instructions are served, never scattered.
+///
+/// The project's own record carries what every installed package tells an
+/// agent, because that record travels with the repository and a colleague who
+/// cloned it has to be told the same thing. What must not happen is that text
+/// arriving in answers nobody asked it for: a listing of records that happens
+/// to include the project's own would otherwise carry every package's document
+/// to an agent that asked what this project holds.
+#[test]
+fn a_package_s_prose_arrives_through_its_topic_and_nowhere_else() {
+    let project = repository();
+    let _sync = opened_in_sync(project.path());
+    let mut agent = Agent::open(project.path());
+
+    let revision = agent.call("sync_project", &json!({"project": "PROBE"}))["revision"]
+        .as_str()
+        .expect("a revision")
+        .to_owned();
+
+    for (tool, arguments) in [
+        (
+            "memory_list_records",
+            json!({"project": "PROBE", "metadata_only": true, "limit": 50}),
+        ),
+        (
+            "memory_get_record",
+            json!({"project": "PROBE", "key": "PROBE", "revision": revision}),
+        ),
+        (
+            "memory_search",
+            json!({"project": "PROBE", "query": "probe"}),
+        ),
+    ] {
+        let answer = agent.call(tool, &arguments).to_string();
+        assert!(
+            !answer.contains(EXTENSION_PROMPT),
+            "{tool} carried a package's instructions to somebody who asked for records: {answer}"
+        );
+        assert!(
+            !answer.contains("Finds tickets by their words"),
+            "{tool} carried a tool's description as well: {answer}"
+        );
+    }
+
+    // Still there, in the one call whose purpose is to hand it over.
+    let topic = agent.call(
+        "sync_instructions",
+        &json!({"project": "PROBE", "topic": "extension:acme.tracker"}),
+    );
+    assert!(
+        topic["body"]
+            .as_str()
+            .is_some_and(|body| body.contains(EXTENSION_PROMPT)),
+        "the topic is where a package speaks: {topic}"
+    );
+}
+
+/// What joins a kind to the instructions that describe it.
+///
+/// A project is a list of kinds and a list of packages, and without the join
+/// they are two lists: an agent asked to write a Watch has no way to know whose
+/// topic says what a good one looks like. The prefix is the join, and it is
+/// said rather than left to be inferred — including in the hint beside each
+/// topic, which names what the package brought rather than the package.
+#[test]
+fn orientation_says_which_package_brought_which_kind() {
+    let project = repository();
+    let _sync = opened_in_sync(project.path());
+    let mut agent = Agent::open(project.path());
+
+    let described = agent.call("sync_project", &json!({"project": "PROBE"}));
+    let package = &described["installed"][0];
+    assert_eq!(
+        package["kinds"],
+        json!(["acme.tracker.watch"]),
+        "{described}"
+    );
+    assert_eq!(
+        package["instructions"], "extension:acme.tracker",
+        "orientation says where to read about it: {described}"
+    );
+    assert!(
+        described["next"]
+            .as_str()
+            .is_some_and(|next| next.contains("instructions")),
+        "and says to read it before writing one: {described}"
+    );
+
+    let topics = agent.call("sync_instructions", &json!({"project": "PROBE"}));
+    let hint = topics["topics"]
+        .as_array()
+        .expect("topics")
+        .iter()
+        .find(|topic| topic["topic"] == "extension:acme.tracker")
+        .and_then(|topic| topic["when"].as_str())
+        .expect("a hint for the package's topic")
+        .to_owned();
+    assert!(
+        hint.contains("Watch"),
+        "the hint is in the words somebody would ask in, not the package's id: {hint}"
+    );
+}
+
+/// A type's own definition is what says how to write one of its records.
+///
+/// The fields, what each takes, which are required, the relations it may carry,
+/// and the guidance its author wrote for the moment before the first write.
+/// None of it is reachable anywhere else on this surface — the engine's
+/// catalogue answers with how *many* fields a type has — so a writer that
+/// cannot read it here finds a field name out from a refusal.
+#[test]
+fn a_topic_states_the_schema_of_every_kind_it_covers() {
+    let project = repository();
+    let _sync = opened_in_sync(project.path());
+    let mut agent = Agent::open(project.path());
+
+    let brought = agent.call(
+        "sync_instructions",
+        &json!({"project": "PROBE", "topic": "extension:acme.tracker"}),
+    );
+    let body = brought["body"].as_str().expect("a body").to_owned();
+    assert!(
+        body.contains("acme.tracker.watch") && body.contains("Watch"),
+        "the package's topic covers the kinds it brought: {body}"
+    );
+
+    // The kinds nobody's package brought have no topic of their own, and are
+    // described in the one that says so.
+    let topics = agent.call("sync_instructions", &json!({"project": "PROBE"}));
+    let listed: Vec<&str> = topics["topics"]
+        .as_array()
+        .expect("topics")
+        .iter()
+        .filter_map(|topic| topic["topic"].as_str())
+        .collect();
+    assert!(listed.contains(&"kinds"), "{listed:?}");
+
+    let own = agent.call(
+        "sync_instructions",
+        &json!({"project": "PROBE", "topic": "kinds"}),
+    );
+    let body = own["body"].as_str().expect("a body").to_owned();
+    assert!(
+        body.contains("ticket") && body.contains("decision"),
+        "the project's own kinds are described where a writer is looking: {body}"
+    );
+    assert!(
+        !body.contains("acme.tracker.watch"),
+        "and a package's kinds are described by the package: {body}"
+    );
+}
+
+/// Filing a record, and describing the place it is filed in.
+///
+/// Both are members of the write rather than calls of their own, which is the
+/// part worth holding: a package's instructions say so in those words, and an
+/// agent that found them missing would go looking for a `folders.create` that
+/// has never existed on this surface.
+#[test]
+fn a_record_is_filed_and_its_folder_described_by_the_same_write() {
+    let project = repository();
+    let _sync = opened_in_sync(project.path());
+    let mut agent = Agent::open(project.path());
+
+    agent.call(
+        "sync_apply",
+        &json!({"project": "PROBE", "save": [
+            {
+                "key": "d-filed",
+                "kind": "decision",
+                "title": "Filed where it belongs",
+                "content": "In a folder.",
+                "folder": "releases",
+            },
+            {
+                "key": "d-about-the-folder",
+                "kind": "decision",
+                "title": "What goes in releases",
+                "content": "Anything a release turns on.",
+                "folder": "releases",
+                "is_folder": true,
+            },
+        ]}),
+    );
+
+    let folders = agent.call(
+        "memory_list_folders",
+        &json!({"project": "PROBE", "kind": "decision"}),
+    );
+    let listed = folders["folders"]
+        .as_array()
+        .expect("folders")
+        .iter()
+        .find(|folder| folder["path"] == "releases")
+        .cloned()
+        .unwrap_or_else(|| panic!("the folder the write named: {folders}"));
+    assert_eq!(
+        listed["described_by"], "d-about-the-folder",
+        "the record that is the folder says so on the write that filed it: {listed}"
     );
 }

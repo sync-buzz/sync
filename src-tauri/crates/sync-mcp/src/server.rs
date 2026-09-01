@@ -78,18 +78,38 @@ drawn from. Kinds differ between projects.
 Higher wins on conflict; lower fills gaps.
 
 1. **Live code** — the final arbiter for any claim about the code.
-2. **Sync records**, gated by freshness: `valid` and `unverified` are usable; `stale` and \
-   `invalid` are a flag, never a fact — check them against the code before acting.
+2. **Sync records**, gated by freshness. `fresh` means somebody read the code and found the \
+   claim standing. `unverified` means nobody has said either way — usable, and worth \
+   checking. `stale` and `invalid` mean the code moved under the claim: a flag, never a \
+   fact, and not to be quoted until you have checked it.
 3. **Loose files** — `README`, stray notes, comments. Lift what is authoritative into Sync.
 4. **Your own memory** — a cache, not a source. Search Sync first; recall only what Sync \
    lacks. On conflict Sync wins, and never overwrite Sync from memory.
+
+**Checking is a write.** Having read the code a record covers and found it true, write the \
+record again with `verified: true`; it becomes `fresh` until the code under its \
+`scope_paths` moves again. That is the only way anything here becomes trusted, so a session \
+that read the code and said nothing leaves the next one doing the same reading. Where the \
+claim no longer holds, the same write fixes it — a record that disagrees with the code is a \
+record to correct, not evidence.
+
+## Being asked for work is being asked for a record
+
+Somebody who says *set a task*, *file that*, *note it down* or *plan this* is asking for a \
+record in this project's memory, written with `sync_apply`. `sync_project` names the kinds \
+this project holds, and one of them is the word they used. A list of your own, a sub-agent \
+you start, or a line in your reply is none of it: those end with the conversation, and the \
+request was for something that outlives it.
+
+Work you are doing right now is the exception. That is done, not filed.
 
 ## The loop
 
 1. **Orient** — `sync_project` on the project you are in.
 2. **Research before acting** — `memory_search` the topic, and read what is already \
    recorded about the files in scope.
-3. **Trust-check** every record you rely on, by the order above.
+3. **Trust-check** every record you rely on, by the order above, and write back what the \
+   check found — `verified: true` where it held, a correction where it did not.
 4. **Record as you go** — write what became true with `sync_apply`, the moment it is true, \
    and correct what your change falsified. Say in one line what you wrote.
 
@@ -239,15 +259,25 @@ impl SyncMcp {
             return Ok(name_the_project(call, &named));
         }
 
+        let ours = own::is_ours(&name);
         let call = project
             .with_domain(move |domain| {
-                if own::is_ours(&name) {
+                if ours {
                     own::call(domain, &name, &arguments)
                 } else {
                     domain.engine_tool(&name, &arguments)
                 }
             })
             .await?;
+        // Only the engine's answers. What this server's own tools say is
+        // already what it decided to say — `sync_instructions` hands over a
+        // package's prose because that is the whole of what it was called for,
+        // and trimming its answer would leave the prose with nowhere to arrive.
+        let call = if ours {
+            call
+        } else {
+            without_package_prose(call)
+        };
         Ok(name_the_project(call, &named))
     }
 
@@ -408,6 +438,68 @@ fn name_the_project(mut call: ToolCall, key: &str) -> ToolCall {
     call
 }
 
+/// Take the packages' own prose back out of an answer that was not asked for it.
+///
+/// A project's record carries what each installed package tells an agent: the
+/// prompt it published and the tools it declares, schemas and all. That is
+/// where it belongs — the record travels with the repository, so a colleague
+/// who cloned it is told the same thing — and it is served deliberately, one
+/// package at a time, as `sync_instructions` with that package's topic.
+///
+/// What it must not be is *incidental*. A listing of thirty records that
+/// happens to include the project's own arrives carrying every package's
+/// instructions, several times the size of everything else in the answer, to an
+/// agent that asked what kinds this project holds. The id and the version stay,
+/// because they say a package is there; the prose goes, because there is a call
+/// whose whole purpose is to hand it over.
+///
+/// Every answer is walked rather than the two that list records, and the reason
+/// is that this is about a shape and not about a tool: whatever else comes to
+/// carry a project's record — a search hit, a diff, something the engine grows
+/// next year — carries it with the same member on it.
+fn without_package_prose(mut call: ToolCall) -> ToolCall {
+    if let Ok(content) = &mut call.result {
+        strip_prose(content);
+    }
+    call
+}
+
+/// Every `installed` list in a value, trimmed to what a package *is*.
+fn strip_prose(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            if let Some(Value::Array(installed)) = object.get_mut("installed") {
+                for package in installed.iter_mut() {
+                    let Some(package) = package.as_object_mut() else {
+                        continue;
+                    };
+                    package.remove("prompt");
+                    // The names, so that what there is to call is still
+                    // visible, and none of the descriptions or schemas: those
+                    // are what the topic is for, and an agent calling a tool
+                    // has read it.
+                    if let Some(Value::Array(tools)) = package.get_mut("tools") {
+                        for tool in tools.iter_mut() {
+                            if let Some(name) = tool.get("name").cloned() {
+                                *tool = name;
+                            }
+                        }
+                    }
+                }
+            }
+            for member in object.values_mut() {
+                strip_prose(member);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                strip_prose(item);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Turn what the engine did into what MCP says.
 ///
 /// A tool that failed is an answer, not a protocol error: `isError` with the
@@ -441,4 +533,31 @@ fn into_result(call: ToolCall) -> CallToolResult {
     // has to parse the other.
     result.structured_content = Some(payload);
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The one block every session reads without asking for it.
+    ///
+    /// It is where the two mistakes this check exists for were both made, and
+    /// it is the worst place to make them: a topic is read by the agent that
+    /// went looking, and this is read by all of them. See the same pair of
+    /// tests in `own.rs` for what each one holds.
+    #[test]
+    fn the_instructions_name_tools_that_exist_and_states_that_do() {
+        let unknown = own::names_that_are_not_tools(INSTRUCTIONS);
+        assert!(
+            unknown.is_empty(),
+            "the instructions name tools this server does not publish: {unknown:?}"
+        );
+        for spelled in INSTRUCTIONS.split('`').skip(1).step_by(2) {
+            assert_ne!(
+                spelled.trim(),
+                "valid",
+                "freshness is `fresh` everywhere the engine and the window spell it"
+            );
+        }
+    }
 }

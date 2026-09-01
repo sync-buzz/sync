@@ -111,3 +111,32 @@ impl std::fmt::Display for CatalogueError {
 }
 
 impl std::error::Error for CatalogueError {}
+
+#[cfg(test)]
+mod tests {
+    use super::PUBLISHED;
+
+    /// The list an author of a package writes their prompt against.
+    ///
+    /// `docs/extensions.md` states this surface in prose, and the check in the
+    /// packages' own repository holds their prompts to it — so a tool added
+    /// here and not written there leaves every package author working from a
+    /// list that is one short, and their check refusing a call that exists.
+    ///
+    /// Held from this side because this is the side that moves. The document
+    /// cannot notice; the allow-list can.
+    #[test]
+    fn the_document_packages_are_written_against_names_every_published_tool() {
+        let document = include_str!("../../../../docs/extensions.md");
+        let missing: Vec<&str> = PUBLISHED
+            .iter()
+            .copied()
+            .filter(|name| !document.contains(name))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "docs/extensions.md does not name these, and a package author reads it \
+             rather than this file: {missing:?}"
+        );
+    }
+}

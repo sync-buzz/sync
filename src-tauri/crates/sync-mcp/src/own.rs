@@ -20,7 +20,7 @@ use std::fmt::Write as _;
 use memory_hub_mcp::ToolCall;
 use rmcp::model::Tool;
 use serde_json::{Value, json};
-use sync_memory::{InstalledExtension, MemoryError, MemoryPresence, Result};
+use sync_memory::{InstalledExtension, MemoryError, MemoryPresence, RecordType, Result};
 
 use crate::domain::Domain;
 
@@ -36,6 +36,13 @@ pub const APPLY: &str = "sync_apply";
 pub const CALL: &str = "sync_call";
 /// The one that makes a sound.
 pub const SPEAK: &str = "sync_speak";
+
+/// The topic describing the kinds a project made for itself.
+///
+/// Not in [`TOPICS`] because its body is the project rather than prose: what it
+/// says differs per repository, and on a project whose kinds all came from
+/// packages there is nothing for it to say and it is not offered.
+const PROJECT_KINDS: &str = "kinds";
 
 /// Whether a name is one of ours.
 #[must_use]
@@ -200,13 +207,18 @@ fn writing() -> Tool {
          replayed once against the revision that won rather than handed \
          back for you to retry; a conflict that survives the replay is \
          reported as one. Keys are permanent: writing to a key that exists \
-         replaces that record, and there is no rename.\n\n\
-         Name a record, never its key: in any text a record carries, a \
-         reference is written `[the record's title](sync://<kind>/<key>)`, and \
-         every hit and listing hands you the title and the kind beside the key. \
-         Double brackets are refused — `[[a-key]]` carries no kind, so nothing \
-         can follow one — and a key left bare in a code span comes back in the \
-         answer with the link to write in its place.",
+         replaces that record, and there is no rename — so state a record \
+         whole, because whatever a write leaves out is gone from it.\n\n\
+         Two members are read the other way round, and both are how a record's \
+         standing is set rather than its text. `archived` left out leaves the \
+         record filed exactly as it was, so correcting a sentence cannot empty \
+         somebody's archive; say `true` to put one away, `false` to bring it \
+         back. `verified` left out means `unverified` — saying nothing is not \
+         the same as saying you checked.\n\n\
+         Name a record, never its key: a reference is \
+         `[the record's title](sync://<kind>/<key>)`, and every hit hands you \
+         both. Double brackets are refused and a bare key in a code span comes \
+         back with the link to write instead — the topic `records` says why.",
         &json!({
             "type": "object",
             "properties": {
@@ -244,6 +256,22 @@ fn writing() -> Tool {
                             "fields": {
                                 "type": "object",
                                 "description": "Product fields for the kind, validated against its type definition."
+                            },
+                            "folder": {
+                                "type": "string",
+                                "description": "Where the record is filed, as `memory_list_folders` names it. Omit for the root. A record whose body is a repository file is filed where its file is, and that one is moved by moving the file."
+                            },
+                            "is_folder": {
+                                "type": "boolean",
+                                "description": "This record *is* the folder it is filed in: what belongs there, written where whoever files something will read it."
+                            },
+                            "archived": {
+                                "type": "boolean",
+                                "description": "Put the record away, or bring it back. Left out, it stays as it is — a write that says nothing about the archive must not empty it."
+                            },
+                            "verified": {
+                                "type": "boolean",
+                                "description": "You read the code under `scope_paths` and the claim still holds. The one way a record becomes `fresh`; left out, the write leaves it `unverified`. Refused where there are no scope paths, because nothing would ever flag it again."
                             }
                         },
                         "required": ["key", "kind", "title", "content"]
@@ -560,7 +588,22 @@ fn project(domain: &mut Domain) -> Result<Value> {
                     let mut said = json!({
                         "id": extension.id,
                         "version": extension.version,
+                        "instructions": format!("extension:{}", extension.id),
                     });
+                    // Which of the kinds above this package brought. Without
+                    // it, a project is a list of kinds and a list of packages
+                    // with nothing joining them, and the agent that wants to
+                    // write one of those kinds has no way to know whose
+                    // instructions describe it — the join is a prefix, and
+                    // saying it costs a word where guessing it costs a turn.
+                    let brought: Vec<Value> = types
+                        .iter()
+                        .filter(|entry| brought_by(entry, &extension.id))
+                        .map(|entry| Value::String(entry.kind.clone()))
+                        .collect();
+                    if !brought.is_empty() {
+                        said["kinds"] = Value::Array(brought);
+                    }
                     // The names and not the descriptions, and not the schemas.
                     // This is the first thing an agent reads about a project
                     // and every word of it is paid for out of its context on
@@ -587,7 +630,16 @@ fn project(domain: &mut Domain) -> Result<Value> {
             }))
             .collect::<Vec<Value>>(),
         "revision": domain.refresh_revision()?,
-        "next": format!("Call `{INSTRUCTIONS}` for how this project expects to be worked with."),
+        // Two sentences rather than one, because they answer different
+        // questions and an agent that read only the first would take the
+        // project's own habits for the whole of what it was told. What a
+        // package expects of a record of its kinds is the package's to say,
+        // and it says it in a topic nobody reads by accident.
+        "next": format!(
+            "Call `{INSTRUCTIONS}` for how this project expects to be worked with. Before \
+             writing a record of a kind a package brought, or calling one of its tools, read \
+             that package's own topic — the `instructions` beside it above."
+        ),
     }))
 }
 
@@ -603,26 +655,14 @@ fn instructions(domain: &mut Domain, arguments: &Value) -> Result<Value> {
     } else {
         Vec::new()
     };
+    let published = if readable(domain)? {
+        domain.list_types()?
+    } else {
+        Vec::new()
+    };
 
     let Some(topic) = arguments.get("topic").and_then(Value::as_str) else {
-        let mut topics: Vec<Value> = TOPICS
-            .iter()
-            .map(|(name, when, _)| json!({"topic": name, "when": when}))
-            .collect();
-        // One per extension the project declares. The bodies arrive with the
-        // manifests, which is a later stage; until then the topic is listed and
-        // says so, because a topic that is silently absent looks like an
-        // extension that has nothing to say about itself.
-        topics.extend(installed.iter().map(|extension| {
-            json!({
-                "topic": format!("extension:{}", extension.id),
-                "when": format!("Before working in the kinds `{}` publishes.", extension.id),
-            })
-        }));
-        // Deliberately not the bodies. A project may declare several
-        // extensions, each with a document's worth of prose, and the list is
-        // read to find out what there is to read.
-        return Ok(json!({"topics": topics}));
+        return Ok(json!({"topics": listed(&installed, &published)}));
     };
 
     if let Some((_, _, body)) = TOPICS.iter().find(|(name, _, _)| *name == topic) {
@@ -630,7 +670,11 @@ fn instructions(domain: &mut Domain, arguments: &Value) -> Result<Value> {
     }
     if let Some(id) = topic.strip_prefix("extension:") {
         return if let Some(extension) = installed.iter().find(|extension| extension.id == id) {
-            Ok(json!({"topic": topic, "body": extension_body(extension)}))
+            let brought: Vec<&RecordType> = published
+                .iter()
+                .filter(|entry| brought_by(entry, id))
+                .collect();
+            Ok(json!({"topic": topic, "body": extension_body(extension, &brought)}))
         } else {
             Err(MemoryError::domain(
                 "invalid_argument",
@@ -639,11 +683,96 @@ fn instructions(domain: &mut Domain, arguments: &Value) -> Result<Value> {
             ))
         };
     }
+    // The kinds nobody's package brought: types somebody made in the window,
+    // for this project and no other. They have fields and guidance exactly as a
+    // package's do, and no topic of their own to be described in — so they are
+    // described here, in the one place a writer is already looking.
+    if topic == PROJECT_KINDS {
+        let own: Vec<&RecordType> = published
+            .iter()
+            .filter(|entry| !from_a_package(entry, &installed))
+            .collect();
+        return Ok(json!({
+            "topic": topic,
+            "body": format!(
+                "Kinds this project made for itself, rather than taking from a package.{}",
+                kinds_section(&own)
+            ),
+        }));
+    }
     Err(MemoryError::domain(
         "invalid_argument",
         format!("no topic named `{topic}`. Call `{INSTRUCTIONS}` with no arguments for the list."),
         json!({"topic": topic}),
     ))
+}
+
+/// Whether a kind came from the package with this id.
+///
+/// The join is the prefix and nothing else: a package's kinds are its id, a
+/// dot, and a word it chose. Written once because three places ask it and a
+/// fourth spelling of `starts_with` is how one of them ends up subtly
+/// different — `tasks` matching `tasksmith.thing`, for instance.
+fn brought_by(kind: &RecordType, id: &str) -> bool {
+    kind.kind
+        .strip_prefix(id)
+        .is_some_and(|rest| rest.starts_with('.'))
+}
+
+/// Whether any installed package brought this kind.
+fn from_a_package(kind: &RecordType, installed: &[InstalledExtension]) -> bool {
+    installed
+        .iter()
+        .any(|extension| brought_by(kind, &extension.id))
+}
+
+/// What there is to read, and when each one is worth reading.
+///
+/// Deliberately not the bodies. A project may declare several packages, each
+/// with a document's worth of prose, and this list is read to find out what
+/// there is to read.
+///
+/// Each hint is written in the words of what the topic covers rather than in
+/// the name of what published it. An id is not something anybody asks for by:
+/// somebody asks for a Task, and the topic describing one has to be findable
+/// from that word. The titles are the project's own, read off its types, so
+/// this stays a list of what is here rather than of what Sync knows about.
+fn listed(installed: &[InstalledExtension], published: &[RecordType]) -> Vec<Value> {
+    let mut topics: Vec<Value> = TOPICS
+        .iter()
+        .map(|(name, when, _)| json!({"topic": name, "when": when}))
+        .collect();
+    // Offered only where there is something to describe. A project whose every
+    // kind came from a package would otherwise be handed a topic that answers
+    // with a heading and nothing under it.
+    if published
+        .iter()
+        .any(|entry| !from_a_package(entry, installed))
+    {
+        topics.push(json!({
+            "topic": PROJECT_KINDS,
+            "when": "Before writing a record of a kind no package brought.",
+        }));
+    }
+    topics.extend(installed.iter().map(|extension| {
+        let brought: Vec<&str> = published
+            .iter()
+            .filter(|entry| brought_by(entry, &extension.id))
+            .map(|entry| entry.title.as_str())
+            .collect();
+        let when = match (brought.is_empty(), extension.tools.is_empty()) {
+            (true, true) => format!("Before working in the kinds `{}` publishes.", extension.id),
+            (true, false) => format!("Before calling a tool of `{}`.", extension.id),
+            (false, true) => format!("Before writing one of: {}.", brought.join(", ")),
+            (false, false) => format!(
+                "Before writing one of: {}, or calling a tool of `{}`.",
+                brought.join(", "),
+                extension.id
+            ),
+        };
+        json!({"topic": format!("extension:{}", extension.id), "when": when})
+    }));
+    topics
 }
 
 /// The records a write names by their key rather than by their name.
@@ -741,6 +870,41 @@ fn refuse_wikilinks(domain: &mut Domain, written: &[sync_memory::EntityInput]) -
             said.join("; ")
         ),
         json!({"wikilinks": found}),
+    ))
+}
+
+/// The one claim a record cannot make: checked, against nothing.
+///
+/// `verified` says the writer read the code the record covers and found the
+/// claim standing. Where the record names no scope paths there is no such code:
+/// nothing was read, and — worse — nothing will ever take the flag off again,
+/// because the engine marks a record stale by reconciling code history against
+/// exactly those paths. A record left permanently marked as checked is the one
+/// failure this whole scale exists to prevent, so the write is refused and the
+/// message says what to add.
+///
+/// Refused rather than quietly downgraded to `unverified`: a writer who claimed
+/// to have checked something has read code, and silently storing that as *not
+/// checked* throws the reading away without telling anybody it happened.
+fn refuse_unscoped_verification(written: &[sync_memory::EntityInput]) -> Result<()> {
+    let unscoped: Vec<&str> = written
+        .iter()
+        .filter(|entity| entity.verified && entity.scope_paths.is_empty())
+        .map(|entity| entity.key.as_str())
+        .collect();
+    if unscoped.is_empty() {
+        return Ok(());
+    }
+    Err(MemoryError::domain(
+        "invalid_argument",
+        format!(
+            "`verified` says you read the code this record covers, and it names none: {}. \
+             Freshness is derived by reconciling code history against `scope_paths`, so a \
+             record with none would stay marked as checked for ever. Add the paths the claim \
+             covers and send the write again, or leave `verified` out. Nothing was written.",
+            unscoped.join(", ")
+        ),
+        json!({"verified_without_scope": unscoped}),
     ))
 }
 
@@ -845,6 +1009,7 @@ fn apply(domain: &mut Domain, arguments: &Value) -> Result<Value> {
     // is given. The refusal answers first: there is no point reporting prose in
     // a transaction that is not going to land.
     refuse_wikilinks(domain, &save)?;
+    refuse_unscoped_verification(&save)?;
     // Attached only after a write that succeeded, because a transaction that
     // failed is not the moment to discuss somebody's style.
     let bare = bare_keys(domain, &save);
@@ -874,14 +1039,14 @@ fn apply(domain: &mut Domain, arguments: &Value) -> Result<Value> {
 /// interesting. It says what is true — that it published types and describes
 /// itself through them — because a topic that came back empty would read as an
 /// extension that failed rather than as one with nothing to add.
-fn extension_body(extension: &InstalledExtension) -> String {
+fn extension_body(extension: &InstalledExtension, brought: &[&RecordType]) -> String {
     let mut body = extension.prompt.clone().unwrap_or_else(|| {
         format!(
-            "`{}` publishes types and says nothing further about them. Read the kinds it \
-             brought with `sync_project` and work in them the way `records` describes.",
+            "`{}` says nothing about itself beyond what its types declare, which is below.",
             extension.id
         )
     });
+    body.push_str(&kinds_section(brought));
     if !extension.tools.is_empty() {
         let id = &extension.id;
         // Read off the project's own record rather than off anything this
@@ -920,6 +1085,105 @@ fn extension_body(extension: &InstalledExtension) -> String {
     body
 }
 
+/// The kinds themselves, as their definitions state them.
+///
+/// A definition holds everything somebody needs to write a record of its type —
+/// the fields, what each one takes, which are required, the relations it may
+/// carry — and one more thing: the `guidance` its author wrote for exactly this
+/// moment. None of it is on the catalogue: `memory_list_types` answers with how
+/// *many* fields a type has, which tells a writer nothing it can act on, and a
+/// writer who cannot see a field name finds it out from a refusal.
+///
+/// So it is here, in the topic that is read before writing one, and stated
+/// verbatim. A summary of a schema is a schema that disagrees with the one the
+/// engine validates against.
+fn kinds_section(kinds: &[&RecordType]) -> String {
+    if kinds.is_empty() {
+        return String::new();
+    }
+    let mut section = String::from("\n\n## The kinds, as their definitions state them");
+    for kind in kinds {
+        let _ = write!(
+            section,
+            "\n\n### `{}` — {}\n\n{}",
+            kind.kind, kind.title, kind.description
+        );
+        if let Some(guidance) = &kind.guidance {
+            let _ = write!(section, "\n\n{guidance}");
+        }
+        if kind.fields.is_empty() {
+            section.push_str("\n\nFields: none. Everything it says is its title and its body.");
+        } else {
+            let _ = write!(
+                section,
+                "\n\nFields: `{}`",
+                Value::Object(kind.fields.clone())
+            );
+        }
+        if !kind.relationships.is_empty() {
+            let _ = write!(
+                section,
+                "\nRelations: `{}`",
+                Value::Object(kind.relationships.clone())
+            );
+        }
+    }
+    section
+}
+
+/// Every name in a text that reads as a tool of this surface, and is not one.
+///
+/// Written for the tests below and for the one in `server.rs`, because both are
+/// holding the same rule against two halves of the same prose. What it looks
+/// for is deliberately narrow: a word in backticks beginning `memory_` or
+/// `sync_` is this surface's own shape, so a text that spells one nothing
+/// answers to is a text telling an agent to call something that does not exist.
+///
+/// Names carrying a dot are not checked, and the reason is that they are
+/// ambiguous by design — `fields.archived` and `acme.tracker.search` are the
+/// same shape, one of them a member and the other a call, and a check that
+/// guessed would fail on the prose it was meant to protect. That class of
+/// mistake is caught where the names are: in a package's own repository,
+/// against the surface it was written for.
+#[cfg(test)]
+pub(crate) fn names_that_are_not_tools(text: &str) -> Vec<String> {
+    let catalogue: Vec<&str> = crate::published::PUBLISHED
+        .iter()
+        .copied()
+        .chain([PROJECTS, PROJECT, INSTRUCTIONS, APPLY, CALL, SPEAK])
+        .collect();
+    let mut unknown = Vec::new();
+    // Odd runs of a split on the fence are what stood between two of them.
+    for spelled in text.split('`').skip(1).step_by(2) {
+        let named = spelled.trim();
+        if !(named.starts_with("memory_") || named.starts_with("sync_")) {
+            continue;
+        }
+        if catalogue.contains(&named) || unknown.iter().any(|seen| seen == named) {
+            continue;
+        }
+        unknown.push(named.to_owned());
+    }
+    unknown
+}
+
+/// Everything this server says to an agent in its own words.
+///
+/// The tool descriptions, their schemas, and every topic — the whole of what an
+/// agent is told by Sync rather than by a package or by the engine.
+#[cfg(test)]
+pub(crate) fn everything_said() -> Vec<String> {
+    let mut said: Vec<String> = TOPICS
+        .iter()
+        .flat_map(|(name, when, body)| [(*name).to_owned(), (*when).to_owned(), (*body).to_owned()])
+        .collect();
+    for tool in tools(true) {
+        said.push(tool.description.unwrap_or_default().to_string());
+        said.push(Value::Object((*tool.input_schema).clone()).to_string());
+    }
+    said
+}
+
 /// The topics, their when-hints, and their bodies.
 ///
 /// Prose rather than generated text, and short on purpose: every word here is
@@ -936,6 +1200,12 @@ const TOPICS: &[(&str, &str, &str)] = &[
          Keys are permanent. There is no rename: a key is what every link and every reader refers \
          to, so choose one that will still be true. Write through `sync_apply`, never by \
          constructing a transaction id of your own.\n\n\
+         Two members say where a record sits rather than what it holds. `folder` files it — \
+         `memory_list_folders` names the folders a project already keeps, and where a folder \
+         has a record describing it, that description is what belongs there, read before \
+         filing rather than after. `archived` puts it away, and a closed thing is archived in \
+         the same write that closes it. A write replaces everything else it does not repeat, \
+         and leaves the archive exactly as it found it.\n\n\
          **Name another record, never its key.** In prose, a reference is a readable name \
          carrying an address: `[the record's title](sync://<kind>/<key>)`. A bare key is \
          unreadable and cannot be opened, and double brackets are not a link — they carry no \
@@ -954,13 +1224,25 @@ const TOPICS: &[(&str, &str, &str)] = &[
     ),
     (
         "freshness",
-        "Before trusting what a record says.",
-        "Every record carries a freshness the engine derives rather than anybody states: it \
-         reconciles code history against the record's scope paths. `valid` and `unverified` are \
-         usable. `stale` and `invalid` mean the code moved under the claim — they are a flag, \
-         never a fact. Verify against the code, then revalidate, edit, or archive.\n\n\
+        "Before relying on what a record says, and after checking one against the code.",
+        "Freshness is the engine reconciling code history against a record's `scope_paths`. \
+         Four states, and only one of them is anybody's to state:\n\n\
+         - `fresh` — somebody read that code and wrote the record back with `verified: true`. \
+         It holds until a commit touches those paths again.\n\
+         - `unverified` — nobody has said either way. Every record starts here and every edit \
+         returns it here: a text that changed is a claim nobody has checked since.\n\
+         - `stale`, `invalid` — the code moved under the claim. **A flag, never a fact.** Do \
+         not quote the body as true.\n\n\
+         A flagged record is settled one of three ways, said in one line before you act on it: \
+         the claim still holds, so write it back with `verified: true`; it needs editing, so \
+         edit it in that same write; it is obsolete, so set `archived: true`. Leaving it \
+         flagged is the one option that costs the next session the same reading again.\n\n\
+         A record with no scope paths is never flagged, because there is nothing to reconcile \
+         it against — and for the same reason it cannot be verified: the write door refuses \
+         the claim rather than storing one that would stand for ever. A claim about code \
+         belongs to the paths it covers; give it them.\n\n\
          Live code is the final arbiter. A record that disagrees with what the code does is a \
-         record to fix, not evidence.",
+         record to fix, and fixing it is part of shipping the change.",
     ),
     (
         "search",
@@ -1008,6 +1290,44 @@ fn tool(name: &'static str, description: &'static str, schema: &Value) -> Tool {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used)]
+
+    /// A name an agent reads in backticks is a name it will call.
+    ///
+    /// Both halves of this were live at once: a topic here named five calls
+    /// that have never existed on this surface, and the agent following it
+    /// spent a turn each finding that out. Prose is the one part of a server
+    /// that the compiler cannot hold, so this holds the part of it that is
+    /// checkable — a tool named must be a tool published.
+    #[test]
+    fn every_tool_this_server_names_is_one_it_publishes() {
+        for said in everything_said() {
+            let unknown = names_that_are_not_tools(&said);
+            assert!(
+                unknown.is_empty(),
+                "these are named as tools and are not published: {unknown:?} — in: {said}"
+            );
+        }
+    }
+
+    /// One word for one state, and it is the engine's word.
+    ///
+    /// Freshness was written here as `valid` and everywhere else — the engine,
+    /// the window, the filters an agent passes — as `fresh`. Nothing failed:
+    /// the agent simply filtered on a state no record has ever been in, and got
+    /// an empty answer that looked like an empty corpus.
+    #[test]
+    fn freshness_is_spelled_the_way_the_engine_spells_it() {
+        const STATES: &[&str] = &["fresh", "unverified", "stale", "invalid"];
+        for said in everything_said() {
+            for spelled in said.split('`').skip(1).step_by(2) {
+                let named = spelled.trim();
+                assert_ne!(
+                    named, "valid",
+                    "the engine has no such state; the four are {STATES:?} — in: {said}"
+                );
+            }
+        }
+    }
 
     use super::*;
 

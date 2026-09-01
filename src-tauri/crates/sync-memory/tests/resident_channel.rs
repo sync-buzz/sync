@@ -182,6 +182,8 @@ fn note(key: &str, title: &str) -> Entity {
         extensions,
         folder: None,
         is_folder: false,
+        archived: false,
+        verified: false,
     }
 }
 

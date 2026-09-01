@@ -1039,6 +1039,26 @@ most of them. What is deliberately *not* written is the handler behind a tool:
 that is the package's own name for one of its functions, and nothing outside the
 package can act on it.
 
+### What a prompt may tell an agent to call
+
+An agent reaching a project does it through one MCP server, and that server
+publishes a fixed surface: nine of the engine's read tools under the engine's
+own names — `memory_get_record`, `memory_list_records`, `memory_list_folders`,
+`memory_list_types`, `memory_read_content`, `memory_search`, `memory_backlinks`,
+`memory_diff`, `memory_schema_status` — and Sync's own `sync_projects`,
+`sync_project`, `sync_instructions`, `sync_apply`, `sync_call` and, where the
+person allowed it, `sync_speak`. The allow-list is
+`src-tauri/crates/sync-mcp/src/published.rs`; everything of Sync's own is
+`own.rs` beside it.
+
+Everything a package's own prompt tells an agent to do is done with those, plus
+the package's own tools through `sync_call`. There is nothing else: a prompt
+naming a call that is not on this list costs the agent a turn to find out, and
+the agent's next guess is usually a worse version of the same mistake. Writing a
+record where it belongs is `folder` on `sync_apply`; describing that folder is
+`is_folder`; putting a record away is `archived`; saying a claim was checked
+against the code is `verified`.
+
 Installing is types first, declaration second, and the order is load-bearing: a
 failure between them leaves types nobody declared, which the next install
 reuses, rather than a declaration whose schema is missing. Removing writes only
@@ -1389,6 +1409,13 @@ to poll an issue. The measurements that decided it: QuickJS through `rquickjs` a
 gate. A sandboxed tier for unsigned UI; the signature format is what lets that
 arrive without a redesign. Paid extensions, ratings, and anything else that
 makes the registry a storefront rather than an index.
+
+**A package cannot say a claim was checked.** `verified` is on the agent's
+write and nowhere in the host API, and the asymmetry is the point: it means
+somebody read the code the record covers and found the claim standing, which is
+a judgement rather than an operation. A package could only ever set it on a
+schedule, and a corpus marked checked by a clock is a corpus that says *checked*
+and means *touched*.
 
 Three more places a package might have appeared, closed for the reason the set
 in §9a is closed at all: a page of the settings window, entries in ⌘K, and a

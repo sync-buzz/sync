@@ -1709,7 +1709,9 @@ impl Domain {
             ));
         }
         let mut operations = self.delete_operations(remove)?;
-        operations.extend(save.into_iter().map(|input| Entity::from(input).to_put()));
+        for input in save {
+            operations.push(self.settled(input)?.to_put());
+        }
         // Something was named and none of it is there: every key was already
         // gone, which is the state the caller asked for. Said as the no-op it
         // is rather than as "you named nothing", which would be untrue and
@@ -1722,6 +1724,52 @@ impl Domain {
         }
         let transaction = self.next_transaction_id("agent");
         self.apply(&transaction, &operations)
+    }
+
+    /// One record to write, with what the write left unsaid filled in.
+    ///
+    /// A write states the whole record, which is what makes it simple to
+    /// describe and what makes one member dangerous: the archive flag is not
+    /// something a writer is thinking about while correcting a sentence, and a
+    /// write that omitted it would take a record out of the archive without
+    /// anybody deciding to. So an unstated flag is read off the store rather
+    /// than defaulted, and only a write that says `archived` moves it.
+    ///
+    /// Freshness is not treated this way, and the difference is the point. A
+    /// text that changed is a claim nobody has checked since, so a write that
+    /// says nothing about it means `unverified` — that is a fact about the
+    /// write, not a member it forgot.
+    ///
+    /// # Errors
+    ///
+    /// Returns the engine failure. A key the store does not hold is not one:
+    /// this is a record being created, and a record is created out of the
+    /// archive.
+    fn settled(&mut self, input: sync_memory::EntityInput) -> Result<Entity> {
+        let stated = input.archived;
+        let mut entity = Entity::from(input);
+        entity.archived = match stated {
+            Some(archived) => archived,
+            None => self.archived_now(&entity.key)?,
+        };
+        Ok(entity)
+    }
+
+    /// Whether the store already holds this key put away.
+    ///
+    /// # Errors
+    ///
+    /// Returns the engine failure.
+    fn archived_now(&mut self, key: &str) -> Result<bool> {
+        let view = self.get_record(key)?;
+        Ok(view
+            .record
+            .as_ref()
+            .and_then(|record| record.get("envelope").or(Some(record)))
+            .and_then(|envelope| envelope.get("archive"))
+            .and_then(|archive| archive.get("archived"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false))
     }
 
     /// Delete records by key, in one transaction.
@@ -2081,10 +2129,13 @@ impl Domain {
     /// Returns the engine failure, including a conflict the replay could not
     /// settle.
     pub fn save_entities(&mut self, entities: Vec<EntityInput>) -> Result<TransactionResult> {
-        let operations: Vec<Value> = entities
-            .into_iter()
-            .map(|input| Entity::from(input).to_put())
-            .collect();
+        let mut operations: Vec<Value> = Vec::with_capacity(entities.len());
+        for input in entities {
+            // Through the same door the agent's writes go through, so that a
+            // write which said nothing about the archive means the same thing
+            // whoever made it. See [`Self::settled`].
+            operations.push(self.settled(input)?.to_put());
+        }
         let transaction = self.next_transaction_id("sync-entities");
         self.apply(&transaction, &operations)
     }
@@ -2292,6 +2343,10 @@ fn project_record(settings: &ProjectSettings) -> Entity {
         // in it.
         folder: None,
         is_folder: false,
+        archived: false,
+        // A project's own record claims nothing about the code, so there is
+        // nothing to have checked it against.
+        verified: false,
     }
 }
 

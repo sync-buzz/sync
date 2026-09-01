@@ -90,6 +90,14 @@ export function VoiceSection() {
     () => byLanguage(status?.voices ?? []),
     [status?.voices],
   );
+  const chosen = settings?.voice ?? null;
+  const stranded = useMemo(
+    () =>
+      chosen && !(status?.voices ?? []).some((voice) => voice.id === chosen)
+        ? chosen
+        : null,
+    [chosen, status?.voices],
+  );
 
   return (
     <section className="flex flex-col gap-5">
@@ -127,7 +135,7 @@ export function VoiceSection() {
 
       <Choice
         label="Voice"
-        detail="Grouped by language. Enhanced and Premium voices are the ones macOS downloads; the rest ship with it."
+        detail="The voices macOS reads text in, grouped by language. Enhanced and Premium ones are the downloads it offers in System Settings; the rest ship with it."
       >
         <select
           aria-label="Voice"
@@ -142,6 +150,14 @@ export function VoiceSection() {
           {/* Not choosing is a real answer, and it is the one somebody who has
               never opened this page already has. */}
           <option value="">The system&apos;s own choice</option>
+          {/* A voice chosen before the list was narrowed to the reading ones.
+              It still speaks — the crate filters what is offered, not what may
+              be said — so the control has to show it. A `select` whose value
+              matches no option draws blank, which would say nothing is chosen
+              while Sync goes on talking in Zarvox. */}
+          {stranded ? (
+            <option value={stranded}>{stranded} — no longer offered</option>
+          ) : null}
           {grouped.map(([language, voices]) => (
             <optgroup key={language} label={languageNamed(language)}>
               {voices.map((voice) => (
@@ -266,11 +282,12 @@ export function VoiceSection() {
 /**
  * The voices, in the order somebody looks for one.
  *
- * Two rules, and both are about a list of nearly two hundred. Languages are
- * ordered by name, except this Mac's own, which goes first — the voice somebody
- * wants is overwhelmingly one that speaks their language. Within a language the
- * downloaded voices lead, because a Premium voice beside a compact one of the
- * same name is the whole reason quality is shown at all.
+ * Two rules, and both are about a list with one voice for every language macOS
+ * supports — forty-nine of them on the machine this was written on. Languages
+ * are ordered by name, except this Mac's own, which goes first: the voice
+ * somebody wants is overwhelmingly one that speaks their language. Within a
+ * language the downloaded voices lead, because a Premium voice beside a compact
+ * one of the same name is the whole reason quality is shown at all.
  */
 function byLanguage(
   voices: readonly Voice[],

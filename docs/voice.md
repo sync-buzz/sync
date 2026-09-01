@@ -89,11 +89,33 @@ and `objc2-app-kit` are already in the tree for the Dock menu, so this is one
 crate and no new dependency graph.
 
 Measured on this machine before the decision, because "the system has voices" is
-not an argument until somebody counts them: **184 voices**, including `ru_RU`
+not an argument until somebody counts them: **180 voices**, including `ru-RU`
 Milena, and macOS downloads its own Enhanced and Premium voices in System
 Settings without Sync being involved. The system plays the sound, so there is no
 audio device to open, no sample format to negotiate and no `rodio` in the
 dependency tree.
+
+**Forty-nine of the hundred and eighty are offered.** The system's list is three
+families and only one of them is voices anybody would have a sentence read in.
+`com.apple.speech.synthesis.voice.*` is the novelty set — Zarvox, Trinoids,
+Bells — with four voices from the eighties among them. `com.apple.eloquence.*`
+is nine formant-synthesis personas across fourteen languages: 112 rows, all of
+them the same robot, and 62% of what somebody scrolls through looking for the
+voice that speaks their language. `com.apple.voice.*` is the rest — one voice
+per language, and the family a downloaded Enhanced or Premium voice arrives in,
+so a person who improves their own list needs nothing here to change.
+
+The platform's own `isNoveltyVoice` was the first answer and does not divide
+them: measured against the 180 it marks 15, missing four of the novelty voices
+and saying nothing about any of the 112. The family in the identifier is what
+separates the three cleanly, so that is what the crate reads.
+
+**What is offered is not what may be said.** A voice chosen before the list was
+narrowed still speaks: the filter is on `voices()`, not on `speak`, and refusing
+it would tell somebody that the voice they are listening to is not on their Mac.
+The settings page shows such a choice as its identifier, marked *no longer
+offered*, because a control drawn blank would say nothing is chosen while the
+machine goes on talking.
 
 It is the platform's own, so there is nothing to download, nothing to choose
 before a person can hear anything, and no audio stack of ours to get wrong. That
