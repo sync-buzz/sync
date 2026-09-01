@@ -130,8 +130,14 @@ impl MemoryClient {
         // handshake that restarted on failure would restart to greet, greet to
         // fail, and fail to restart — a loop with a process spawned at every
         // turn. A replacement that cannot answer is an error, not another try.
-        let answered = self.request_once(crate::protocol::METHODS, &json!({}))?;
-        let answered: Vec<String> = parse(answered)?;
+        // The number goes out with the question rather than beside it: a
+        // handshake is the one place both ends are certain to speak, and a
+        // version agreed anywhere else is a version one of them can skip.
+        let answered = self.request_once(
+            crate::protocol::METHODS,
+            &json!({"channel": crate::protocol::CHANNEL_VERSION}),
+        )?;
+        let answered = channel_methods(&answered)?;
         let missing: Vec<&str> = REQUIRED_METHODS
             .iter()
             .copied()
@@ -1190,7 +1196,81 @@ impl MemoryClient {
 }
 
 /// Resource bodies arrive as JSON text inside `contents[0].text`.
+/// What the handshake says this window is talking to.
+///
+/// Three answers and each is a different sentence. A handshake with no version
+/// on it is an engine from before the channel had one, which is the shape a
+/// stale bundle takes. A version that is not ours names which of the two is
+/// behind — the sentence a person can act on, rather than a call failing later
+/// on a shape that moved. Anything else is the list of what it answers.
+fn channel_methods(answer: &Value) -> Result<Vec<String>> {
+    let Some(stated) = answer.get("channel").and_then(Value::as_u64) else {
+        return Err(MemoryError::Sidecar(
+            "the sidecar's handshake states no channel version — it is older than this window"
+                .to_owned(),
+        ));
+    };
+    let ours = u64::from(crate::protocol::CHANNEL_VERSION);
+    if stated != ours {
+        let older = if stated < ours { "sidecar" } else { "window" };
+        return Err(MemoryError::Sidecar(format!(
+            "this window speaks channel version {ours} and the sidecar speaks {stated} — the {older} is the older of the two"
+        )));
+    }
+    parse(answer.get("methods").cloned().unwrap_or(Value::Null))
+}
+
 fn parse<T: serde::de::DeserializeOwned>(value: Value) -> Result<T> {
     serde_json::from_value(value)
         .map_err(|error| MemoryError::Protocol(format!("unreadable engine response: {error}")))
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used)]
+
+    use super::*;
+
+    /// The handshake as it is answered today.
+    #[test]
+    fn a_handshake_at_this_version_is_the_list_it_carries() {
+        let named = channel_methods(&json!({
+            "channel": crate::protocol::CHANNEL_VERSION,
+            "methods": ["types.list", "records.load"],
+        }))
+        .expect("the versions agree");
+        assert_eq!(named, vec!["types.list", "records.load"]);
+    }
+
+    /// An engine from before the channel had a number. The bare list is what it
+    /// answered, and the message has to name what is old rather than report an
+    /// unreadable response.
+    #[test]
+    fn a_handshake_with_no_version_says_the_sidecar_is_the_older_one() {
+        let refused = channel_methods(&json!(["types.list"])).expect_err("no version was stated");
+        assert!(
+            refused.to_string().contains("older than this window"),
+            "the message names which side is behind: {refused}"
+        );
+    }
+
+    /// Both directions of the mismatch, because both happen: a window updated
+    /// past its bundled engine, and a resident process from a newer install.
+    #[test]
+    fn a_version_that_is_not_ours_names_the_older_side() {
+        let ours = u64::from(crate::protocol::CHANNEL_VERSION);
+        let behind = channel_methods(&json!({"channel": ours + 1, "methods": []}))
+            .expect_err("the sidecar speaks a later version");
+        assert!(
+            behind.to_string().contains("the window is the older"),
+            "{behind}"
+        );
+
+        let ahead = channel_methods(&json!({"channel": 0, "methods": []}))
+            .expect_err("the sidecar speaks an earlier version");
+        assert!(
+            ahead.to_string().contains("the sidecar is the older"),
+            "{ahead}"
+        );
+    }
 }

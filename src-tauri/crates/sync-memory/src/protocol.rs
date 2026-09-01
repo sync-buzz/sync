@@ -26,6 +26,39 @@ pub const PROJECT_RESOURCE: &str = "memory://project";
 /// should be found.
 pub const METHODS: &str = "methods.list";
 
+/// What version of the host channel both ends are speaking.
+///
+/// One number for the channel rather than one per operation, and stated in the
+/// handshake by each end. Until now nothing forced the question: the window and
+/// the sidecar are built and released together, so a mismatch was a bundle
+/// assembled wrong rather than a state anybody could be in. A client that
+/// arrives through a store is months behind by construction — *old client, new
+/// server* is its ordinary condition, not its edge — and a number added after
+/// the first such client exists does nothing for the clients that shipped
+/// without it.
+///
+/// Compatibility is equality and nothing cleverer. A range would be a promise
+/// about which changes are safe, and nobody has had to keep that promise yet.
+pub const CHANNEL_VERSION: u32 = 1;
+
+/// The longest single message the host channel will read.
+///
+/// A line is read into memory before anything can look at it, so without a
+/// ceiling one client with no newline in it is as much of this process's memory
+/// as it cares to take, given away quietly. Eight mebibytes is far above any
+/// message either end sends — a record body, a document, a base64 payload — and
+/// far below what a connection may cost.
+pub const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
+
+/// The call that lists the projects this machine holds.
+///
+/// Answered before any project has been named, which is what makes it the one
+/// call a connection can make while it still has nothing to say about *which*
+/// project it is about. A client that cannot see the file system has no other
+/// way to find out what there is; a client that can see it must not be asked
+/// to, because a path is a thing to be typed wrong.
+pub const PROJECTS: &str = "projects.list";
+
 /// The call that tells a host connection which project it is about.
 ///
 /// Only meaningful on the resident process's socket, where one process serves

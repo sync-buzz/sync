@@ -55,6 +55,6 @@ pub use mapping::{
 };
 pub use process::{BinarySource, EngineBinary, LaunchConfig, resolve_binary};
 pub use protocol::{
-    ATTACH, ATTEND, Connection, METHODS, PROJECT_RESOURCE, REVISION_RESOURCE, TOOL_CALL, Transport,
-    tool_result,
+    ATTACH, ATTEND, CHANNEL_VERSION, Connection, MAX_FRAME_BYTES, METHODS, PROJECT_RESOURCE,
+    PROJECTS, REVISION_RESOURCE, TOOL_CALL, Transport, tool_result,
 };

@@ -19,8 +19,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use memory_hub_mcp::EmbeddingProvider;
-use serde_json::Value;
-use sync_memory::{METHODS, MemoryError, Result};
+use serde_json::{Value, json};
+use sync_memory::{CHANNEL_VERSION, METHODS, MemoryError, PROJECTS, Result};
 
 use crate::domain::Domain;
 use crate::projects::Projects;
@@ -109,8 +109,63 @@ impl Host {
     pub fn methods(&self) -> Vec<&'static str> {
         let mut methods: Vec<&'static str> = self.operations.keys().copied().collect();
         methods.push(METHODS);
+        methods.push(PROJECTS);
         methods.sort_unstable();
         methods
+    }
+
+    /// Whether this call can be answered before a project has been named.
+    ///
+    /// Asked by a door before it demands a project of its caller, so that the
+    /// two questions a connection has to ask first — what do you answer, and
+    /// what have you got — are not refused for being asked first.
+    #[must_use]
+    pub fn answers_without_project(method: &str) -> bool {
+        matches!(method, METHODS | PROJECTS)
+    }
+
+    /// Answer the one call every connection makes first.
+    ///
+    /// It carries two things and they answer two different questions. The list
+    /// says what this surface can do, which is what catches a sidecar older
+    /// than the window that asked. The number says what the *channel* is, which
+    /// is what catches the pair being incompatible at all — a client from a
+    /// store is months behind by construction, and it must be told so in a
+    /// sentence rather than left to fail on the first call whose shape moved.
+    ///
+    /// A caller that states no version is answered rather than refused. The
+    /// number is only enforceable where both ends state it, and the answer
+    /// carries it either way, so a caller that says nothing can still read what
+    /// it is talking to.
+    fn handshake(&self, params: &Value) -> Result<Value> {
+        if let Some(stated) = params.get("channel").and_then(Value::as_u64) {
+            let ours = u64::from(CHANNEL_VERSION);
+            if stated != ours {
+                let older = if stated < ours { "caller" } else { "engine" };
+                return Err(MemoryError::domain(
+                    "unsupported",
+                    format!(
+                        "this channel is version {ours} and the caller speaks {stated} — the {older} is the older of the two"
+                    ),
+                    Value::Null,
+                ));
+            }
+        }
+        Ok(json!({"channel": CHANNEL_VERSION, "methods": self.methods()}))
+    }
+
+    /// Where the project called `key` is, if this machine holds one.
+    ///
+    /// The registry is the whole of the answer. A caller that names a project
+    /// this machine has not registered is told so by name, and nothing goes
+    /// near the file system on its behalf — which is the difference between a
+    /// key and a path, and the reason a connection from elsewhere gets only the
+    /// former.
+    #[must_use]
+    pub fn project_named(&self, key: &str) -> Option<std::path::PathBuf> {
+        self.projects
+            .holding(key)
+            .map(|project| project.path().to_owned())
     }
 
     /// Run one call.
@@ -120,12 +175,18 @@ impl Host {
     /// `unsupported` when nothing answers to that name — said plainly rather
     /// than as a silence the caller has to time out on.
     pub fn dispatch(&self, project: &Path, method: &str, params: &Value) -> Result<Value> {
-        // Answered by the surface rather than by an operation, because it is a
-        // question about the surface. The window asks it once on connecting: a
-        // bundled sidecar older than the window is a mismatch worth finding at
-        // the handshake instead of at the first call that is not there.
+        // Answered by the surface rather than by an operation, and both for the
+        // same reason: an [`Operation`] is handed a [`Domain`], which is one
+        // project's memory, and neither of these is about a project. The window
+        // asks the first on connecting — a bundled sidecar older than the window
+        // is a mismatch worth finding at the handshake instead of at the first
+        // call that is not there — and a client with no file system in front of
+        // it asks the second before it can ask anything else at all.
         if method == METHODS {
-            return Ok(Value::from(self.methods()));
+            return self.handshake(params);
+        }
+        if method == PROJECTS {
+            return Ok(self.projects.listed());
         }
         let Some(operation) = self.operations.get(method) else {
             return Err(MemoryError::domain(
@@ -145,5 +206,114 @@ impl Host {
             domain.ensure_initialised()?;
         }
         operation.run(&mut domain, params)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used)]
+
+    use super::*;
+
+    fn surface() -> Host {
+        Host::over(Arc::new(Projects::over(Vec::new(), None)), None)
+    }
+
+    /// The handshake carries both halves of what a caller has to know: what
+    /// this surface answers, and what channel it is answering on.
+    #[test]
+    fn the_handshake_states_the_channel_and_the_surface() {
+        let answered = surface()
+            .handshake(&json!({"channel": CHANNEL_VERSION}))
+            .expect("the versions agree");
+        assert_eq!(answered["channel"], CHANNEL_VERSION);
+        assert!(
+            answered["methods"]
+                .as_array()
+                .expect("a list")
+                .iter()
+                .any(|method| method == METHODS),
+            "the list leaves itself out: {answered}"
+        );
+    }
+
+    /// A caller behind this engine and a caller ahead of it are two different
+    /// sentences, and both have to name which side is old. "Incompatible" alone
+    /// leaves a person with a working application and no idea what to update.
+    #[test]
+    fn a_caller_at_another_version_is_told_which_side_is_old() {
+        let older = surface()
+            .handshake(&json!({"channel": u64::from(CHANNEL_VERSION) - 1}))
+            .expect_err("an older caller");
+        assert!(
+            older.to_string().contains("the caller is the older"),
+            "{older}"
+        );
+
+        let newer = surface()
+            .handshake(&json!({"channel": u64::from(CHANNEL_VERSION) + 1}))
+            .expect_err("a newer caller");
+        assert!(
+            newer.to_string().contains("the engine is the older"),
+            "{newer}"
+        );
+    }
+
+    /// A key is resolved through the registry and nowhere else. That is the
+    /// difference between a key and a path: one names something this machine
+    /// agreed to hold, the other names a directory.
+    #[test]
+    fn a_key_is_answered_from_the_registry_and_an_unknown_one_is_not_answered_at_all() {
+        let host = Host::over(
+            Arc::new(Projects::over(
+                vec![crate::projects::Registered {
+                    path: std::path::PathBuf::from("/w/a"),
+                    name: "A".to_owned(),
+                    identifier: "A".to_owned(),
+                }],
+                None,
+            )),
+            None,
+        );
+
+        assert_eq!(
+            host.project_named("A"),
+            Some(std::path::PathBuf::from("/w/a"))
+        );
+        // Not a path derived from the name, not a folder looked for: nothing.
+        assert_eq!(host.project_named("B"), None);
+    }
+
+    /// The list is answered by the surface, so it is answered whatever project
+    /// the caller has named — including none.
+    #[test]
+    fn the_projects_are_listed_without_a_project_being_named() {
+        let host = Host::over(
+            Arc::new(Projects::over(
+                vec![crate::projects::Registered {
+                    path: std::path::PathBuf::from("/w/a"),
+                    name: "A".to_owned(),
+                    identifier: "A".to_owned(),
+                }],
+                None,
+            )),
+            None,
+        );
+
+        assert!(Host::answers_without_project(PROJECTS));
+        let listed = host
+            .dispatch(Path::new(""), PROJECTS, &json!({}))
+            .expect("the list needs no project");
+        assert_eq!(listed["projects"][0]["project"], "A");
+    }
+
+    /// A caller that states nothing is answered, and the answer is where it
+    /// finds the number it did not send.
+    #[test]
+    fn a_caller_that_states_no_version_is_answered_with_ours() {
+        let answered = surface()
+            .handshake(&json!({}))
+            .expect("nothing was claimed, so nothing disagrees");
+        assert_eq!(answered["channel"], CHANNEL_VERSION);
     }
 }
