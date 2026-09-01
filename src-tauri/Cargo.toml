@@ -8,7 +8,7 @@ default-members = [".", "crates/sync-memory", "crates/sync-extensions", "crates/
 
 [package]
 name = "sync"
-version = "0.10.4"
+version = "0.10.5"
 # The workspace's default members hold two binaries — this window and the ACP
 # stub agent one test raises — so `cargo run` has two to choose from and picks
 # neither. Naming the window here is what `tauri dev` needs to start at all.
