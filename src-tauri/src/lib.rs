@@ -68,6 +68,7 @@ pub fn run() {
         .manage(server::RunningServer::default())
         .manage(schedule::ScheduleFile::default())
         .manage(work::WorkFile::default())
+        .manage(work::delegated::Delegations::default())
         // Agent sessions outlive the screen that opened one, so they are held
         // by the application rather than by a window or by an extension.
         .manage(sessions::live::Sessions::default())

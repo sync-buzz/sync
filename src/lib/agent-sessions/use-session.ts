@@ -288,6 +288,16 @@ export async function startSession(args: {
    * from.
    */
   worktree?: WorktreeChoice | null;
+  /**
+   * The conversation this one is being delegated from, by the agent's own id
+   * for it — `acpSession`, as a row and a pointer alike carry it.
+   *
+   * A conversation opened this way is filed where its parent is: what it is
+   * about and who ordered it are read from the parent rather than taken beside
+   * this, so a package cannot file work under a record it has nothing to do
+   * with. A chain of them is two conversations deep, and a third is refused.
+   */
+  parent?: string | null;
 }): Promise<OpenedSession> {
   return openSession(args);
 }

@@ -108,6 +108,20 @@ pub struct Remembered {
     /// under somebody reading it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub about: Option<super::live::About>,
+    /// The conversation this one was delegated from, by that conversation's own
+    /// agent id.
+    ///
+    /// Here rather than only on the live session because a tree of
+    /// conversations that flattened on restart would be a tree nobody could
+    /// rely on: the child outlives the run its parent was raised in, and both
+    /// halves of the list are drawn from the same two facts.
+    ///
+    /// It may name a conversation this file no longer holds — pointers prune
+    /// oldest-first, and a parent can be forgotten while its child is kept.
+    /// That is an ordinary state and not one to repair: a child whose parent is
+    /// gone is drawn where a conversation with no parent is drawn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
     /// The record it was kept as, when somebody kept it.
     ///
     /// The link is held here rather than in the record because it is the half
@@ -250,6 +264,7 @@ mod tests {
             last_seen_ms: seen,
             source: None,
             about: None,
+            parent: None,
             record_key: None,
         }
     }
@@ -348,5 +363,44 @@ mod tests {
         assert_eq!(held.agent_id, "claude");
         assert_eq!(held.cwd, "/work/repo");
         assert_eq!(held.record_key.as_deref(), Some("conversation-aa11"));
+    }
+
+    /// What a conversation came out of survives the application ending.
+    ///
+    /// This is the whole reason the fact is written down here rather than held
+    /// on the session: a child outlives the run that raised its parent, and a
+    /// tree that flattened at every restart would be a tree nobody could trust.
+    /// Written and read through the file rather than asserted on the struct,
+    /// because the failure this guards against is a spelling one — a member
+    /// serialised under a name the reader does not use is a member that quietly
+    /// becomes nothing.
+    #[test]
+    fn what_a_conversation_came_out_of_is_read_back_too() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let path = directory.path().join("conversations.json");
+        let mut store = Store::default();
+        store.remember("/work/repo", entry("thread-1", 10));
+        let mut child = entry("thread-2", 11);
+        child.parent = Some("thread-1".to_owned());
+        store.remember("/work/repo", child);
+        store.write(&path).expect("the store is written");
+
+        let read = Store::read(&path);
+        assert_eq!(
+            read.get("/work/repo", "thread-2")
+                .expect("the child is held")
+                .parent
+                .as_deref(),
+            Some("thread-1"),
+            "and it names the parent by the agent's id, which is the one identity that outlives \
+             the run"
+        );
+        assert!(
+            read.get("/work/repo", "thread-1")
+                .expect("the parent is held")
+                .parent
+                .is_none(),
+            "a conversation nobody delegated says nothing, rather than saying null"
+        );
     }
 }

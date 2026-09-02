@@ -51,6 +51,8 @@ use crate::project::{ProjectError, configuration_file, write_configuration};
 use crate::sessions::event::now_ms;
 use crate::sessions::live::{About, Source};
 
+pub(crate) mod delegated;
+
 /// The file, in this installation's configuration directory.
 const FILE: &str = "ordered-work.json";
 
@@ -177,6 +179,14 @@ pub struct Ordered {
     /// place of them.
     #[serde(default)]
     pub keep: Keep,
+    /// The conversation this work was delegated from, as the order named one.
+    ///
+    /// Written down with the rest of the order because this file is the account
+    /// of what was asked for: an order whose agent never rose has no session to
+    /// carry the fact, and *delegated from that conversation, never started* is
+    /// exactly the state somebody comes here to read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
     pub ordered_at_ms: u64,
     /// The agent's own id for the session, once there is one.
     ///
@@ -362,10 +372,16 @@ impl Store {
 /// already taken it out of the menu and the registry, and a failure to tidy
 /// this file is not a reason to tell somebody it did not happen.
 pub(crate) fn forget<R: Runtime>(app: &AppHandle<R>, work: &WorkFile, project: &str) {
-    let Ok(_held) = work.guard.lock() else { return };
-    let mut store = Store::read(app);
-    store.forget(project);
-    let _ = store.write(app);
+    {
+        let Ok(_held) = work.guard.lock() else { return };
+        let mut store = Store::read(app);
+        store.forget(project);
+        let _ = store.write(app);
+    }
+    // The answers this project's delegated work was still holding go with it:
+    // they name conversations in a project that is no longer here, and nothing
+    // will ever be free to be handed one.
+    delegated::forget(app, project);
 }
 
 /// The package that is talking, at the length an order needs it.
@@ -410,6 +426,16 @@ pub struct Order {
     /// recent one about the same record. Absent is [`Keep::Each`].
     #[serde(default)]
     pub keep: Keep,
+    /// The conversation this work was delegated from, by the agent's own id for
+    /// it, when a package ordered on an agent's behalf rather than on a clock's.
+    ///
+    /// Optional, and the absence is the ordinary answer: a routine on a clock
+    /// comes out of nothing. Where it is given, what the work is *about* and
+    /// who ordered it stop being this order's to state — both are read from the
+    /// parent by the session layer, which is what keeps a delegated
+    /// conversation in the group it belongs to.
+    #[serde(default)]
+    pub parent: Option<String>,
 }
 
 /// What the agent is to be asked, in the shape the session layer already takes.
@@ -508,6 +534,7 @@ pub(crate) fn order<R: Runtime>(
         about: order.about.take(),
         on_interrupted: order.on_interrupted,
         keep: order.keep,
+        parent: order.parent.take(),
         ordered_at_ms: now_ms(),
         acp_session: None,
     };
@@ -517,6 +544,7 @@ pub(crate) fn order<R: Runtime>(
     let source = entry.source();
     let about = entry.about.clone();
     let title = entry.title.clone();
+    let parent = entry.parent.clone();
     {
         let _held = work
             .guard
@@ -546,6 +574,7 @@ pub(crate) fn order<R: Runtime>(
                 source,
                 about,
                 keep,
+                parent,
             },
         )
         .await
@@ -576,6 +605,8 @@ struct Run {
     /// as two fields.
     about: Option<AboutOrder>,
     keep: Keep,
+    /// The conversation this run was delegated from, when it was.
+    parent: Option<String>,
 }
 
 /// Raise the agent and say the first thing to it.
@@ -596,6 +627,7 @@ async fn perform<R: Runtime>(
         source,
         about,
         keep,
+        parent,
     } = run;
     let agent = agent.as_str();
     let cwd = std::path::PathBuf::from(project);
@@ -614,13 +646,23 @@ async fn perform<R: Runtime>(
         agent,
         &cwd,
         source,
-        about.and_then(|about| about.record()),
+        crate::sessions::Under {
+            about: about.and_then(|about| about.record()),
+            parent,
+        },
     )
     .await?;
     // Before the turn, because saying something is what writes the pointer, and
     // the pointer records the title. Set afterwards, the name would be right in
     // this run's list and wrong in every later one.
     session.set_title(&title);
+    // Nothing here says the work was delegated, and that is the point of where
+    // it is said instead. A conversation opened under a parent owes its first
+    // answer upwards whether a package ordered it or a person sent a command
+    // block, so the debt is recorded when the conversation is opened and paid
+    // by the turn that runs — see [`crate::sessions::send`]. An order that
+    // arranged any of that itself would be the half of the rule that holds only
+    // for orders.
     crate::sessions::send(
         app,
         &session,
@@ -635,24 +677,21 @@ async fn perform<R: Runtime>(
     // refers to. A session with nothing said in it is not a conversation and
     // has no pointer — `sessions::remember` says so — so attaching its id
     // before this point would name something that is not written down.
-    let Some(acp_session) = session.acp_session() else {
-        return Ok(());
-    };
-    let work = app.state::<WorkFile>();
-    let Ok(_held) = work.guard.lock() else {
-        return Ok(());
-    };
-    let mut store = Store::read(app);
-    if store.began(project, key, acp_session.0.as_ref()) {
-        let _ = store.write(app);
+    if let Some(acp_session) = session.acp_session() {
+        let work = app.state::<WorkFile>();
+        let Ok(_held) = work.guard.lock() else {
+            return Ok(());
+        };
+        let mut store = Store::read(app);
+        if store.began(project, key, acp_session.0.as_ref()) {
+            let _ = store.write(app);
+        }
     }
-    drop(_held);
 
     // Last, and after everything about this run is written down. The run that
-    // replaces yesterday's has to exist before yesterday's is taken away —
-    // interrupted here, the cost is one extra row, and interrupted the other way
-    // round it would be an account of a routine that had been removed and not
-    // yet rewritten.
+    // replaces yesterday's has to exist before yesterday's is taken away — interrupted here, the cost is one
+    // extra row, and interrupted the other way round it would be an account of a
+    // routine that had been removed and not yet rewritten.
     if let (Keep::Latest, (extension_id, Some(about))) = (keep, (&slot.0, slot.1.as_deref())) {
         supersede(app, project, key, extension_id, about).await;
     }
@@ -744,6 +783,7 @@ mod tests {
             about: None,
             on_interrupted: OnInterrupted::Continue,
             keep: Keep::Each,
+            parent: None,
             ordered_at_ms: at,
             acp_session: None,
         }

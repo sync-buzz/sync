@@ -40,6 +40,36 @@ import { satisfies, valid, validRange } from "semver";
  * point of the number is that a manifest can state a range and be believed. The
  * cost is honest major bumps, which is the cost of meaning it.
  *
+ * **3.7.0** is what one conversation came out of, and what came of it.
+ * `startSession` takes a `parent` — another conversation, by the agent's own id
+ * for it — and `work.order` takes one beside it. A `SessionRow` carries both
+ * `parent` and its own `acpSession`, which is what the first is read against,
+ * and a pointer carries `parent` too, so the descent survives the application
+ * being restarted.
+ *
+ * Nothing is passed beside it. What a delegated conversation is *about* and who
+ * ordered it are read from the parent rather than stated by the caller, which
+ * is what keeps a heading unforgeable: a package may say what it delegated
+ * from and cannot say what to file the result under. A chain is two
+ * conversations deep and a third is refused in words.
+ *
+ * `SessionStatus` gains `queued` beside `working`, for the conversation whose
+ * first turn is recorded and waiting: one delegated run happens under a
+ * conversation at a time, because the work is carried out in that
+ * conversation's own working tree. Reporting it as `working` was the
+ * alternative, and the wait is as long as the run above it — an hour of a row
+ * saying an agent is working when no agent has been asked anything.
+ *
+ * **Two changes here are the ones to be careful about, and both are additions
+ * rather than loosenings.** `acpSession` on a live row: a pointer was always
+ * addressed by that id and a live row by this run's key, so a window handed a
+ * child's `parent` had nothing to compare it with. And a member added to a
+ * union that is *returned* — which is not "an accepted type widened", and is
+ * none of the three that make a major either: nothing is removed, renamed or
+ * narrowed, and every status that existed still means what it meant. What it
+ * costs is a package that switches over the union exhaustively and proves it,
+ * which will want a branch for the seventh.
+ *
  * **3.6.0** makes the published theme keep the promise it already stated. Its
  * names are unchanged and no rule about them moved; what changed is what they
  * are worth at paint. A size or a spacing step written as a number inside
@@ -524,7 +554,7 @@ import { satisfies, valid, validRange } from "semver";
  * `AreaModule`, `ActivationResult` — arrived in the same commit, which on its
  * own would have been a minor.
  */
-export const SYNC_API_VERSION = "3.6.0" as const;
+export const SYNC_API_VERSION = "3.7.0" as const;
 
 /**
  * What this build can do, as opposed to what its surface looks like.

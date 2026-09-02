@@ -53,6 +53,15 @@ const HISTORY_LIMIT: usize = 4000;
 /// somebody has to shorten before they can use it.
 const DERIVED_TITLE_LIMIT: usize = 60;
 
+/// How much of what an agent said in one turn is held for whoever ordered it.
+///
+/// The tail rather than the head, which is the whole reason there is a number
+/// here at all: a turn's answer is at the end of it, after however many
+/// paragraphs of working out. What is kept is what a conversation that asked
+/// for this work is handed, and it is handed it without the rest of the turn
+/// around it, so a bound that cut the front would cut the answer.
+const SAID_LIMIT: usize = 4_000;
+
 /// A live session.
 /// Who asked for a session, when it was not a person at the keyboard.
 ///
@@ -222,6 +231,21 @@ pub struct Session {
     /// `None` is a conversation about nothing in particular, which is what the
     /// window's own `New conversation` opens.
     pub about: Option<About>,
+    /// The conversation this one was delegated from, by the agent's own id for
+    /// it. `None` is a conversation nobody delegated, which is most of them.
+    ///
+    /// **The agent's id rather than [`Self::key`], and that is the whole of the
+    /// choice.** A live key is minted from zero every launch, so a child that
+    /// pointed at one would point at a different conversation after a restart —
+    /// the same reason the pointer next door is identified by the agent's id
+    /// ([`super::remembered::Remembered::acp_session`]). A parent has one from
+    /// `session/new`, before a word is said in it, so there is never a moment
+    /// when it could be delegated from and not yet be nameable.
+    ///
+    /// Immutable, beside the other two, and for the reason that matters most in
+    /// a list: what a conversation descends from cannot change, so a row cannot
+    /// move out from under somebody reading it.
+    pub parent: Option<String>,
     state: Mutex<State>,
     /// Held apart from the rest of the state because ending a process is async
     /// and takes `&mut`, and nothing else about a session needs to wait.
@@ -279,6 +303,35 @@ struct State {
     /// the window builds block ids from it, so spending numbers on something
     /// that is not an event would put gaps in it for no reason.
     next_image: u64,
+    /// What the agent has said in the turn that is running, as plain text.
+    ///
+    /// Not a second transcript, and not a shortcut past the rule at the head of
+    /// [`super`] that this side does not interpret a conversation. It is the
+    /// one sentence work delegated from another conversation is answered with
+    /// ([`crate::work::delegated`]): the parent has no way to read a transcript
+    /// that is not its own, so *what came of it* has to be a value on this side
+    /// or it is nothing.
+    ///
+    /// Cleared by the next thing said, because it is about one turn. A replayed
+    /// chunk is not appended — those are words from before this run, and a
+    /// conversation resumed would otherwise answer with a turn that finished
+    /// yesterday.
+    said: String,
+    /// Whether this conversation's first answer belongs to the one it was
+    /// delegated from.
+    ///
+    /// **Written here rather than derived from "nothing has been said yet",**
+    /// and that is the whole of the field. A resumed conversation is a fresh
+    /// [`Session`] with an empty [`State`] — the agent replays what was said as
+    /// updates, and nothing replays a prompt — so a conversation continued
+    /// after a restart looks exactly like one that has never been spoken in. A
+    /// person typing into a delegated conversation they came back to would
+    /// have their sentence dressed as work and their answer posted upwards.
+    ///
+    /// Set when the conversation is opened under a parent, by whichever
+    /// entrance opened it, and taken by the turn that pays it. `false`
+    /// afterwards and on every conversation nobody delegated.
+    owes: bool,
     /// Whether anything has been said in this conversation.
     ///
     /// What decides whether it is worth writing a pointer for. A session that
@@ -330,6 +383,7 @@ impl Session {
         place: Place,
         source: Option<Source>,
         about: Option<About>,
+        parent: Option<String>,
     ) -> Arc<Self> {
         let cwd = place.cwd();
         Arc::new(Self {
@@ -342,6 +396,7 @@ impl Session {
             opened_at_ms: now_ms(),
             source,
             about,
+            parent,
             state: Mutex::new(State::default()),
             process: tokio::sync::Mutex::new(None),
         })
@@ -349,6 +404,23 @@ impl Session {
 
     pub fn status(&self) -> Status {
         self.locked().status
+    }
+
+    /// Says that this conversation's first answer belongs to the one it was
+    /// delegated from. Called where it is opened, and nowhere else.
+    pub fn owe(&self) {
+        self.locked().owes = true;
+    }
+
+    /// Whether this turn is the one that answers upwards — and takes the debt
+    /// with the answer, so that nothing answers twice.
+    ///
+    /// Taken rather than read, because two turns can be said into one
+    /// conversation before either has finished: a person may add a sentence to
+    /// work that is already running, and only the first of them is the work.
+    pub fn take_what_is_owed(&self) -> bool {
+        let mut state = self.locked();
+        std::mem::take(&mut state.owes)
     }
 
     pub fn configuration(&self) -> Option<serde_json::Value> {
@@ -478,6 +550,9 @@ impl Session {
         {
             let mut state = self.locked();
             state.spoke = true;
+            // What was said in the turn before this one is not what this one
+            // answers with.
+            state.said.clear();
             if state.title.is_none() {
                 state.title = first_words(&text);
             }
@@ -603,6 +678,15 @@ impl Session {
         // one.
         self.hold_pictures(&mut payload);
         let replayed = self.locked().replaying;
+        if !replayed
+            && update.as_deref() == Some("agent_message_chunk")
+            && let Some(text) = payload
+                .get("content")
+                .and_then(|content| content.get("text"))
+                .and_then(serde_json::Value::as_str)
+        {
+            self.hold_what_was_said(text);
+        }
         self.emit(|seq, at_ms| SessionEvent::Update {
             seq,
             at_ms,
@@ -611,6 +695,35 @@ impl Session {
             payload,
             replayed,
         });
+    }
+
+    /// Keeps the tail of what the agent is saying in the turn that is running.
+    ///
+    /// Appended chunk by chunk rather than assembled from the history
+    /// afterwards, so that nothing has to decide where one message ended and
+    /// the next began — a boundary the window draws from pauses between
+    /// arrivals, which is a measurement this side does not have and should not
+    /// invent.
+    fn hold_what_was_said(&self, text: &str) {
+        let mut state = self.locked();
+        state.said.push_str(text);
+        if state.said.len() <= SAID_LIMIT {
+            return;
+        }
+        // The cut lands on a character, not inside one: this is arbitrary text
+        // from an agent, and a `String` sliced through a multi-byte character
+        // is a panic rather than a mangled word.
+        let over = state.said.len() - SAID_LIMIT;
+        let from = (over..state.said.len())
+            .find(|at| state.said.is_char_boundary(*at))
+            .unwrap_or(state.said.len());
+        state.said.drain(..from);
+    }
+
+    /// What the agent has said in the turn that is running.
+    #[must_use]
+    pub fn said(&self) -> String {
+        self.locked().said.clone()
     }
 
     /// Takes every picture out of an update and puts it in the session.
@@ -1012,6 +1125,7 @@ mod tests {
             Place::project(std::env::temp_dir()),
             None,
             None,
+            None,
         )
     }
 
@@ -1044,6 +1158,96 @@ mod tests {
         assert_eq!(state.history.len(), 2);
         assert_eq!(state.history[0].seq(), 0);
         assert_eq!(state.history[1].seq(), 1);
+    }
+
+    /// An update carrying a sentence, as an agent sends one. Built through the
+    /// client crate's decoder for the reason [`image_update`] is: what is
+    /// tested is the shape that actually reaches this side, and the member the
+    /// text is read out of is exactly what could be misspelled without anything
+    /// failing.
+    fn said_update(text: &str) -> SessionUpdateEvent {
+        acp_client::decode_session_update(serde_json::json!({
+            "sessionId": "s0",
+            "update": {
+                "sessionUpdate": "agent_message_chunk",
+                "content": { "type": "text", "text": text },
+            },
+        }))
+        .expect("the envelope carries a session id")
+    }
+
+    /// What work delegated from another conversation is answered with.
+    ///
+    /// The turn's own words and nothing else: not the turn before it, and not a
+    /// replay of words said in a run that has already ended.
+    #[test]
+    fn a_session_holds_what_the_agent_said_in_the_turn_that_is_running() {
+        let session = session();
+        session.record_prompt("Rename the columns".to_owned(), Vec::new(), Vec::new());
+        session.record_update(said_update("Renamed them, "));
+        session.record_update(said_update("and the tests pass."));
+        assert_eq!(session.said(), "Renamed them, and the tests pass.");
+
+        session.record_prompt("And the migration?".to_owned(), Vec::new(), Vec::new());
+        assert_eq!(
+            session.said(),
+            "",
+            "the next thing asked is the end of what the last one was answered with"
+        );
+
+        session.set_replaying(true);
+        session.record_update(said_update("Renamed them, and the tests pass."));
+        session.set_replaying(false);
+        assert_eq!(
+            session.said(),
+            "",
+            "and a conversation coming back is not a conversation answering"
+        );
+    }
+
+    /// The debt a delegated conversation carries, and the reason it is a field
+    /// rather than a question about the transcript.
+    ///
+    /// The half that cannot be asserted here is that nothing but
+    /// [`super::open`] calls [`Session::owe`] — a conversation resumed after a
+    /// restart is a fresh session with an empty state, so one that worked this
+    /// out from "nothing has been said yet" would hand a person's own sentence
+    /// upwards as though it were the work.
+    #[test]
+    fn what_a_conversation_owes_upwards_is_paid_once() {
+        let session = session();
+        assert!(
+            !session.take_what_is_owed(),
+            "a conversation nobody delegated owes nothing"
+        );
+
+        session.owe();
+        assert!(
+            session.take_what_is_owed(),
+            "and the turn that runs pays it"
+        );
+        assert!(
+            !session.take_what_is_owed(),
+            "a second turn said into the same conversation is not the work \
+             again: somebody adding a sentence to a run already going must not \
+             answer upwards twice"
+        );
+    }
+
+    /// The bound keeps the end, which is where a turn's answer is.
+    #[test]
+    fn what_was_said_is_kept_from_the_end_when_there_is_too_much_of_it() {
+        let session = session();
+        session.record_update(said_update(&"я".repeat(SAID_LIMIT)));
+        session.record_update(said_update("done"));
+
+        let said = session.said();
+        assert!(said.ends_with("done"), "the end is what is kept");
+        assert!(said.len() <= SAID_LIMIT + "done".len());
+        assert!(
+            said.starts_with('я'),
+            "and the cut lands on a character rather than inside one: {said}"
+        );
     }
 
     /// An update carrying an image, as an agent sends one.

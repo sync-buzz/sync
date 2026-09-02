@@ -38,7 +38,7 @@ use std::sync::Arc;
 use acp_client::{AgentProfile, launch, schema};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::State;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager as _, Runtime};
@@ -106,6 +106,27 @@ pub struct SessionRow {
     /// offers — name the work, throw it away — need the path it is at.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub worktree: Option<crate::worktree::Worktree>,
+    /// The agent's own id for this session, once the agent has given one.
+    ///
+    /// Here so that a live row and a pointer can be spoken about in one
+    /// vocabulary. A pointer has always been addressed by this id, a live row
+    /// by this run's key, and the two were never comparable — which was fine
+    /// while the only question was *is this one running*, answered on this side
+    /// in [`session_remembered`]. It stops being fine the moment a conversation
+    /// names another one: the parent of a live child may itself be live, and a
+    /// window given two incomparable identities cannot say which row it is.
+    ///
+    /// `None` until the agent answers `session/new`, and on a session whose
+    /// agent never rose.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub acp_session: Option<String>,
+    /// The conversation this one was delegated from, by the agent's id for it.
+    ///
+    /// Read against [`Self::acp_session`] of the other rows, whichever half of
+    /// the list they came from. A parent nothing in the list names is drawn as
+    /// no parent at all rather than as a row with something missing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
 }
 
 /// Everything one session has said so far, read in one go.
@@ -228,16 +249,14 @@ pub async fn session_open<R: Runtime>(
     // agent is actually raised is answered below.
     cwd: String,
     model: Option<String>,
-    // The record this conversation is being opened under, when a screen opened
-    // it from one. The window is the only caller that can answer it: a person
-    // pressing `Send to agent` on a task is standing in the task, and nothing
-    // below this line can find that out afterwards.
-    about: Option<About>,
     // Where to work: the project itself when this is absent, a fresh tree, or
     // one that is already there. A person's choice and nothing else's —
     // `docs/background.md` §9 does not promise a sandbox, so a tree buys the
     // right to throw the work away rather than any kind of safety.
     worktree: Option<crate::worktree::Choice>,
+    // What this conversation stands under: a record, another conversation, both
+    // or neither.
+    under: Under,
 ) -> Result<OpenedSession, ProjectError> {
     let project = PathBuf::from(&cwd);
     let made = match worktree {
@@ -253,7 +272,7 @@ pub async fn session_open<R: Runtime>(
         project: project.clone(),
         worktree: made.clone(),
     };
-    let opened = open(&app, &sessions, &agent_id, place, model, None, about).await;
+    let opened = open(&app, &sessions, &agent_id, place, model, None, under).await;
 
     // A tree made for a conversation that never opened is a directory nobody
     // will ever look at: the agent did not start, so nothing was written in it
@@ -288,13 +307,23 @@ async fn open<R: Runtime>(
     // so that a poll landing between the insert and the raise cannot see a row
     // that is briefly nobody's.
     source: Option<Source>,
-    // What it is about, for the same reason and with the same timing: a row
-    // that appeared in the list before it knew which record it belonged to
+    // What this one stands under, set with the same timing and for the same
+    // reason: a row that appeared in the list before it knew where it belonged
     // would be a row that changes group under somebody reading it.
-    about: Option<About>,
+    under: Under,
 ) -> Result<(Arc<Session>, OpenedSession), ProjectError> {
     let spec = catalog::spec(agent_id)
         .ok_or_else(|| ProjectError::new("agent_unknown", format!("no agent called {agent_id}")))?;
+    // Where a delegated conversation's heading comes from. Both facts are the
+    // parent's, and taking them here rather than from the caller is what makes
+    // them unforgeable: whoever asked for this session — a window, a handler,
+    // an agent through a package's tool — cannot put a conversation under a
+    // record it does not belong to, because it is not asked.
+    let Under { about, parent } = under;
+    let (source, about) = match parent.as_deref() {
+        None => (source, about),
+        Some(parent) => descent(app, sessions, &place.project, parent)?,
+    };
     let program = catalog::resolve(spec.program).ok_or_else(|| {
         ProjectError::new(
             "agent_missing",
@@ -309,7 +338,15 @@ async fn open<R: Runtime>(
         place,
         source,
         about,
+        parent,
     );
+    // Both entrances pass through here — a window sending a command block and a
+    // package ordering on an agent's behalf — so this is where the two are made
+    // the same thing. Anything that read the debt off *how* the conversation
+    // was opened would be a rule that held for one of them.
+    if session.parent.is_some() {
+        session.owe();
+    }
     sessions.insert(Arc::clone(&session));
 
     let cwd = session.cwd.clone();
@@ -329,6 +366,116 @@ async fn open<R: Runtime>(
             Err(error)
         }
     }
+}
+
+/// What a conversation stands under, as whoever opens one may state it.
+///
+/// One value rather than two arguments travelling together, which is the
+/// bargain [`Place`] already makes for the other pair: these are two answers to
+/// one question — where does this conversation belong — set at the same moment,
+/// never edited afterwards, and read together by everything that draws the
+/// list.
+///
+/// **Who ordered it is deliberately not here.** A source is composed by the
+/// host out of an order it wrote down, and a shape arriving from the webview
+/// carrying one would be a window able to sign its work as a package's.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Under {
+    /// The record this conversation is being opened under, when a screen opened
+    /// it from one. Only the caller can answer it: a person pressing `Send to
+    /// agent` on a task is standing in the task, and nothing below that line
+    /// can find it out afterwards.
+    #[serde(default)]
+    pub about: Option<About>,
+    /// The conversation this one is being delegated from, by the agent's own id
+    /// for it.
+    ///
+    /// Where it is given, [`Self::about`] is ignored and the parent's is used:
+    /// a delegated conversation is filed where its parent is, so a caller
+    /// cannot file work under a record it has nothing to do with.
+    #[serde(default)]
+    pub parent: Option<String>,
+}
+
+/// How deep a chain of delegated conversations may go.
+///
+/// Two, counted as conversations rather than as delegations: somebody's own
+/// conversation may delegate, and what it delegated may not. The number is
+/// small on purpose and it is not a technical limit — nothing breaks at three.
+/// It is the limit on what a person can still follow in a column they read
+/// down, and on what an unattended chain can spend before anybody sees it.
+const DEPTH: usize = 2;
+
+/// What a delegated conversation inherits from the one it came out of.
+///
+/// Answers the parent's `source` and `about`, and refuses when the parent is
+/// itself delegated — that being the third level. Both facts are read from the
+/// parent rather than taken from whoever asked, so a caller cannot file work
+/// under a record it has nothing to do with, and an agent — which reaches this
+/// through a package's tool — cannot name one at all.
+///
+/// The live registry first and the pointers after it, because the ordinary case
+/// is an agent delegating mid-turn and the other one is real: a conversation
+/// continued from a pointer after a restart is delegated from a session this
+/// run did raise, but one whose parent has since been stopped is not.
+fn descent<R: Runtime>(
+    app: &AppHandle<R>,
+    sessions: &Sessions,
+    project: &std::path::Path,
+    parent: &str,
+) -> Result<(Option<Source>, Option<About>), ProjectError> {
+    if let Some(session) = sessions.all().into_iter().find(|session| {
+        session
+            .acp_session()
+            .is_some_and(|id| id.0.to_string() == parent)
+    }) {
+        return inherited(
+            session.parent.is_some(),
+            session.source.clone(),
+            session.about.clone(),
+        );
+    }
+
+    let path = configuration_file(app, remembered::FILE)?;
+    let store = Store::read(&path);
+    let held = store
+        .get(&project.to_string_lossy(), parent)
+        .ok_or_else(|| {
+            ProjectError::new(
+                "conversation_unknown",
+                "this project holds no conversation with that id, so there is nothing to \
+                 delegate from",
+            )
+        })?;
+    inherited(
+        held.parent.is_some(),
+        held.source.clone(),
+        held.about.clone(),
+    )
+}
+
+/// What a delegated conversation takes from the one above it, given what that
+/// one is.
+///
+/// Apart from [`descent`] because finding the parent needs the application and
+/// deciding what descends from it does not, and this half is the half with a
+/// rule in it.
+fn inherited(
+    parent_was_itself_delegated: bool,
+    source: Option<Source>,
+    about: Option<About>,
+) -> Result<(Option<Source>, Option<About>), ProjectError> {
+    if parent_was_itself_delegated {
+        return Err(ProjectError::new(
+            "conversation_depth",
+            format!(
+                "that conversation was itself delegated, and a chain of them is {DEPTH} deep: \
+                 delegate from the conversation it came out of, or start one of your own"
+            ),
+        ));
+    }
+    Ok((source, about))
 }
 
 /// Raises an agent for work an extension ordered, with no window involved.
@@ -352,7 +499,9 @@ pub(crate) async fn raise_for_work<R: Runtime>(
     agent_id: &str,
     cwd: &std::path::Path,
     source: Source,
-    about: Option<About>,
+    // The record the order named, and the conversation it was delegated from
+    // when a package ordered on an agent's behalf rather than on a clock's.
+    under: Under,
 ) -> Result<Arc<Session>, ProjectError> {
     let sessions = app.state::<Sessions>();
     // In the project's own tree. An order does not choose where it is
@@ -366,7 +515,7 @@ pub(crate) async fn raise_for_work<R: Runtime>(
         Place::project(cwd.to_path_buf()),
         None,
         Some(source),
-        about,
+        under,
     )
     .await
     .map(|(session, _)| session)
@@ -551,6 +700,7 @@ fn remember<R: Runtime>(app: &AppHandle<R>, session: &Arc<Session>) {
             last_seen_ms: event::now_ms(),
             source: session.source.clone(),
             about: session.about.clone(),
+            parent: session.parent.clone(),
             record_key: None,
         },
     );
@@ -704,6 +854,10 @@ pub async fn session_resume<R: Runtime>(
         // out of a different group is one somebody has to look for twice.
         held.source.clone(),
         held.about.clone(),
+        // And what it came out of, for the third time and the same reason: a
+        // conversation resumed out from under its parent would leave the row
+        // beneath it standing on nothing.
+        held.parent.clone(),
     );
     // The name it already had. Nothing the agent replays carries one, and a
     // conversation coming back under a different title is a different
@@ -727,6 +881,10 @@ pub async fn session_resume<R: Runtime>(
     {
         Ok(opened) => {
             remember(&app, &session);
+            // Nothing raised this conversation on its own — a person did, which
+            // is the condition an outcome held for it has been waiting on since
+            // whichever run ended under it.
+            crate::work::delegated::deliver(&app, &project);
             Ok(opened)
         }
         Err(error) => {
@@ -949,6 +1107,25 @@ pub(crate) struct Turn {
     pub kept: Vec<PastedImage>,
 }
 
+/// How a turn ended, at the length whoever ordered it needs.
+///
+/// Deliberately not a [`Status`]. A status says where the *session* is and it
+/// moves again the moment anything else happens in it; this is a fact about one
+/// turn, read minutes later out of a queue, and the two would disagree the
+/// first time somebody typed into a conversation an agent had delegated.
+/// Written into the queue of answers waiting to be handed over
+/// ([`crate::work::delegated`]), which is why it is serialised at all: an
+/// outcome outlives the run that produced it, and a shape that could not be
+/// written down would make that the one thing it could not do.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum Ending {
+    /// The agent stopped, with the reason it gave when it gave one.
+    Stopped(Option<String>),
+    /// The turn fell over, and this is what there was to say about it.
+    Failed(String),
+}
+
 /// Says one turn into an open session and answers as soon as it is on its way.
 ///
 /// The one place a turn is built, for the window's prompt and for work an
@@ -967,29 +1144,65 @@ pub(crate) fn send<R: Runtime>(
     turn: Turn,
 ) -> Result<(), ProjectError> {
     let (connection, acp_session) = ready(session)?;
+    // Whether this is the turn a delegated conversation was opened to run, and
+    // taken here because everything below branches on it: what the agent is
+    // told, what the row says while it waits, and where the answer goes.
+    let owed = session
+        .parent
+        .clone()
+        .filter(|_| session.take_what_is_owed());
+    let text = match &owed {
+        // Said by the host rather than by whoever delegated, because the host
+        // is what takes the last words and hands them on.
+        Some(_) => crate::work::delegated::briefed(&turn.text),
+        None => turn.text,
+    };
     // Recorded before it is sent, so the transcript holds it whether or not the
     // agent ever answers — and so a screen that comes back to this session is
     // handed the question along with the answer.
-    session.record_prompt(turn.text.clone(), turn.attachments.clone(), turn.kept);
+    session.record_prompt(text.clone(), turn.attachments.clone(), turn.kept);
     // The first thing said is what names the conversation, so the pointer
     // written when the session opened is holding `null` until now. Rewritten
     // here rather than only at open: a conversation the list could only call
     // "Untitled" is one nobody can pick out of it after a restart.
     remember(app, session);
-    session.set_status(Status::Working, None);
+    // Queued rather than working until the slot below is in hand. Set before
+    // the task rather than inside it so there is no moment where a conversation
+    // that is about to wait says it is running.
+    session.set_status(
+        match owed {
+            Some(_) => Status::Queued,
+            None => Status::Working,
+        },
+        None,
+    );
     let request =
-        schema::PromptRequest::new(acp_session, blocks(turn.text, &turn.attachments, turn.sent));
+        schema::PromptRequest::new(acp_session, blocks(text, &turn.attachments, turn.sent));
 
     // The turn runs on its own task so this command can answer now. Nothing is
     // lost by that: every result of the turn is an event on the subscription.
     let watching = Arc::clone(session);
+    let afterwards = app.clone();
+    let project = session.project.to_string_lossy().into_owned();
     tauri::async_runtime::spawn(async move {
-        match connection.prompt(request).await {
+        // Held for the length of the turn, and only by the turn a delegated
+        // conversation exists to run. **The turn rather than the agent**: what
+        // two delegated runs at once would damage is a working tree, and a
+        // process that is up and has been asked nothing touches nothing.
+        let slot = match &owed {
+            Some(parent) => Some(crate::work::delegated::slot(&afterwards, &project, parent).await),
+            None => None,
+        };
+        if owed.is_some() {
+            watching.set_status(Status::Working, None);
+        }
+        let ending = match connection.prompt(request).await {
             Ok(response) => {
                 let reason = serde_json::to_value(response.stop_reason)
                     .ok()
                     .and_then(|value| value.as_str().map(ToOwned::to_owned));
-                watching.set_status(Status::Ready, reason);
+                watching.set_status(Status::Ready, reason.clone());
+                Ending::Stopped(reason)
             }
             Err(error) => {
                 // The agent's stderr is the only account of a process that died
@@ -999,9 +1212,20 @@ pub(crate) fn send<R: Runtime>(
                 if !tail.is_empty() {
                     detail.push_str(&format!(" — {}", tail.join(" ")));
                 }
-                watching.set_status(Status::Failed, Some(detail));
+                watching.set_status(Status::Failed, Some(detail.clone()));
+                Ending::Failed(detail)
             }
+        };
+        if let Some(parent) = owed {
+            crate::work::delegated::finished(&afterwards, &project, &parent, &watching, ending);
         }
+        // After the answer is written down, so the conversation that takes the
+        // slot next cannot start before the one it is waiting on has accounted
+        // for itself.
+        drop(slot);
+        // A turn ending is the moment a conversation becomes free, and free is
+        // the whole of what an outcome waiting for this one waits for.
+        crate::work::delegated::deliver(&afterwards, &project);
     });
     Ok(())
 }
@@ -1301,6 +1525,8 @@ fn row(session: &Arc<Session>) -> SessionRow {
         source: session.source.clone(),
         about: session.about.clone(),
         worktree: session.worktree.clone(),
+        acp_session: session.acp_session().map(|id| id.0.to_string()),
+        parent: session.parent.clone(),
     }
 }
 
@@ -1468,6 +1694,8 @@ mod tests {
             source: None,
             about: None,
             worktree: None,
+            acp_session: None,
+            parent: None,
         };
 
         assert_eq!(
@@ -1506,6 +1734,8 @@ mod tests {
             }),
             about: None,
             worktree: None,
+            acp_session: None,
+            parent: None,
         };
 
         let json = serde_json::to_value(&row).expect("a row serialises");
@@ -1544,6 +1774,8 @@ mod tests {
             accepts_images: true,
             source: None,
             worktree: None,
+            acp_session: None,
+            parent: None,
             about: Some(About {
                 key: "task-4c1a".to_owned(),
                 kind: "tasks.task".to_owned(),
@@ -1558,6 +1790,113 @@ mod tests {
         assert!(
             json.get("source").is_none(),
             "and a person opening one from a record is still a person"
+        );
+    }
+
+    /// What a conversation came out of, and the id the rest of the list is read
+    /// against.
+    ///
+    /// Both on one row because they are only useful together: a child names its
+    /// parent by the agent's id for it, and no row could be found by that name
+    /// until every row carried its own. The names are asserted for the reason
+    /// the source's are — a member the window spells differently arrives as
+    /// `undefined`, and a tree quietly flattens into the list it used to be.
+    #[test]
+    fn a_row_says_what_it_came_out_of_and_what_it_is_called_by() {
+        let row = SessionRow {
+            key: "s3".to_owned(),
+            agent_id: "claude".to_owned(),
+            agent_name: "Claude Code".to_owned(),
+            title: None,
+            project: "/tmp/project".to_owned(),
+            cwd: "/tmp/project".to_owned(),
+            status: Status::Working,
+            opened_at_ms: 1234,
+            accepts_images: true,
+            source: None,
+            about: None,
+            worktree: None,
+            acp_session: Some("thread-2".to_owned()),
+            parent: Some("thread-1".to_owned()),
+        };
+
+        let json = serde_json::to_value(&row).expect("a row serialises");
+        assert_eq!(json["acpSession"], "thread-2");
+        assert_eq!(
+            json["parent"], "thread-1",
+            "read against another row's `acpSession`, whichever half of the list it came from"
+        );
+    }
+
+    /// The other half of the same boundary: what the window sends arrives.
+    ///
+    /// The window puts both under one member because Rust takes them as one
+    /// value, and a member spelled differently on either side is read as
+    /// nothing at all — a delegation that silently became an ordinary
+    /// conversation, with no error anywhere to say so.
+    #[test]
+    fn what_a_conversation_stands_under_crosses_from_the_window() {
+        let under: Under = serde_json::from_value(serde_json::json!({
+            "about": {"key": "task-4c1a", "kind": "tasks.task", "title": "Support worktrees"},
+            "parent": "thread-1",
+        }))
+        .expect("the window's shape is read");
+
+        assert_eq!(under.about.expect("a record").key, "task-4c1a");
+        assert_eq!(under.parent.as_deref(), Some("thread-1"));
+
+        let neither: Under = serde_json::from_value(serde_json::json!({
+            "about": null,
+            "parent": null,
+        }))
+        .expect("and so is a conversation under nothing");
+        assert!(neither.about.is_none() && neither.parent.is_none());
+    }
+
+    /// A delegated conversation is filed where its parent is, and by nothing
+    /// the caller said.
+    ///
+    /// This is what makes the heading unforgeable. Whoever asked for the
+    /// session — a window, a handler, an agent through a package's tool — may
+    /// name a parent and nothing else: what the work is about and who ordered
+    /// it are read from that parent, so no caller can put a conversation under
+    /// a record it has nothing to do with.
+    #[test]
+    fn a_delegated_conversation_is_filed_where_its_parent_is() {
+        let source = Source {
+            work: "w1-0".to_owned(),
+            extension_id: "issues".to_owned(),
+            extension_name: "Issues".to_owned(),
+            handler: "issues.poll".to_owned(),
+            about: Some("issue-4c1a".to_owned()),
+        };
+        let about = About {
+            key: "task-4c1a".to_owned(),
+            kind: "tasks.task".to_owned(),
+            title: "Support worktrees".to_owned(),
+        };
+
+        let (descended_source, descended_about) =
+            inherited(false, Some(source.clone()), Some(about.clone()))
+                .expect("a conversation one deep is allowed");
+
+        assert_eq!(descended_source.as_ref(), Some(&source));
+        assert_eq!(descended_about.as_ref(), Some(&about));
+    }
+
+    /// And the chain stops at the second conversation.
+    ///
+    /// Refused in words rather than silently flattened, because an agent that
+    /// asked for this is about to do something else instead and needs to know
+    /// what: the refusal says to delegate from the conversation above.
+    #[test]
+    fn a_conversation_delegated_from_a_delegated_one_is_refused() {
+        let refusal = inherited(true, None, None).expect_err("the third level is refused");
+        assert_eq!(refusal.kind, "conversation_depth");
+        assert!(
+            refusal.message.contains(&DEPTH.to_string()),
+            "the refusal says what the limit is: {}",
+            refusal.message
         );
     }
 
@@ -1633,6 +1972,8 @@ mod tests {
             source: None,
             about: None,
             worktree: None,
+            acp_session: None,
+            parent: None,
         };
 
         // Null rather than absent: the window distinguishes "not named" from

@@ -1020,6 +1020,7 @@ export interface RememberedConversation {
     readonly lastSeenMs: number;
     // (undocumented)
     readonly openedAtMs: number;
+    readonly parent?: string;
     readonly recordKey?: string;
     readonly source?: SessionSource;
     // (undocumented)
@@ -1249,6 +1250,7 @@ export interface SessionModeState {
 export interface SessionRow {
     readonly about?: SessionAbout;
     readonly acceptsImages: boolean;
+    readonly acpSession?: string;
     // (undocumented)
     readonly agentId: string;
     // (undocumented)
@@ -1259,6 +1261,7 @@ export interface SessionRow {
     readonly key: string;
     // (undocumented)
     readonly openedAtMs: number;
+    readonly parent?: string;
     readonly project: string;
     readonly source?: SessionSource;
     // (undocumented)
@@ -1284,6 +1287,12 @@ export type SessionStatus =
 | "ready"
 /** A turn is running. */
 | "working"
+/**
+* A turn has been said into it and is waiting its turn to run. What a
+* conversation delegated from one that already has a delegated run under it
+* says until that one is finished.
+*/
+| "queued"
 /** Stopped on a question only a person can answer. */
 | "asking"
 /** Ended by itself, or its process died. */
@@ -1376,6 +1385,7 @@ export function startSession(args: {
     model?: string | null;
     about?: SessionAbout | null;
     worktree?: WorktreeChoice | null;
+    parent?: string | null;
 }): Promise<OpenedSession>;
 
 // @public
@@ -1391,7 +1401,7 @@ export function stopSession(key: string): Promise<void>;
 export function supportsApiRange(range: string): boolean;
 
 // @public
-export const SYNC_API_VERSION: "3.6.0";
+export const SYNC_API_VERSION: "3.7.0";
 
 // @public
 export const SYNC_CAPABILITIES: readonly ["records", "agents.acp", "markdown.plugins", "native-menu", "folders", "sheets", "net", "net.write", "vault", "background", "schedule", "work.agent", "agent.tools"];

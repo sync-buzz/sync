@@ -87,6 +87,7 @@ fn a_conversation_an_extension_ordered_says_so_across_the_boundary() {
             about: Some("issue-4c1a".to_owned()),
         }),
         None,
+        None,
     ));
 
     let rows = listed(&webview);
@@ -124,6 +125,7 @@ fn a_conversation_held_under_a_record_says_which_one() {
             kind: "tasks.task".to_owned(),
             title: "Support worktrees".to_owned(),
         }),
+        None,
     ));
 
     let row = listed(&webview)[0].clone();
@@ -162,6 +164,7 @@ fn a_conversation_a_person_started_says_nothing_about_a_source() {
         "claude".to_owned(),
         "Claude Code".to_owned(),
         Place::project(std::env::temp_dir()),
+        None,
         None,
         None,
     ));
@@ -208,6 +211,7 @@ fn a_conversation_in_a_working_tree_says_where_it_is() {
         },
         None,
         None,
+        None,
     ));
 
     let row = listed(&webview)[0].clone();
@@ -243,6 +247,7 @@ fn a_conversation_in_the_project_carries_no_tree() {
         "claude".to_owned(),
         "Claude Code".to_owned(),
         Place::project(std::env::temp_dir()),
+        None,
         None,
         None,
     ));
@@ -284,6 +289,7 @@ fn one_list_carries_both_and_they_can_be_told_apart() {
             "Claude Code".to_owned(),
             Place::project(std::env::temp_dir()),
             source,
+            None,
             None,
         ));
     }

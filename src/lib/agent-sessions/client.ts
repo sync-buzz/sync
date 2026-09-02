@@ -51,6 +51,12 @@ export type SessionStatus =
   | "ready"
   /** A turn is running. */
   | "working"
+  /**
+   * A turn has been said into it and is waiting its turn to run. What a
+   * conversation delegated from one that already has a delegated run under it
+   * says until that one is finished.
+   */
+  | "queued"
   /** Stopped on a question only a person can answer. */
   | "asking"
   /** Ended by itself, or its process died. */
@@ -130,6 +136,25 @@ export interface SessionRow {
    * mistake a `Running`/`Not running` split already made once.
    */
   readonly about?: SessionAbout;
+  /**
+   * The agent's own id for this session, once the agent has given one.
+   *
+   * What a row is named by when another row names it. A pointer has always
+   * been addressed this way and a live row by this run's key, and the two were
+   * never comparable — which stopped being good enough when a conversation
+   * began naming the one it came out of.
+   */
+  readonly acpSession?: string;
+  /**
+   * The conversation this one was delegated from, by that conversation's own
+   * agent id.
+   *
+   * Read against {@link SessionRow.acpSession} of the other conversations,
+   * whichever half of the list they came from. A parent nothing in the list
+   * names is drawn as no parent at all: pointers prune, and a child may outlive
+   * the row above it.
+   */
+  readonly parent?: string;
 }
 
 /**
@@ -486,13 +511,25 @@ export function openSession(args: {
    * agent that has already answered about what it found.
    */
   worktree?: WorktreeChoice | null;
+  /**
+   * The conversation this one is being delegated from, by the agent's own id
+   * for it — `acpSession` on the row or the pointer.
+   *
+   * What the work is *about* and who ordered it are not passed beside this:
+   * both are read from the parent, so a delegated conversation is filed where
+   * its parent is and no caller can file one anywhere else.
+   */
+  parent?: string | null;
 }): Promise<OpenedSession> {
   return call<OpenedSession>("session_open", {
     agentId: args.agentId,
     cwd: args.cwd,
     model: args.model ?? null,
-    about: args.about ?? null,
     worktree: args.worktree ?? null,
+    // One value, because they are one answer: where this conversation belongs.
+    // Rust takes them together and reads the record off the parent when both
+    // are given, so a delegated conversation is filed where its parent is.
+    under: { about: args.about ?? null, parent: args.parent ?? null },
   });
 }
 
@@ -550,6 +587,12 @@ export interface RememberedConversation {
    * its agent stopped would move up the list under somebody reading it.
    */
   readonly about?: SessionAbout;
+  /**
+   * The conversation this one was delegated from, by that conversation's own
+   * agent id. Written down rather than held in memory, so a tree does not
+   * flatten when the application is restarted.
+   */
+  readonly parent?: string;
   /** The record it was kept as, when somebody kept it on this machine. */
   readonly recordKey?: string;
 }
