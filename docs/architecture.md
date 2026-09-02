@@ -78,6 +78,18 @@ Domain modules are ordinary Rust that compiles and runs without Tauri, so they s
 
 One session is kept per open project for the life of the application. Opening one is lazy in the way that matters: the sidecar starts and greets without reading the corpus, so a project it cannot read yet — a repository nobody has kept memory in — refuses by name instead of by ending the process.
 
+## The channel has three doors, and one of them is not on this machine
+
+The window's channel is a dispatcher with no opinion about its transport, and there are now three ways to reach it. Two are local: the pipe a sidecar started with `--host` reads, and the socket in the application's own directory that the window and the clock come through. The third is `iroh` — QUIC, hole punched where it can be and relayed where it cannot — and it is how a device somewhere else reaches this machine at all. A port would have reached as far as the same Wi-Fi, and choosing that would have meant building a door people could only use at home.
+
+The transport settles two things that a socket would have left to be built. The connection is encrypted and both ends are authenticated by their keys before the dispatcher sees a byte, so what a device sends to prove itself is not on a line anybody can read, and neither is anything it goes on to ask for.
+
+**What a caller may do is decided by the door it came through, never by what it says it is.** A connection off this machine names its project by a key from the registry, so a path — the right to name any directory on somebody's computer — is not a thing it can send. It cannot turn its connection around either: an attended connection is the one Sync itself holds, and whoever is on the far side of it answers, in the application's name, every tool call every agent on this machine makes. And it cannot say which devices are admitted, because a device that could add a device would be a device nobody can revoke.
+
+The engine holds the set of admitted secrets in memory and nothing else — no names, no records, no history. Those are the application's, in `remote-access.json` and the keychain beside it, and they are stated over the socket on every change and on every read. So revoking a device takes effect at its next connection, and an engine that restarted holds nothing until the application says otherwise.
+
+**Deliberately absent.** No set of allowed operations per device: the transport can do what the window can do, and in this version some of it is simply not drawn. That is not protection and is not offered as any — the risk is answered by pairing and revoking rather than by hiding buttons.
+
 ## The project says where its memory lives, and Sync answers for it
 
 The engine will not guess where a project's records go: its host says so when it opens the project, and nothing is written down that could later disagree. Sync answers `git_metadata` — Git objects — because a project here is a repository and memory kept in Git travels with it, versions itself, pushes to the same remote and puts nothing in the working tree. Opening that storage is what creates it, so the first read of a repository that has never held memory is what gives it some. It happens on the way in rather than behind a button: the alternative is a window that opens on a project it cannot read to ask a question whose answer it already knows.

@@ -7,10 +7,14 @@ import {
   ProjectSetupSheet,
   useProjectSetup,
 } from "@/components/shell/project-setup";
+import { PairingScreen } from "@/components/shell/pairing-screen";
+import { ProjectsScreen } from "@/components/shell/projects-screen";
 import { ProjectWindow } from "@/components/shell/project-window";
 import { WelcomeScreen } from "@/components/shell/welcome";
 import type { OpenProject } from "@/lib/project/types";
 import { useAppMenu } from "@/lib/app-menu";
+import { useDevice } from "@/lib/device";
+import { usePairing } from "@/lib/pairing";
 import { useWindowMaterial } from "@/lib/window-material";
 import { useWindowReveal } from "@/lib/window-reveal";
 import { useWindowTitle } from "@/lib/window-title";
@@ -31,6 +35,11 @@ import { useWindowTitle } from "@/lib/window-title";
  * What the slab holds is decided by one fact — whether a project is open. This
  * component owns that fact and the flow that changes it, and nothing else: the
  * two windows below own their own layout and selection state.
+ *
+ * On a phone one question stands in front of that fact: whether this window has
+ * a computer to ask at all. It is asked only there, because on a Mac the
+ * machine the window runs on is the machine that answers, and the hook returns
+ * a settled no rather than a state the desktop has to render around.
  */
 export function AppShell() {
   useWindowMaterial();
@@ -42,6 +51,8 @@ export function AppShell() {
   // than by leaving the command out.
   useAppMenu(null);
   const isLoading = useWindowReveal();
+  const pairing = usePairing();
+  const isPhone = useDevice() === "phone";
 
   const [project, setProject] = useState<OpenProject | null>(null);
   const setup = useProjectSetup({ onOpened: setProject });
@@ -57,14 +68,28 @@ export function AppShell() {
           states in full: a hidden box goes on being scrolled by the browser,
           and nothing is left to scroll it back. */}
       <div className="relative flex h-full flex-col overflow-clip rounded-(--radius-window) shadow-(--shadow-content)">
-        <LaunchScreen isLoading={isLoading} />
+        {/* A phone that does not yet know whether it has a computer is a
+            window that is still starting, and says the one thing it can say.
+            Nothing is held back to show it: on a Mac the second half of this
+            is always false. */}
+        <LaunchScreen isLoading={isLoading || pairing.isAsking} />
 
-        {project ? (
+        {pairing.needed ? (
+          <PairingScreen pairing={pairing} />
+        ) : project ? (
           <ProjectWindow
             project={project}
             setup={setup}
             onProjectChanged={setProject}
           />
+        ) : isPhone ? (
+          // The same place in the composition and a different question, because
+          // on a phone it is a different question. A Mac with no project open
+          // asks which folder; a phone cannot ask that — it has no file system
+          // to offer and no project of its own to make — so it asks which of
+          // the computer's projects, and the toolbar goes with the folder
+          // picker rather than being drawn empty above a list.
+          <ProjectsScreen onOpened={setProject} />
         ) : (
           <>
             <AppHeader project={null} setup={setup} />

@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/mobile-schema.json",
+  "identifier": "default",
+  "description": "The core defaults. Every permission the desktop capability grants past the core is for something the phone does not have: a title bar to drag, a window to reveal, a folder to choose, a login item to register. What the phone needs instead is a channel to a computer, and a channel is not a permission — it is a command this application implements.",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default"
+  ]
+}

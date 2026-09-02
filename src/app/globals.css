@@ -110,6 +110,40 @@
   --status-warning: hsl(32 90% 32%);
   --status-danger: hsl(0 68% 42%);
 
+  /*
+   * The metric scale, declared here rather than in the theme block, and that
+   * indirection is the whole of it.
+   *
+   * A token written as a number inside `@theme inline` is *compiled into* the
+   * utility: `text-lg` becomes `font-size: 15px`, `h-8` becomes `height: 32px`.
+   * Nothing on the document can move a number that is already in the rule, so
+   * the phone could be given its own colours and not its own metrics — which
+   * was true of this layer until it was measured and is exactly what these two
+   * names fix. The theme block reads them, so a utility carries `var(--type-lg)`
+   * and the value is this file's to decide, per appearance and per device, the
+   * way every colour here already is.
+   *
+   * Desktop density: a 4px step drives every numeric utility Tailwind derives.
+   */
+  --step: 4px;
+
+  --type-xs: 11px;
+  --type-xs--line-height: 14px;
+  --type-sm: 12px;
+  --type-sm--line-height: 16px;
+  --type-base: 13px;
+  --type-base--line-height: 18px;
+  --type-lg: 15px;
+  --type-lg--line-height: 20px;
+  /*
+   * One size above the interface scale, for the launch screen alone. The shell
+   * has no brand mark, so at launch the name of the application has to do the
+   * work an icon would, and it cannot do that at fifteen pixels in the middle
+   * of an empty window.
+   */
+  --type-display: 26px;
+  --type-display--line-height: 32px;
+
   /* Geometry */
   --control-height-sm: 24px;
   --control-height: 28px;
@@ -174,6 +208,20 @@
   --input: var(--separator-strong);
   --ring: var(--focus-ring);
   --radius: var(--radius-surface);
+}
+
+/*
+ * The one value the phone is held to more strictly than the Mac.
+ *
+ * The tertiary tier at 47% lightness comes to 4.38:1 over the panel surface,
+ * under the 4.5:1 a phone is held to; 46% reaches 4.51:1 and is otherwise the
+ * same grey. It sits here, above the dark appearance rather than below it,
+ * because it corrects a light value only — the dark tier already passes at
+ * 5.13:1, and restating its number here to protect this one from it would put
+ * that number in two places.
+ */
+[data-device="phone"] {
+  --text-tertiary: hsl(var(--tint-h) calc(4% * var(--tint-s)) 46%);
 }
 
 /* ---------------------------------------------------------------- *
@@ -365,6 +413,31 @@ html[data-vibrancy="on"] body {
 }
 
 /* ---------------------------------------------------------------- *
+ * The phone
+ * ---------------------------------------------------------------- *
+ *
+ * The attribute is set by the phone's own application, at document start,
+ * and by nothing else — so its absence is a computer, exactly as the absence
+ * of `data-appearance` is the system's own.
+ *
+ * **There is no frame, and that is this document's own reasoning rather than a
+ * concession.** The frame is the window's edge catching what is behind it, and
+ * an application filling a phone has nothing behind it: no desktop, no second
+ * window, no material to be muted. What is left is the slab, and a slab that
+ * is the whole screen has no inset to sit in, no corner of its own — the
+ * corners are the device's — and nothing to cast a shadow onto.
+ *
+ * Below both appearances, because both of them state a shadow and this has to
+ * outrank whichever one is in force.
+ */
+[data-device="phone"] {
+  --window-inset: 0px;
+  --radius-window: 0px;
+  --shadow-content: none;
+}
+
+
+/* ---------------------------------------------------------------- *
  * Tailwind theme
  * ---------------------------------------------------------------- */
 @theme inline {
@@ -375,25 +448,27 @@ html[data-vibrancy="on"] body {
   --font-mono:
     ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 
-  /* Desktop density: a 4px spacing grid drives every numeric utility. */
-  --spacing: 4px;
-
-  --text-xs: 11px;
-  --text-xs--line-height: 14px;
-  --text-sm: 12px;
-  --text-sm--line-height: 16px;
-  --text-base: 13px;
-  --text-base--line-height: 18px;
-  --text-lg: 15px;
-  --text-lg--line-height: 20px;
   /*
-   * One size above the interface scale, for the launch screen alone. The shell
-   * has no brand mark, so at launch the name of the application has to do the
-   * work an icon would, and it cannot do that at fifteen pixels in the middle
-   * of an empty window.
+   * The metric names, pointing at the scale above rather than carrying it.
+   *
+   * Read the note beside `--step`: a number written here would be compiled
+   * into every utility that uses it, in this window and in every package built
+   * against this contract, and no document attribute could move it afterwards.
+   * Written as a reference it behaves the way a colour here already does —
+   * one name, one place to change it, nothing rebuilt.
    */
-  --text-display: 26px;
-  --text-display--line-height: 32px;
+  --spacing: var(--step);
+
+  --text-xs: var(--type-xs);
+  --text-xs--line-height: var(--type-xs--line-height);
+  --text-sm: var(--type-sm);
+  --text-sm--line-height: var(--type-sm--line-height);
+  --text-base: var(--type-base);
+  --text-base--line-height: var(--type-base--line-height);
+  --text-lg: var(--type-lg);
+  --text-lg--line-height: var(--type-lg--line-height);
+  --text-display: var(--type-display);
+  --text-display--line-height: var(--type-display--line-height);
 
   --color-window: var(--surface-window);
   --color-sidebar: var(--surface-sidebar);

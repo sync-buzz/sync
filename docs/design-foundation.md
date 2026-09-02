@@ -1026,10 +1026,21 @@ rest of the application. Two rules keep it from becoming a second product:
 - **The system's title bar, and nothing restating it.** The window is called
   Settings by the system, so no header inside it says so again.
 
-It has one section, and that is the honest count. Agents are listed with the
-file each keeps its connections in and the words "Not connected", because Sync
-publishes no interface for them yet — and the control that would connect one is
-present, inert and says why, the way the header's search field does.
+Its sections are the questions that are the installation's rather than any
+project's: how the window is painted, how text is set, what serves every project
+this Mac holds, which agents reach Sync, which devices reach it from somewhere
+else, where disposable work happens, what it says out loud, and the secrets it
+keeps for a package.
+
+**Remote Access is its own section and not a part of Vault**, because the two
+are opposite questions. The vault holds what a package uses to reach *out*;
+this decides who may reach *in*. Somebody whose phone was stolen is looking for
+the second, and a list of packages' keys is not where they would think to look.
+It is a list with a bar under it, like every list here that is added to: a row
+is a device's name, what it is revoked by and when it was last here, and never
+its key. The key is legible in the sheet that mints it and nowhere afterwards —
+this Mac keeps it where it cannot be read back, so a sheet that closed on its
+own would take the only usable copy with it.
 
 **Extensions are not settings.** An extension installs the types a project
 stores, the scripts it runs and the screen it renders, and the project declares

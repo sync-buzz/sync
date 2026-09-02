@@ -1,0 +1,18 @@
+{
+  "$schema": "../gen/schemas/mobile-schema.json",
+  "identifier": "camera",
+  "description": "The camera, for the one thing a camera is for here: reading the code a computer puts on its screen. Its own file rather than five more lines in the default one, and the reason is the platform gate above them — the plugin is a dependency of the iOS target alone, so a build for this machine has no such permissions to resolve and fails on the names. Left in the default capability, that failure is `cargo test` refusing to run at all, which is how the phone's own code came to have no tests that run anywhere.",
+  "platforms": [
+    "iOS"
+  ],
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "barcode-scanner:allow-scan",
+    "barcode-scanner:allow-cancel",
+    "barcode-scanner:allow-check-permissions",
+    "barcode-scanner:allow-request-permissions",
+    "barcode-scanner:allow-open-app-settings"
+  ]
+}

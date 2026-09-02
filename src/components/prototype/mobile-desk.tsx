@@ -4,10 +4,8 @@ import { useState } from "react";
 import { FRAMES, type FrameId } from "@/lib/shell-frames";
 import { cn } from "@/lib/utils";
 import { MobilePhone } from "@/components/prototype/mobile-phone";
-import {
-  DEVICE,
-  type InspectorPresentation,
-} from "@/components/prototype/mobile-geometry";
+import { DEVICE } from "@/components/prototype/mobile-geometry";
+import type { InspectorPresentation } from "@/lib/mobile-geometry";
 
 /**
  * The prototype and the two switches it is looked at through.

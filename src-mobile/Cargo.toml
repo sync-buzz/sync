@@ -1,0 +1,72 @@
+# Sync on the phone: the second application of this repository.
+#
+# It draws and the computer executes, so nothing of the memory engine is here —
+# no sidecar, no model, no index — and none of the desktop's native furniture
+# either. What it shares with `src-tauri` is exactly two things: the frontend
+# export in `out/`, and `sync-memory`, which is the vocabulary of the channel
+# the two speak over.
+#
+# Its own workspace rather than a member of the one in `src-tauri`: that
+# workspace keeps the heavy sidecar out of an ordinary `cargo check` through
+# `default-members`, and `--workspace` ignores `default-members` — so
+# `clippy --workspace` and `test --workspace`, both of which CI runs where no
+# iOS toolchain exists, would try to build a crate that only builds for iOS.
+[workspace]
+
+[package]
+name = "sync-mobile"
+description = "Sync for iOS"
+# The crate's own. What the phone shows is stated in `tauri.conf.json`, and the
+# two are kept equal by hand.
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.91"
+publish = false
+
+[lib]
+# `staticlib` is what Xcode links against, and the reason there is a library
+# here at all: the iOS entry point is a C symbol in it, called by the generated
+# Swift project rather than by a `main`.
+name = "sync_mobile_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.6.3", features = [] }
+
+[dependencies]
+# The transport the phone reaches a computer on. The same version the door on
+# the other side is built against: the two speak QUIC to each other, and the
+# names in 1.x are not the names in 0.x.
+# A package's files cross the channel as text, because the channel is JSON.
+base64 = "0.22"
+iroh = "1.1"
+# Only to derive what a command answers with. The shapes the window reads back
+# are `sync-memory`'s; what is derived here is the handful this application
+# composes itself, and every one of those is about the phone.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2.11.3", features = [] }
+# The words the phone and the computer both spell. The client that speaks them
+# over the network is separate work; the dependency is here from the start
+# because it is itself the claim worth checking — this crate crosses to iOS
+# carrying nothing of the engine with it.
+sync-memory = { path = "../src-tauri/crates/sync-memory" }
+# Where the pairing is kept. The same crate the computer keeps its secrets
+# with, opening the one store a phone has — which is the whole reason it is a
+# crate rather than a module of the desktop application.
+sync-vault = { path = "../src-tauri/crates/sync-vault" }
+# Only what the connection needs: a runtime to block on, the async read and
+# write the streams are, and the clock a call is given a deadline by.
+tokio = { version = "1", features = ["rt-multi-thread", "io-util", "time"] }
+
+# The camera, and only for the one thing a camera is for here: reading the code
+# a computer puts on its screen. It is a dependency of the target rather than of
+# the crate because its Rust half exists only where there is a camera to ask
+# for — a plain `cargo check` for this machine is how the rest of this file is
+# read, and it would stop compiling on a crate that has no host build at all.
+#
+# `target_os = "ios"` rather than the pair of mobile operating systems the
+# plugin documents: there is no Android application here, and a gate naming one
+# would describe a target this repository does not build.
+[target.'cfg(target_os = "ios")'.dependencies]
+tauri-plugin-barcode-scanner = "2.4"

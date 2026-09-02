@@ -77,10 +77,28 @@ seconds. Reach it deliberately with `-p sync-mcp`.
 | `src/lib/memory/`, `src/lib/project/` | typed clients over the Tauri commands |
 | `src-tauri/src/*.rs` | the command layer: parse, call a domain function, map the result |
 | `src-tauri/crates/` | the domain, every crate compiling without Tauri |
+| `src-mobile/` | the iOS application: its own workspace, its own configuration |
 
 The division between a crate and the module beside it is deliberate: a crate
 that cannot see the application cannot widen its own reach, so *who may ask* is
 decided in `src-tauri/src/`, and *how it is done* in the crate.
+
+`src-mobile/` is a second application rather than a second target of the first.
+`src-tauri` bundles the engine sidecar and is signed for the Mac; the phone has
+no engine, so it shows the same `out/` export and shares one crate with the
+desktop — `sync-memory`, the vocabulary of the host channel. It is its own Cargo
+workspace because `--workspace` ignores `default-members`: a crate that builds
+only for iOS, made a member of the one in `src-tauri`, would break the
+`clippy --workspace` and `test --workspace` runs above on any machine without
+that toolchain.
+
+The phone's commands are `pnpm tauri ios …` — `pnpm tauri ios dev "iPhone 17
+Pro"` puts it on a simulator. They go through `scripts/tauri.mjs`, which names
+`src-mobile` for a CLI that would otherwise find `src-tauri` and build the
+desktop application for a phone. That indirection is not a convenience: the
+generated Xcode project calls the CLI back as `pnpm tauri ios xcode-script …`
+from inside `src-mobile/gen/apple`, and pnpm runs a script from the root of the
+package it belongs to — so by then the directory somebody chose is gone.
 
 Every `invoke` command is declared in one list in `src-tauri/src/lib.rs`. Adding
 one means adding it there, and what the webview may ask for stays readable in a
@@ -99,6 +117,33 @@ single place.
   `cargo test -p sync-extensions --test live_registry -- --ignored`.
 - **Changing what a project record carries means rebuilding the sidecar**, or
   the window talks to an engine that has never heard of the field.
+- **The Xcode project is written by the command that generated it.** `pnpm
+  tauri ios init` bakes the invocation it was started with into the project's
+  pre-build script. Started any other way — `pnpm exec tauri`, `node
+  …/tauri.js` — it writes a command that cannot be resolved from
+  `src-mobile/gen/apple`, and the failure surfaces inside Xcode rather than in
+  the CLI. The generated project is committed for that reason: it is the record
+  of what Xcode is told.
+- **That command writes the project once and then leaves it alone.** An
+  existing `src-mobile/gen/apple/project.yml` is not overwritten, so anything
+  under `bundle > iOS` in `src-mobile/tauri.conf.json` — a framework to link,
+  the minimum system version — reaches Xcode only if that file is deleted
+  before the command is run again. It fails quietly, and it reads as a setting
+  the CLI ignores rather than as a stale file. What gives it away is
+  `CFBundleShortVersionString` in `project.yml` standing at `1.0.0` instead of
+  at the application's own version.
+- **A key of the phone's `Info.plist` is written in `src-mobile/Info.ios.plist`.**
+  The generated one belongs to the project generator, which rewrites it from
+  `project.yml` every time; the CLI merges the file beside `tauri.conf.json`
+  into it on `ios dev` and `ios build`. So a key added to the generated file
+  lives until the next `init` takes it, and a key added to this one survives
+  both.
+- **Linking the phone's application says things `cargo check` cannot.** The
+  channel's transport reaches for the system's network configuration, and the
+  frameworks an iOS target links are named in the Xcode project rather than
+  found by the compiler — so a missing one is fifty undefined symbols at the
+  last step of a build that compiled cleanly. `bundle > iOS > frameworks` is
+  where one is added.
 - **The application ships no packages.** Nothing is bundled and nothing is
   unpacked at launch: an extension arrives from the registry or from a folder,
   which is what makes *installed* a thing a person did.

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  What this application asks the phone for, kept where a regeneration cannot
+  reach it.
+
+  `gen/apple/sync-mobile_iOS/Info.plist` is written whole by `pnpm tauri ios
+  init`, so a key added there survives until the next person runs the command
+  the trap in AGENTS.md tells them to run. The CLI merges `Info.plist` and
+  `Info.ios.plist` from beside `tauri.conf.json` into the generated one, and
+  this file is that: the second name rather than the first, because it says out
+  loud that these keys are a phone's.
+
+  The string is not a note to a developer. iOS shows it inside the alert that
+  asks, so it is written to the person holding the phone, and it names the one
+  thing the camera is for here.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Sync reads the pairing code your computer is showing, so that this phone can reach it. The camera is used for nothing else.</string>
+</dict>
+</plist>
