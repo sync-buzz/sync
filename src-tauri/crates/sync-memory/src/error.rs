@@ -163,3 +163,47 @@ impl MemoryError {
 }
 
 pub type Result<T> = std::result::Result<T, MemoryError>;
+
+/// A failure, in the shape the window branches on.
+///
+/// `kind` is the engine's stable vocabulary (`conflict`, `locked`,
+/// `signing_not_configured`, …) plus the answering layer's own (`sidecar`,
+/// `protocol`, `unreachable`). The UI switches on it; the message is for
+/// people.
+///
+/// It is here rather than in either application because both of them answer the
+/// same window: the Mac's, with an engine behind it, and the phone's, with a
+/// computer behind that. Two spellings of one shape is how the branch a window
+/// takes comes to depend on which application it happens to be running in.
+#[derive(Debug, Serialize)]
+pub struct CommandError {
+    pub kind: String,
+    pub message: String,
+    pub data: Value,
+}
+
+impl From<MemoryError> for CommandError {
+    fn from(error: MemoryError) -> Self {
+        match error {
+            MemoryError::Domain {
+                ref kind,
+                ref message,
+                ref data,
+            } => Self {
+                kind: kind.as_wire().to_owned(),
+                message: message.clone(),
+                data: data.clone(),
+            },
+            MemoryError::Sidecar(ref reason) => Self {
+                kind: "sidecar".to_owned(),
+                message: reason.clone(),
+                data: Value::Null,
+            },
+            MemoryError::Protocol(_) | MemoryError::Io(_) => Self {
+                kind: "protocol".to_owned(),
+                message: error.to_string(),
+                data: Value::Null,
+            },
+        }
+    }
+}

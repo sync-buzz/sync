@@ -22,7 +22,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-use sync_memory::{ENTITY_KINDS, Entity, EntityKind, LaunchConfig, MemoryClient, type_definitions};
+use sync_memory::{
+    ENTITY_KINDS, Entity, EntityKind, LaunchConfig, MemoryClient, Operations as _, type_definitions,
+};
 
 fn engine_binary() -> Option<PathBuf> {
     if let Some(path) = std::env::var_os("SYNC_MCP_BINARY") {

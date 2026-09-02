@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { AgentsSection } from "@/components/settings/agents-section";
+import { RemoteSection } from "@/components/settings/remote-section";
 import { ServerSection } from "@/components/settings/server-section";
 import { AppearanceSection } from "@/components/settings/appearance-section";
 import {
@@ -69,6 +70,8 @@ export function SettingsWindow() {
             <TypographySection />
           ) : sectionId === "server" ? (
             <ServerSection />
+          ) : sectionId === "remote" ? (
+            <RemoteSection />
           ) : sectionId === "worktrees" ? (
             <WorktreesSection />
           ) : sectionId === "vault" ? (

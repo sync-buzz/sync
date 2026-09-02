@@ -24,6 +24,7 @@ pub mod extensions;
 pub mod handlers;
 pub mod memory;
 pub mod project;
+pub mod remote;
 pub mod schedule;
 pub mod server;
 pub mod sessions;
@@ -166,6 +167,10 @@ pub fn run() {
             server::server_restart,
             server::server_set_port,
             server::server_new_token,
+            remote::remote_status,
+            remote::remote_enable,
+            remote::remote_pair,
+            remote::remote_revoke,
             project::project_settings_load,
             project::project_identifier_suggest,
             project::project_settings_save,

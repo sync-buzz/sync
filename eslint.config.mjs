@@ -21,9 +21,13 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
-    // Rust build artifacts and Tauri generated schemas.
+    // Rust build artifacts and Tauri generated schemas, for both applications.
+    // The phone's build directory holds JavaScript too — the API script Tauri
+    // generates for its webview — and it is not ours to lint.
     "src-tauri/target/**",
     "src-tauri/gen/**",
+    "src-mobile/target/**",
+    "src-mobile/gen/**",
     // Declarations emitted for the API surface report. Generated, not written.
     "temp/**",
   ]),

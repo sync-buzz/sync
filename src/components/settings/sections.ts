@@ -5,6 +5,7 @@ import {
   KeyRound,
   Palette,
   Radio,
+  Smartphone,
   Type,
   type LucideIcon,
 } from "lucide-react";
@@ -13,11 +14,17 @@ import {
  * The sections of the settings window.
  *
  * Settings are the installation's: what is true of this machine whatever project
- * is open, and whatever project is not. Seven things are — how the window is
+ * is open, and whatever project is not. Eight things are — how the window is
  * painted, how a record's text is set, what serves every project this machine
- * holds, which agents reach Sync, where work happens when it happens somewhere
- * disposable, what it says out loud, and the secrets it keeps on a package's
- * behalf.
+ * holds, which agents reach Sync, which devices reach it from somewhere else,
+ * where work happens when it happens somewhere disposable, what it says out
+ * loud, and the secrets it keeps on a package's behalf.
+ *
+ * Remote Access is its own section rather than a part of Vault, and the two are
+ * asked by different people about different things: the vault holds what a
+ * package uses to reach *out*, and this decides who may reach *in*. Somebody
+ * whose phone was stolen is looking for the second, and they would not think to
+ * look for it in a list of packages' keys.
  *
  * Text is its own section rather than a part of Appearance, because the two are
  * different questions asked by different people. Appearance is what the window
@@ -73,6 +80,12 @@ export const SETTINGS_SECTIONS = [
     label: "Agents",
     icon: Bot,
     headline: "Agents reach a project's knowledge through Sync.",
+  },
+  {
+    id: "remote",
+    label: "Remote Access",
+    icon: Smartphone,
+    headline: "Which devices may talk to this Mac from somewhere else.",
   },
   {
     id: "worktrees",

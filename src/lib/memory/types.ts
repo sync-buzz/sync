@@ -531,8 +531,12 @@ export interface EntityInput {
 /** Which engine is serving a project, and how. */
 export interface EngineSummary {
   binary: string;
-  /** `override` when somebody named a sidecar, `bundled` when it is ours. */
-  source: "override" | "bundled";
+  /**
+   * `override` when somebody named a sidecar, `bundled` when it is ours, and
+   * `channel` where the engine is not on this machine at all — which is a
+   * phone, and is why `binary` can be empty.
+   */
+  source: "override" | "bundled" | "channel";
   version: string;
   projectId: string;
   revision: string;

@@ -36,8 +36,24 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use sync_memory::{ATTEND, TOOL_CALL};
-use tauri::{AppHandle, Runtime};
+use sync_memory::{ATTEND, EXTENSION_FETCH, TOOL_CALL, carried};
+use tauri::{AppHandle, Manager as _, Runtime};
+
+/// The largest file this channel will carry out of an artefact.
+///
+/// Half of a frame rather than a fraction close to it, and the arithmetic is
+/// the reason: base64 is four bytes for every three, and the answer is a JSON
+/// object with a media type beside it — so four mebibytes of file is about five
+/// and a third on the wire, comfortably inside a frame with room for whatever
+/// else the shape grows.
+///
+/// **A file over this is refused by name and by size**, which is the whole
+/// point of the number being here rather than left to the frame reader. A
+/// package with a large asset is an ordinary thing to build, and the author of
+/// one deserves a sentence naming the file rather than a connection that dies
+/// on a line nobody can read. Splitting a file across frames is the answer when
+/// somebody needs it; until then this says plainly that it does not happen.
+const BIGGEST_FILE: usize = sync_memory::MAX_FRAME_BYTES / 2;
 
 /// How long to wait before reaching for a door that was not there.
 ///
@@ -101,13 +117,14 @@ fn answer<R: Runtime>(app: &AppHandle<R>, stream: UnixStream) -> std::io::Result
         let id = request.get("id").cloned().unwrap_or(Value::Null);
         let params = request.get("params").cloned().unwrap_or_else(|| json!({}));
 
-        if method != TOOL_CALL {
+        if method != TOOL_CALL && !carried(method) {
             say(
                 &writing,
                 &refusal(&id, &format!("Sync does not answer `{method}`")),
             )?;
             continue;
         }
+        let method = method.to_owned();
 
         // One thread per call, and the connection stays readable while it runs.
         // A tool that waits twenty seconds on somebody's API would otherwise be
@@ -116,7 +133,12 @@ fn answer<R: Runtime>(app: &AppHandle<R>, stream: UnixStream) -> std::io::Result
         let app = app.clone();
         let writing = Arc::clone(&writing);
         std::thread::spawn(move || {
-            let answered = match run(&app, &params) {
+            let outcome = if method == TOOL_CALL {
+                run(&app, &params)
+            } else {
+                about_a_package(&app, &method, &params)
+            };
+            let answered = match outcome {
                 Ok(answer) => json!({"jsonrpc": "2.0", "id": id, "result": answer}),
                 Err(why) => refusal(&id, &why),
             };
@@ -167,6 +189,171 @@ fn run<R: Runtime>(app: &AppHandle<R>, params: &Value) -> Result<Value, String> 
     })?;
 
     crate::handlers::run(app, &installed, project, handler, &arguments)
+}
+
+/// Answer one of the calls the door carries here about this machine's packages.
+///
+/// Every one of them is what the window's own command layer does, called
+/// through the same function rather than a second copy of it — so a phone and
+/// this window get the same answer, and a check added to one is not a check the
+/// other quietly lacks.
+///
+/// The name is refused rather than defaulted. A call that reached here is one
+/// [`sync_memory::carried`] named, and a name that list gained without this
+/// match gaining it is a defect between two halves of one product — which is
+/// worth a sentence saying so rather than a silent nothing.
+fn about_a_package<R: Runtime>(
+    app: &AppHandle<R>,
+    method: &str,
+    params: &Value,
+) -> Result<Value, String> {
+    use sync_memory::{
+        EXTENSION_FILE, EXTENSION_FORGET, EXTENSION_INSTALL, EXTENSION_LIST, EXTENSION_OCCASION,
+        EXTENSION_REPOINT, REGISTRY_CACHED, REGISTRY_INDEX, REGISTRY_LEDGER, SCHEDULE_OFF,
+        SCHEDULE_REMEMBER, SCHEDULE_SWITCH,
+    };
+
+    match method {
+        EXTENSION_FETCH => reach(app, params),
+        EXTENSION_LIST => encoded(crate::extensions::listed(app)?),
+        EXTENSION_FILE => carrying_file(app, params),
+        EXTENSION_INSTALL => encoded(crate::extensions::install_now(
+            app,
+            &read(params, "artefact")?,
+        )?),
+        EXTENSION_FORGET => {
+            crate::extensions::forget_now(app, named(params, "id")?)?;
+            Ok(Value::Null)
+        }
+        EXTENSION_REPOINT => encoded(crate::extensions::repoint_now(
+            app,
+            &read(params, "pointer")?,
+        )?),
+        EXTENSION_OCCASION => encoded(crate::handlers::occasion_now(
+            app,
+            named(params, "project")?,
+            named(params, "id")?,
+            named(params, "occasion")?,
+            params.get("payload").unwrap_or(&Value::Null),
+        )?),
+        REGISTRY_INDEX => encoded(crate::extensions::index_now(app)?),
+        REGISTRY_CACHED => encoded(crate::extensions::cached_now(app)?),
+        REGISTRY_LEDGER => encoded(crate::extensions::ledger_now(app, named(params, "id")?)?),
+        SCHEDULE_REMEMBER => {
+            let guard = app.state::<crate::schedule::ScheduleFile>();
+            crate::schedule::remember_now(
+                app,
+                &guard,
+                named(params, "project")?,
+                read(params, "extensions")?,
+            )
+            .map_err(|refusal| refusal.message)?;
+            Ok(Value::Null)
+        }
+        SCHEDULE_OFF => {
+            let guard = app.state::<crate::schedule::ScheduleFile>();
+            encoded(
+                crate::schedule::switched_off_now(app, &guard, named(params, "project")?)
+                    .map_err(|refusal| refusal.message)?,
+            )
+        }
+        SCHEDULE_SWITCH => {
+            let guard = app.state::<crate::schedule::ScheduleFile>();
+            crate::schedule::switch_now(
+                app,
+                &guard,
+                named(params, "project")?,
+                named(params, "id")?,
+                params.get("on").and_then(Value::as_bool).unwrap_or(false),
+            )
+            .map_err(|refusal| refusal.message)?;
+            Ok(Value::Null)
+        }
+        _ => Err(format!("Sync does not answer `{method}`")),
+    }
+}
+
+/// One file of an artefact, as text a JSON line can carry.
+///
+/// Base64 because the protocol is JSON and a package ships pictures and fonts
+/// as readily as it ships code. The media type travels with it: what a file is
+/// is decided where the file is, and a phone guessing from an extension would
+/// be a second answer to a question this machine already answers for its own
+/// webview.
+fn carrying_file<R: Runtime>(app: &AppHandle<R>, params: &Value) -> Result<Value, String> {
+    use base64::Engine as _;
+
+    let id = named(params, "id")?;
+    let path = named(params, "path")?;
+    let (bytes, media) = crate::extensions::file_of(app, id, path)?;
+    if bytes.len() > BIGGEST_FILE {
+        return Err(format!(
+            "`{path}` is {} bytes, and a file crossing this channel may be at most {BIGGEST_FILE}",
+            bytes.len()
+        ));
+    }
+    Ok(json!({
+        "mediaType": media,
+        "base64": base64::engine::general_purpose::STANDARD.encode(&bytes),
+    }))
+}
+
+/// A member the call must carry, as a string.
+fn named<'a>(params: &'a Value, member: &str) -> Result<&'a str, String> {
+    params
+        .get(member)
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("the call carries no `{member}`"))
+}
+
+/// A member the call must carry, read into what it stands for.
+fn read<T: serde::de::DeserializeOwned>(params: &Value, member: &str) -> Result<T, String> {
+    let value = params
+        .get(member)
+        .cloned()
+        .ok_or_else(|| format!("the call carries no `{member}`"))?;
+    serde_json::from_value(value).map_err(|error| format!("`{member}` is not one: {error}"))
+}
+
+/// What was answered, in the shape a JSON line carries.
+fn encoded<T: serde::Serialize>(answer: T) -> Result<Value, String> {
+    serde_json::to_value(answer).map_err(|error| format!("the answer could not be sent: {error}"))
+}
+
+/// Make one package's request, from this machine.
+///
+/// The two lines that matter are the two [`crate::extensions::extension_fetch`]
+/// runs, and they are the same two on purpose: what a package may reach is read
+/// off the artefact installed here, on the first request and on every redirect,
+/// and the secret its manifest declared is put in the header here. A caller
+/// somewhere else named neither and cannot.
+///
+/// What arrives is what the surface's own door takes — an id and a request —
+/// so a member added to `NetRequest` is a member both routes gain at once
+/// rather than one that quietly never crosses.
+///
+/// # Errors
+///
+/// In words: the request was not one, the package is not installed here, it did
+/// not ask for the capability, or the request itself failed.
+fn reach<R: Runtime>(app: &AppHandle<R>, params: &Value) -> Result<Value, String> {
+    let id = params
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or("the memory engine asked for a request without naming an extension")?;
+    let request: sync_extensions::NetRequest = params
+        .get("request")
+        .cloned()
+        .ok_or_else(|| "the memory engine asked for a request without one".to_owned())
+        .and_then(|request| {
+            serde_json::from_value(request).map_err(|error| {
+                format!("the memory engine asked for a request it did not describe: {error}")
+            })
+        })?;
+
+    let installed = crate::extensions::permitted(app, id, sync_extensions::NET_CAPABILITY)?;
+    let answered = crate::extensions::fetch_now(id, &installed.manifest, &request)?;
+    serde_json::to_value(answered).map_err(|error| format!("the answer could not be sent: {error}"))
 }
 
 /// What one request off the channel is about.

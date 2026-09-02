@@ -43,10 +43,13 @@ use serde_json::{Value, json};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;
 
-use sync_memory::{ATTACH, ATTEND, MAX_FRAME_BYTES, MemoryError, PROJECTS};
+use sync_memory::{
+    ATTACH, ATTEND, MAX_FRAME_BYTES, MemoryError, PROJECTS, REMOTE_DEVICES, carried,
+};
 
 use crate::application::Application;
 use crate::host::Host;
+use crate::remote::Devices;
 
 /// What a connection may name a project by.
 ///
@@ -73,6 +76,17 @@ pub(crate) struct Naming {
     pub(crate) by_path: bool,
 }
 
+impl Naming {
+    /// Whether this door may say where a project is.
+    ///
+    /// The same question the field asks, put about an answer rather than about
+    /// a call, and it is one question rather than two: a door that will not be
+    /// handed a path has no business handing one out.
+    fn says_where(&self, method: &str) -> bool {
+        self.by_path || method != PROJECTS
+    }
+}
+
 /// Serve the host channel on `path` until the process ends.
 ///
 /// # Errors
@@ -83,6 +97,7 @@ pub(crate) struct Naming {
 pub async fn serve(
     host: Arc<Host>,
     application: Arc<Application>,
+    devices: Arc<Devices>,
     path: PathBuf,
 ) -> io::Result<()> {
     let listener = bind(&path)?;
@@ -90,18 +105,26 @@ pub async fn serve(
         let (stream, _) = listener.accept().await?;
         let host = Arc::clone(&host);
         let application = Arc::clone(&application);
+        let devices = Arc::clone(&devices);
         // Per connection, because one window has several projects open and a
         // call in one of them must not be behind a call in another.
         tokio::spawn(async move {
             // This door is a file in this machine's own application directory,
             // reachable only by something running as this user. The window is
             // on the other end of it, and it names its project by path.
-            if let Err(error) = attend(&host, &application, stream, &Naming { by_path: true }).await
+            if let Err(error) = attend(
+                &host,
+                &application,
+                &devices,
+                stream,
+                &Naming { by_path: true },
+            )
+            .await
             {
                 // A connection ending is ordinary — the window closed a project
                 // — so this is only worth a line when it ended for a reason.
                 if error.kind() != io::ErrorKind::UnexpectedEof {
-                    eprintln!("a host connection ended: {error}");
+                    tracing::info!(%error, "a host connection ended");
                 }
             }
         });
@@ -158,6 +181,7 @@ pub fn pid_file(socket: &Path) -> PathBuf {
 pub(crate) async fn attend<S>(
     host: &Arc<Host>,
     application: &Arc<Application>,
+    devices: &Arc<Devices>,
     stream: S,
     naming: &Naming,
 ) -> io::Result<()>
@@ -166,21 +190,67 @@ where
     // what the writer task below needs of anything it is handed.
     S: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
-    let (reading, mut writing) = tokio::io::split(stream);
-    let mut lines = Frames::new(BufReader::new(reading), MAX_FRAME_BYTES);
-    let mut attached: Option<PathBuf> = None;
+    let (reading, writing) = tokio::io::split(stream);
+    attend_read(
+        host,
+        application,
+        devices,
+        Frames::new(BufReader::new(reading), MAX_FRAME_BYTES),
+        writing,
+        naming,
+    )
+    .await
+}
 
-    loop {
-        let line = match lines.next().await? {
-            Frame::Line(line) => line,
+/// The same, for a door that has already read something off the stream.
+///
+/// The network door has to know who is calling before it lets them at any of
+/// this, and what it reads to find out is one line of the same framing. Handing
+/// the halves over rather than the stream is what lets it read that line with
+/// [`Frames`] and pass the very same reader on — a door that made its own
+/// buffer would either lose whatever the first read pulled in behind the
+/// greeting, or need its own copy of the framing to avoid it.
+pub(crate) async fn attend_read<R, W>(
+    host: &Arc<Host>,
+    application: &Arc<Application>,
+    devices: &Arc<Devices>,
+    mut lines: Frames<R>,
+    writing: W,
+    naming: &Naming,
+) -> io::Result<()>
+where
+    R: AsyncBufRead + Unpin,
+    W: AsyncWrite + Send + Unpin + 'static,
+{
+    // Everything written on this connection goes through one queue and one
+    // task, in both of the directions this connection can end up serving. That
+    // is what lets a call be answered by whichever task finished it rather than
+    // by the loop that read it — two tasks writing into a stream would
+    // interleave two answers into one unreadable line.
+    let (queue, queued) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let writer = tokio::spawn(draining(writing, queued));
+
+    let mut attached: Option<PathBuf> = None;
+    // Calls in flight on this connection, and the reading loop waits here when
+    // they are all taken. Back-pressure rather than a queue that grows: a
+    // caller sending faster than this machine answers is a caller that should
+    // be made to wait, not one whose work should be accumulated in memory.
+    let running = Arc::new(tokio::sync::Semaphore::new(AT_ONCE));
+
+    let outcome = loop {
+        let line = match lines.next().await {
+            Ok(Frame::Line(line)) => line,
             // Answered rather than dropped, and the connection kept: a caller
             // that sent one message too big is a caller that can send a smaller
             // one, and a door that goes silent instead teaches nothing.
-            Frame::TooLong => {
-                write(&mut writing, &too_long()).await?;
-                continue;
+            Ok(Frame::TooLong) => {
+                if say(&queue, &too_long()) {
+                    continue;
+                }
+                break Ok(());
             }
-            Frame::End => return Ok(()),
+            Ok(Frame::End) => break Ok(()),
+            Err(error) => break Err(error),
         };
         if line.trim().is_empty() {
             continue;
@@ -189,112 +259,320 @@ where
         // that is not JSON is a caller's mistake, and ending the connection
         // over it would report the same class of mistake two different ways.
         let Ok(request) = serde_json::from_str::<Value>(&line) else {
-            write(&mut writing, &malformed()).await?;
-            continue;
+            if say(&queue, &malformed()) {
+                continue;
+            }
+            break Ok(());
         };
         let id = request.get("id").cloned().unwrap_or(Value::Null);
         let method = request.get("method").and_then(Value::as_str).unwrap_or("");
-        let params = request.get("params").cloned().unwrap_or_else(|| json!({}));
+        let mut params = request.get("params").cloned().unwrap_or_else(|| json!({}));
 
         // The one call that turns this connection around. Everything after
         // it is answers to what *this* process asked, so the loop below never
         // sees another line — [`answer_calls`] owns the connection from here.
         if method == ATTEND {
-            let answer = json!({"jsonrpc": "2.0", "id": id, "result": {"attending": true}});
-            write(&mut writing, &answer).await?;
-            return answer_calls(application, lines, writing).await;
+            if !naming.by_path {
+                if say(&queue, &no_turning_round(&id)) {
+                    continue;
+                }
+                break Ok(());
+            }
+            say(
+                &queue,
+                &json!({"jsonrpc": "2.0", "id": id, "result": {"attending": true}}),
+            );
+            return answer_calls(application, lines, queue, writer).await;
         }
 
-        if method == ATTACH {
-            let answer = if naming.by_path {
-                match params.get("path").and_then(Value::as_str) {
-                    Some(path) => {
-                        attached = Some(PathBuf::from(path));
-                        json!({"jsonrpc": "2.0", "id": id, "result": {"attached": path}})
-                    }
-                    None => refusal(&id, "`project.attach` needs the path of a project"),
-                }
-            } else {
-                // Refused by name rather than ignored. A client that attached
-                // and was answered with silence would go on to make every call
-                // it meant for that project against nothing.
-                refusal(
-                    &id,
-                    "this connection names a registered project in each call, as `project` — there is no `project.attach` on it and no naming a directory by its path",
-                )
+        if let Some(answer) =
+            about_this_connection(devices, naming, &mut attached, &id, method, &params)
+        {
+            if say(&queue, &answer) {
+                continue;
+            }
+            break Ok(());
+        }
+
+        // Carried to the application and not read on the way. Every one of
+        // these is a fact about the machine rather than about a project — an
+        // artefact on its disk, the registry it fetches, a secret in its
+        // keychain — and the checks that go with them are all on that side. A
+        // package's own request is the clearest case: what it may reach is a
+        // sentence in the manifest of the artefact installed there, so the
+        // check and the request are both there and this door's whole part is to
+        // carry the call.
+        //
+        // Not refused on this machine's own socket either, and there is nothing
+        // to gain by refusing it: the answer would be the same wherever the
+        // caller is, because none of these depends on where the caller is.
+        if carried(method) {
+            let Ok(permit) = Arc::clone(&running).acquire_owned().await else {
+                break Ok(());
             };
-            write(&mut writing, &answer).await?;
+            let application = Arc::clone(application);
+            let queue = queue.clone();
+            let method = method.to_owned();
+            tokio::spawn(async move {
+                let answered = application.call(&method, params).await;
+                say(&queue, &answered_with(&id, answered));
+                drop(permit);
+            });
             continue;
         }
 
-        // Asked before a project is demanded, because these are the two
-        // questions a connection has to ask first: what this surface answers,
-        // and what projects there are to choose between. Refusing them for
-        // naming no project would leave a client that cannot see the file
-        // system with no first move.
-        let project = if Host::answers_without_project(method) {
-            PathBuf::new()
-        } else if naming.by_path {
-            let Some(project) = attached.clone() else {
-                // Said rather than answered from a guess. There is no default
-                // project and inventing one would answer a call meant for one
-                // repository out of another.
-                let answer = refusal(
-                    &id,
-                    "this connection has not said which project it is about — call `project.attach` first",
-                );
-                write(&mut writing, &answer).await?;
-                continue;
-            };
-            project
-        } else {
-            // The key is resolved through the registry and nowhere else, so a
-            // name this machine has not registered is a refusal by name — never
-            // an attempt to open whatever is at some path derived from it.
-            let Some(key) = params.get("project").and_then(Value::as_str) else {
-                let answer = refusal(
-                    &id,
-                    format!(
-                        "every call on this connection names its project — `project`, a key as `{PROJECTS}` lists them"
-                    )
-                    .as_str(),
-                );
-                write(&mut writing, &answer).await?;
-                continue;
-            };
-            let Some(project) = host.project_named(key) else {
-                let answer = refusal(
-                    &id,
-                    format!("this machine holds no project called `{key}`").as_str(),
-                );
-                write(&mut writing, &answer).await?;
-                continue;
-            };
-            project
+        let project = match about_a_project(host, naming, attached.as_ref(), method, &mut params) {
+            Ok(project) => project,
+            Err(why) => {
+                if say(&queue, &refusal(&id, &why)) {
+                    continue;
+                }
+                break Ok(());
+            }
         };
-
+        // Taken before the call is spawned and let go when it is answered, so
+        // that this `await` is where a connection with everything in flight
+        // stops reading.
+        let Ok(permit) = Arc::clone(&running).acquire_owned().await else {
+            break Ok(());
+        };
+        let says_where = naming.says_where(method);
         let host = Arc::clone(host);
         let method = method.to_owned();
-        // Off the runtime: a dispatch reaches Git, LanceDB and possibly a
-        // model, and the agents' door shares these threads.
-        let answered =
-            tokio::task::spawn_blocking(move || host.dispatch(&project, &method, &params))
-                .await
-                .map_err(|error| {
-                    io::Error::other(format!("a host call could not be run: {error}"))
-                })?;
+        let queue = queue.clone();
+        // **Off the reading loop, which is the whole of this.** The call still
+        // goes to a blocking thread — a dispatch reaches Git, `LanceDB` and
+        // possibly a model — but the loop no longer waits for it, so the next
+        // line is read while this one is being worked on. Over a socket the
+        // difference is invisible; over a network with fifty milliseconds on it
+        // the twenty small calls that draw a screen were a second of waiting.
+        //
+        // What this does *not* loosen is the order the engine writes in: a
+        // project's memory is behind one mutex, so two calls about one project
+        // are as serialised as they ever were. The concurrency is the
+        // transport's, and it is the transport that was serialising things that
+        // had no reason to be.
+        //
+        // What it does change, and this is worth saying out loud: two calls a
+        // caller sent without waiting for the first answer may now run in
+        // either order. That is this engine's ordinary condition already — the
+        // agents' door has served callers concurrently all along — and a write
+        // states the revision it expects, so a caller that needs one call after
+        // another waits for the first, which is what it must do for the
+        // revision anyway.
+        tokio::spawn(async move {
+            let answered =
+                tokio::task::spawn_blocking(move || host.dispatch(&project, &method, &params))
+                    .await;
+            let answer = match answered {
+                Ok(outcome) => answered_with(&id, outcome.map(|it| named_only(says_where, it))),
+                // The blocking thread was lost. Answered rather than dropped:
+                // a caller waiting on an id that will never come back waits for
+                // as long as its own patience, and this is not its mistake.
+                Err(error) => refusal(&id, &format!("a host call could not be run: {error}")),
+            };
+            say(&queue, &answer);
+            drop(permit);
+        });
+    };
 
-        let answer = match answered {
-            Ok(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}),
-            // The engine's own `kind` travels in `data`, so the window can tell
-            // a stale revision from a locked project without reading prose.
-            Err(error) => json!({"jsonrpc": "2.0", "id": id, "error": {
-                "code": -32000,
-                "message": error.to_string(),
-                "data": {"kind": error.kind().map(sync_memory::MemoryErrorKind::as_wire)},
-            }}),
-        };
-        write(&mut writing, &answer).await?;
+    // Let go of this loop's own sender, then wait. The calls still running hold
+    // senders of their own, so the channel closes when the last of them has
+    // queued its answer and the writer stops when it has written it — a
+    // connection that ended is not a reason to drop an answer somebody is
+    // already waiting for.
+    drop(queue);
+    let _ = writer.await;
+    outcome
+}
+
+/// One outcome, as the answer to the call that asked for it.
+///
+/// The engine's own `kind` travels in `data`, so the window can tell a stale
+/// revision from a locked project without reading prose.
+fn answered_with(id: &Value, outcome: sync_memory::Result<Value>) -> Value {
+    match outcome {
+        Ok(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}),
+        Err(error) => json!({"jsonrpc": "2.0", "id": id, "error": {
+            "code": -32000,
+            "message": error.to_string(),
+            "data": {"kind": error.kind().map(sync_memory::MemoryErrorKind::as_wire)},
+        }}),
+    }
+}
+
+/// How many calls one connection may have in flight at once.
+///
+/// Named rather than left open, because every one of them holds a blocking
+/// thread while it runs and a caller deciding how many of those this process
+/// spends is a caller deciding how much of the machine it gets.
+///
+/// Sixteen: the case this exists for is a screen drawing itself, which the
+/// measurement behind it put at about twenty small calls, so this turns a
+/// second of waiting into two rounds rather than into one. A larger number
+/// would buy the last round at the cost of a worse answer to *how much can one
+/// caller take*.
+const AT_ONCE: usize = 16;
+
+/// Put one message on the connection, and say whether there is still one.
+///
+/// False means the writer has gone, which is the connection having ended. It is
+/// not an error to report: the caller left, and there is nobody to tell.
+fn say(queue: &tokio::sync::mpsc::UnboundedSender<String>, answer: &Value) -> bool {
+    queue.send(answer.to_string()).is_ok()
+}
+
+/// Write whatever is queued, in the order it was queued, until nobody is left
+/// to queue anything.
+async fn draining<W>(mut writing: W, mut queued: tokio::sync::mpsc::UnboundedReceiver<String>)
+where
+    W: AsyncWrite + Send + Unpin + 'static,
+{
+    while let Some(message) = queued.recv().await {
+        if writing
+            .write_all(format!("{message}\n").as_bytes())
+            .await
+            .is_err()
+            || writing.flush().await.is_err()
+        {
+            break;
+        }
+    }
+}
+
+/// Which project a call is about, or what to tell the caller instead.
+///
+/// The two doors answer this differently and that difference is the whole of
+/// what a connection from elsewhere may not do — so it is asked of the door,
+/// once, rather than decided again inside each call.
+fn about_a_project(
+    host: &Arc<Host>,
+    naming: &Naming,
+    attached: Option<&PathBuf>,
+    method: &str,
+    params: &mut Value,
+) -> Result<PathBuf, String> {
+    // Asked before a project is demanded, because these are the two questions a
+    // connection has to ask first: what this surface answers, and what projects
+    // there are to choose between. Refusing them for naming no project would
+    // leave a client that cannot see the file system with no first move.
+    if Host::answers_without_project(method) {
+        return Ok(PathBuf::new());
+    }
+    if naming.by_path {
+        // Said rather than answered from a guess. There is no default project
+        // and inventing one would answer a call meant for one repository out of
+        // another.
+        return attached.cloned().ok_or_else(|| {
+            "this connection has not said which project it is about — call `project.attach` first"
+                .to_owned()
+        });
+    }
+    // The key is resolved through the registry and nowhere else, so a name this
+    // machine has not registered is a refusal by name — never an attempt to
+    // open whatever is at some path derived from it.
+    let key = params
+        .get("project")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            format!(
+                "every call on this connection names its project — `project`, a key as `{PROJECTS}` lists them"
+            )
+        })?
+        .to_owned();
+    let found = host
+        .project_named(&key)
+        .ok_or_else(|| format!("this machine holds no project called `{key}`"))?;
+    // Spent where it was read. Several operations hand their parameters to the
+    // engine whole, so a key left in them would arrive at a tool that never
+    // asked for one — and what a strict schema does with an argument it does
+    // not know is not this door's to guess.
+    if let Some(members) = params.as_object_mut() {
+        members.remove("project");
+    }
+    Ok(found)
+}
+
+/// What a door that may not be turned around says when it is asked to be.
+///
+/// This machine's own application, and nothing else. What is on the other side
+/// of an attended connection is whoever answers every tool an agent calls — so
+/// a caller that could turn its connection around would be answering, in the
+/// application's name, calls made by agents it has never met.
+fn no_turning_round(id: &Value) -> Value {
+    refusal(
+        id,
+        "this connection asks and is answered — the channel back belongs to the application this engine is a part of",
+    )
+}
+
+/// The project list with nothing in it but what a caller off this machine may
+/// have.
+///
+/// A key and a name are what such a caller chooses between and all it can act
+/// on: it names the project by key in every call, and there is no operation it
+/// could hand a path to. What is left is the layout of somebody's disk —
+/// their home directory's name, where they keep their work, how many projects
+/// they have under one folder — sent to a phone that has no use for a word of
+/// it. Nothing was leaking; it was being given away for nothing, which is the
+/// version of this that never shows up as a defect.
+fn named_only(says_where: bool, mut answer: Value) -> Value {
+    if says_where {
+        return answer;
+    }
+    if let Some(listed) = answer.get_mut("projects").and_then(Value::as_array_mut) {
+        for project in listed {
+            if let Some(members) = project.as_object_mut() {
+                members.remove("path");
+            }
+        }
+    }
+    answer
+}
+
+/// The calls a door answers about the connection itself.
+///
+/// Neither is an [`Operation`](crate::host::Operation), and for one reason: an
+/// operation is handed a [`Domain`](crate::domain::Domain) — one project's
+/// memory — and neither of these is about a project. They are about *this
+/// connection*, which is why the answer to both depends on which door heard
+/// them, and why what a door does not allow is a refusal rather than a silence.
+///
+/// `None` means this was not one of them, and the caller goes on to the surface.
+fn about_this_connection(
+    devices: &Arc<Devices>,
+    naming: &Naming,
+    attached: &mut Option<PathBuf>,
+    id: &Value,
+    method: &str,
+    params: &Value,
+) -> Option<Value> {
+    match method {
+        ATTACH if naming.by_path => Some(match params.get("path").and_then(Value::as_str) {
+            Some(path) => {
+                *attached = Some(PathBuf::from(path));
+                json!({"jsonrpc": "2.0", "id": id, "result": {"attached": path}})
+            }
+            None => refusal(id, "`project.attach` needs the path of a project"),
+        }),
+        // Refused by name rather than ignored. A client that attached and was
+        // answered with silence would go on to make every call it meant for
+        // that project against nothing.
+        ATTACH => Some(refusal(
+            id,
+            "this connection names a registered project in each call, as `project` — there is no `project.attach` on it and no naming a directory by its path",
+        )),
+        REMOTE_DEVICES if naming.by_path => {
+            devices.stated(params);
+            Some(json!({"jsonrpc": "2.0", "id": id, "result": devices.described()}))
+        }
+        // The whole reason this one is heard by the door: a device that could
+        // name the devices this machine admits is a device nobody can revoke.
+        REMOTE_DEVICES => Some(refusal(
+            id,
+            "the devices this machine admits are stated by the application on it, and not over this connection",
+        )),
+        _ => None,
     }
 }
 
@@ -308,29 +586,19 @@ where
 /// The connection ending is how it is meant to end — Sync closing, or Sync
 /// reconnecting after this process restarted. Everything still waiting is
 /// failed rather than left, so an agent hears why now rather than in a minute.
-async fn answer_calls<R, W>(
+async fn answer_calls<R>(
     application: &Arc<Application>,
     mut lines: Frames<R>,
-    mut writing: W,
+    queue: tokio::sync::mpsc::UnboundedSender<String>,
+    writer: tokio::task::JoinHandle<()>,
 ) -> io::Result<()>
 where
     R: AsyncBufRead + Unpin,
-    W: AsyncWrite + Send + Unpin + 'static,
 {
-    let (queue, mut queued) = tokio::sync::mpsc::unbounded_channel::<String>();
+    // The queue and the task draining it are the ones this connection has had
+    // since it was accepted. Handed over rather than made again: one stream has
+    // one writer, and a second would interleave its lines with the first's.
     application.attend(queue);
-    let writer = tokio::spawn(async move {
-        while let Some(request) = queued.recv().await {
-            if writing
-                .write_all(format!("{request}\n").as_bytes())
-                .await
-                .is_err()
-                || writing.flush().await.is_err()
-            {
-                break;
-            }
-        }
-    });
 
     let reading = async {
         loop {
@@ -340,7 +608,9 @@ where
                     // Nothing to answer to: this direction carries answers, and
                     // an answer too long to read is a call that will time out
                     // on its own patience rather than one anybody can refuse.
-                    eprintln!("an answer on the channel back was longer than the channel allows");
+                    tracing::warn!(
+                        "an answer on the channel back was longer than the channel allows"
+                    );
                     continue;
                 }
                 Frame::End => break,
@@ -352,7 +622,7 @@ where
                 // Not fatal, for the reason a malformed request is not: one
                 // unreadable line is a mistake at the other end, and dropping
                 // the channel over it would take every tool call with it.
-                eprintln!("an answer on the channel back could not be read as JSON");
+                tracing::warn!("an answer on the channel back could not be read as JSON");
                 continue;
             };
             let Some(id) = answer.get("id").and_then(Value::as_u64) else {
@@ -370,7 +640,7 @@ where
 }
 
 /// One message off the channel, or the reason there is not one.
-enum Frame {
+pub(crate) enum Frame {
     Line(String),
     /// Longer than the channel allows. Said as soon as the ceiling is passed
     /// rather than when the message finally ends, because a caller that never
@@ -389,9 +659,14 @@ enum Frame {
 /// would like. Here the buffer stops at `limit`, everything past it is consumed
 /// and dropped, and the cost of a caller sending a gigabyte is the time to read
 /// a gigabyte and nothing else.
-struct Frames<R> {
+pub(crate) struct Frames<R> {
     reader: R,
     limit: usize,
+    /// How long a message may take to arrive before the caller is treated as
+    /// gone. `None` on this machine's own socket, where the other end is the
+    /// window and a connection costs a file descriptor; set on the network
+    /// door, where it is what closes a phone whose screen went off.
+    patience: Option<std::time::Duration>,
     /// Set after a message was refused for its length: the rest of it is still
     /// on the stream, and reading it as the next message would answer a caller
     /// with a refusal for something it never sent.
@@ -399,16 +674,44 @@ struct Frames<R> {
 }
 
 impl<R: AsyncBufRead + Unpin> Frames<R> {
-    const fn new(reader: R, limit: usize) -> Self {
+    pub(crate) const fn new(reader: R, limit: usize) -> Self {
         Self {
             reader,
             limit,
+            patience: None,
             skipping: false,
         }
     }
 
+    /// Give up on a caller that has said nothing for this long.
+    #[must_use]
+    pub(crate) const fn patience(mut self, waiting: std::time::Duration) -> Self {
+        self.patience = Some(waiting);
+        self
+    }
+
     /// Read the next message, or say why there is not one.
-    async fn next(&mut self) -> io::Result<Frame> {
+    ///
+    /// A silence longer than this reader's patience ends the connection, which
+    /// is the only sense in which it can end: there is nobody to answer, and a
+    /// task waiting on somebody who left is the cost being avoided.
+    pub(crate) async fn next(&mut self) -> io::Result<Frame> {
+        let Some(patience) = self.patience else {
+            return self.arriving().await;
+        };
+        match tokio::time::timeout(patience, self.arriving()).await {
+            Ok(frame) => frame,
+            Err(_) => Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                format!(
+                    "nothing arrived on this connection for {} seconds",
+                    patience.as_secs()
+                ),
+            )),
+        }
+    }
+
+    async fn arriving(&mut self) -> io::Result<Frame> {
         if self.skipping && !self.skip_to_end_of_message().await? {
             return Ok(Frame::End);
         }
@@ -497,7 +800,7 @@ fn outcome(answer: &Value) -> sync_memory::Result<Value> {
     Err(MemoryError::domain(kind, message, Value::Null))
 }
 
-async fn write<W: AsyncWrite + Unpin>(stream: &mut W, answer: &Value) -> io::Result<()> {
+pub(crate) async fn write<W: AsyncWrite + Unpin>(stream: &mut W, answer: &Value) -> io::Result<()> {
     stream.write_all(format!("{answer}\n").as_bytes()).await?;
     stream.flush().await
 }
@@ -522,7 +825,7 @@ fn too_long() -> Value {
     }})
 }
 
-fn refusal(id: &Value, message: &str) -> Value {
+pub(crate) fn refusal(id: &Value, message: &str) -> Value {
     json!({"jsonrpc": "2.0", "id": id, "error": {
         "code": -32000,
         "message": message,
@@ -539,6 +842,7 @@ mod tests {
     use crate::projects::Projects;
 
     use super::*;
+    use sync_memory::EXTENSION_FETCH;
 
     /// The whole of the inversion, on a socket pair: a request goes out on the
     /// connection that attended, and the answer written back reaches whoever
@@ -555,10 +859,13 @@ mod tests {
         let (reading, writing) = engine.into_split();
         let attending = Arc::clone(&held);
         tokio::spawn(async move {
+            let (queue, queued) = tokio::sync::mpsc::unbounded_channel::<String>();
+            let writer = tokio::spawn(draining(writing, queued));
             let _ = answer_calls(
                 &attending,
                 Frames::new(BufReader::new(reading), MAX_FRAME_BYTES),
-                writing,
+                queue,
+                writer,
             )
             .await;
         });
@@ -605,7 +912,14 @@ mod tests {
         let host = Arc::new(Host::over(Arc::new(Projects::over(Vec::new(), None)), None));
         let application = Arc::new(Application::new());
         tokio::spawn(async move {
-            let _ = attend(&host, &application, engine, &Naming { by_path: true }).await;
+            let _ = attend(
+                &host,
+                &application,
+                &Arc::new(Devices::default()),
+                engine,
+                &Naming { by_path: true },
+            )
+            .await;
         });
 
         let (reading, mut writing) = tokio::io::split(window);
@@ -667,10 +981,13 @@ mod tests {
         let (reading, writing) = engine.into_split();
         let attending = Arc::clone(&held);
         tokio::spawn(async move {
+            let (queue, queued) = tokio::sync::mpsc::unbounded_channel::<String>();
+            let writer = tokio::spawn(draining(writing, queued));
             let _ = answer_calls(
                 &attending,
                 Frames::new(BufReader::new(reading), MAX_FRAME_BYTES),
-                writing,
+                queue,
+                writer,
             )
             .await;
         });
@@ -801,7 +1118,14 @@ mod tests {
         let host = Arc::new(Host::over(Arc::new(Projects::over(Vec::new(), None)), None));
         let application = Arc::new(Application::new());
         tokio::spawn(async move {
-            let _ = attend(&host, &application, engine, &Naming { by_path: true }).await;
+            let _ = attend(
+                &host,
+                &application,
+                &Arc::new(Devices::default()),
+                engine,
+                &Naming { by_path: true },
+            )
+            .await;
         });
 
         let (reading, mut writing) = tokio::io::split(window);
@@ -850,7 +1174,14 @@ mod tests {
         let serving = Arc::clone(&host);
         let application = Arc::new(Application::new());
         tokio::spawn(async move {
-            let _ = attend(&serving, &application, engine, &Naming { by_path: false }).await;
+            let _ = attend(
+                &serving,
+                &application,
+                &Arc::new(Devices::default()),
+                engine,
+                &Naming { by_path: false },
+            )
+            .await;
         });
         (window, host)
     }
@@ -887,7 +1218,32 @@ mod tests {
         )
         .await;
         assert_eq!(answer["result"]["projects"][0]["project"], "A");
-        assert_eq!(answer["result"]["projects"][0]["path"], "/w/a");
+    }
+
+    /// A key and a name are what such a caller chooses between, and all it
+    /// could act on: it names the project by key in every call, and there is no
+    /// operation on this door it could hand a path to.
+    ///
+    /// So the path is not sent. It was, and nothing leaked — it was given away
+    /// for nothing, which is the version of this that never turns up as a
+    /// defect: the layout of somebody's disk on a phone that has no use for a
+    /// word of it.
+    #[tokio::test]
+    async fn a_connection_from_elsewhere_is_not_told_where_a_project_is() {
+        let (mut window, _host) = from_elsewhere();
+        let answer = ask(
+            &mut window,
+            &json!({"jsonrpc": "2.0", "id": 1, "method": PROJECTS, "params": {}}),
+        )
+        .await;
+        let listed = &answer["result"]["projects"][0];
+        assert_eq!(listed["project"], "A");
+        assert_eq!(listed["name"], "A");
+        assert_eq!(
+            listed.get("path"),
+            None,
+            "the door sent where the project is: {listed}"
+        );
     }
 
     /// The whole of what this connection is not allowed to do. A path from
@@ -1041,5 +1397,453 @@ mod tests {
             "the permissions are this door's whole access control"
         );
         drop(held);
+    }
+
+    /// The connection a device gets asks and is answered, and that is all.
+    ///
+    /// Turning it around would put whoever is on the other end in the place the
+    /// application occupies — answering, in its name, every tool call every
+    /// agent on this machine makes. A paired device is trusted to read and
+    /// write somebody's memory; it is not the application.
+    #[tokio::test]
+    async fn a_connection_from_elsewhere_cannot_turn_itself_around() {
+        let (mut window, _host) = from_elsewhere();
+        let answer = ask(
+            &mut window,
+            &json!({"jsonrpc": "2.0", "id": 1, "method": ATTEND, "params": {}}),
+        )
+        .await;
+        assert!(
+            answer["result"].is_null(),
+            "the channel was turned around: {answer}"
+        );
+        assert!(
+            answer["error"]["message"]
+                .as_str()
+                .expect("a refusal in words")
+                .contains("belongs to the application"),
+            "{answer}"
+        );
+        // Still answering afterwards, which is the other half of it being a
+        // refusal rather than the connection being taken over.
+        let after = ask(
+            &mut window,
+            &json!({"jsonrpc": "2.0", "id": 2, "method": PROJECTS, "params": {}}),
+        )
+        .await;
+        assert_eq!(after["result"]["projects"][0]["project"], "A");
+    }
+
+    /// A device cannot say who is admitted. If it could, the first thing a
+    /// stolen device would do is add itself under a second secret, and revoking
+    /// the one in the list would revoke nothing.
+    #[tokio::test]
+    async fn a_connection_from_elsewhere_cannot_state_the_devices() {
+        let (mut window, _host) = from_elsewhere();
+        let answer = ask(
+            &mut window,
+            &json!({
+                "jsonrpc": "2.0", "id": 1, "method": REMOTE_DEVICES,
+                "params": {"devices": [{"fingerprint": "f0", "secret": "one it minted"}]},
+            }),
+        )
+        .await;
+        assert!(
+            answer["error"]["message"]
+                .as_str()
+                .expect("a refusal in words")
+                .contains("stated by the application"),
+            "{answer}"
+        );
+    }
+
+    /// And on the socket in this machine's own directory it is answered, with
+    /// the count the application compares against what it believes it sent.
+    #[tokio::test]
+    async fn the_application_states_the_devices_and_is_told_what_was_taken() {
+        let host = Arc::new(Host::over(Arc::new(Projects::over(Vec::new(), None)), None));
+        let devices = Arc::new(Devices::default());
+        let (mut window, engine) = tokio::io::duplex(4096);
+        let serving = Arc::clone(&host);
+        let held = Arc::clone(&devices);
+        let application = Arc::new(Application::new());
+        tokio::spawn(async move {
+            let _ = attend(
+                &serving,
+                &application,
+                &held,
+                engine,
+                &Naming { by_path: true },
+            )
+            .await;
+        });
+
+        let answer = ask(
+            &mut window,
+            &json!({
+                "jsonrpc": "2.0", "id": 1, "method": REMOTE_DEVICES,
+                "params": {"devices": [
+                    {"fingerprint": "f0", "secret": "a phone"},
+                    {"fingerprint": "f1", "secret": "a tablet"},
+                ]},
+            }),
+        )
+        .await;
+        assert_eq!(
+            answer["result"]["devices"].as_array().map(Vec::len),
+            Some(2)
+        );
+        // No door open in a test, so there is no name to answer with — and the
+        // application shows the absence rather than an address that would not
+        // work.
+        assert!(answer["result"]["endpoint"].is_null());
+
+        // Stated again with one of them gone, which is the whole of revoking.
+        let answer = ask(
+            &mut window,
+            &json!({
+                "jsonrpc": "2.0", "id": 2, "method": REMOTE_DEVICES,
+                "params": {"devices": [{"fingerprint": "f0", "secret": "a phone"}]},
+            }),
+        )
+        .await;
+        assert_eq!(
+            answer["result"]["devices"].as_array().map(Vec::len),
+            Some(1)
+        );
+        assert_eq!(answer["result"]["devices"][0]["fingerprint"], "f0");
+    }
+
+    /// One operation that takes its time, and one that does not.
+    ///
+    /// Registered on the surface rather than borrowed from the real ones,
+    /// because what is being measured is the transport: a real operation would
+    /// bring a repository, a model and a reason for the timing to be anything
+    /// other than what this test set.
+    struct Slow;
+
+    impl crate::host::Operation for Slow {
+        fn name(&self) -> &'static str {
+            "test.slow"
+        }
+
+        // No corpus, so nothing here opens a repository that is not there.
+        fn needs_memory(&self) -> bool {
+            false
+        }
+
+        fn run(
+            &self,
+            _domain: &mut crate::domain::Domain,
+            _params: &Value,
+        ) -> sync_memory::Result<Value> {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            Ok(json!({"slow": true}))
+        }
+    }
+
+    struct Fast;
+
+    impl crate::host::Operation for Fast {
+        fn name(&self) -> &'static str {
+            "test.fast"
+        }
+
+        fn needs_memory(&self) -> bool {
+            false
+        }
+
+        fn run(
+            &self,
+            _domain: &mut crate::domain::Domain,
+            _params: &Value,
+        ) -> sync_memory::Result<Value> {
+            Ok(json!({"fast": true}))
+        }
+    }
+
+    /// How many calls were running at the same moment, at the most.
+    struct Counting(Arc<Watching>);
+
+    #[derive(Default)]
+    struct Watching {
+        now: std::sync::atomic::AtomicUsize,
+        most: std::sync::atomic::AtomicUsize,
+    }
+
+    impl crate::host::Operation for Counting {
+        fn name(&self) -> &'static str {
+            "test.counted"
+        }
+
+        fn needs_memory(&self) -> bool {
+            false
+        }
+
+        fn run(
+            &self,
+            _domain: &mut crate::domain::Domain,
+            _params: &Value,
+        ) -> sync_memory::Result<Value> {
+            use std::sync::atomic::Ordering;
+            let now = self.0.now.fetch_add(1, Ordering::SeqCst) + 1;
+            self.0.most.fetch_max(now, Ordering::SeqCst);
+            std::thread::sleep(std::time::Duration::from_millis(60));
+            self.0.now.fetch_sub(1, Ordering::SeqCst);
+            Ok(json!({}))
+        }
+    }
+
+    /// A machine holding `count` projects, named `P0`, `P1` and so on.
+    fn holding_projects(count: usize) -> Vec<crate::projects::Registered> {
+        (0..count)
+            .map(|at| crate::projects::Registered {
+                path: PathBuf::from(format!("/w/{at}")),
+                name: format!("P{at}"),
+                identifier: format!("P{at}"),
+            })
+            .collect()
+    }
+
+    /// Serve a surface on a connection that names its projects by key.
+    fn serving(host: Host) -> tokio::io::DuplexStream {
+        let host = Arc::new(host);
+        let (caller, engine) = tokio::io::duplex(64 * 1024);
+        let application = Arc::new(Application::new());
+        tokio::spawn(async move {
+            let _ = attend(
+                &host,
+                &application,
+                &Arc::new(Devices::default()),
+                engine,
+                &Naming { by_path: false },
+            )
+            .await;
+        });
+        caller
+    }
+
+    async fn send(stream: &mut tokio::io::DuplexStream, request: &Value) {
+        stream
+            .write_all(format!("{request}\n").as_bytes())
+            .await
+            .expect("the caller wrote");
+    }
+
+    /// Read one whole line, byte at a time, so nothing of the next answer is
+    /// swallowed into a buffer this test would then have to remember about.
+    async fn next_answer(stream: &mut tokio::io::DuplexStream) -> Value {
+        let mut byte = [0_u8; 1];
+        let mut line = Vec::new();
+        loop {
+            let read = tokio::io::AsyncReadExt::read(stream, &mut byte)
+                .await
+                .expect("the answer is readable");
+            if read == 0 || byte[0] == b'\n' {
+                break;
+            }
+            line.push(byte[0]);
+        }
+        serde_json::from_slice(&line).expect("the answer is JSON")
+    }
+
+    /// Two calls sent one after the other, and the second does not wait for the
+    /// first.
+    ///
+    /// Two projects rather than one, and that is the point rather than a
+    /// convenience: a project's memory is behind one mutex, so two calls about
+    /// the *same* project are still done one at a time — which is the ordering
+    /// this change was not allowed to loosen. What it loosened is the
+    /// transport, and two projects is where that becomes visible.
+    #[tokio::test]
+    async fn a_slow_call_does_not_hold_up_the_one_sent_after_it() {
+        let mut host = Host::over(Arc::new(Projects::over(holding_projects(2), None)), None);
+        host.register(Box::new(Slow));
+        host.register(Box::new(Fast));
+        let mut caller = serving(host);
+
+        send(
+            &mut caller,
+            &json!({"jsonrpc": "2.0", "id": 1, "method": "test.slow", "params": {"project": "P0"}}),
+        )
+        .await;
+        send(
+            &mut caller,
+            &json!({"jsonrpc": "2.0", "id": 2, "method": "test.fast", "params": {"project": "P1"}}),
+        )
+        .await;
+
+        let first = next_answer(&mut caller).await;
+        let second = next_answer(&mut caller).await;
+        assert_eq!(first["id"], 2, "the quick call answered first: {first}");
+        assert_eq!(first["result"]["fast"], true);
+        assert_eq!(second["id"], 1, "and the slow one after it: {second}");
+        assert_eq!(second["result"]["slow"], true);
+    }
+
+    /// The number of calls one connection may have running is a number, and it
+    /// is this one.
+    ///
+    /// Without it a caller decides how many of this process's blocking threads
+    /// it spends, which is a caller deciding how much of the machine it gets.
+    #[tokio::test]
+    async fn a_connection_runs_no_more_than_the_stated_number_of_calls_at_once() {
+        let watching = Arc::new(Watching::default());
+        let asked = AT_ONCE * 2;
+        let mut host = Host::over(
+            Arc::new(Projects::over(holding_projects(asked), None)),
+            None,
+        );
+        host.register(Box::new(Counting(Arc::clone(&watching))));
+        let mut caller = serving(host);
+
+        // One project each, so that nothing but the ceiling is holding them
+        // back.
+        for at in 0..asked {
+            send(
+                &mut caller,
+                &json!({
+                    "jsonrpc": "2.0", "id": at, "method": "test.counted",
+                    "params": {"project": format!("P{at}")},
+                }),
+            )
+            .await;
+        }
+        let mut answered = 0;
+        while answered < asked {
+            let answer = next_answer(&mut caller).await;
+            assert!(answer["error"].is_null(), "{answer}");
+            answered += 1;
+        }
+
+        let most = watching.most.load(std::sync::atomic::Ordering::SeqCst);
+        assert!(most > 1, "nothing ran at the same time as anything: {most}");
+        assert!(
+            most <= AT_ONCE,
+            "{most} ran at once, and the ceiling is {AT_ONCE}"
+        );
+    }
+
+    /// A request a package makes is carried to the application whole, and the
+    /// engine adds nothing to it and reads nothing out of it.
+    ///
+    /// That is the claim worth a test rather than the plumbing: what a package
+    /// may reach is a sentence in a manifest on the machine the request goes out
+    /// from, so a door that helpfully attached a host, a list or an id of its
+    /// own would be a door deciding a permission it cannot see.
+    #[tokio::test]
+    async fn a_package_s_request_is_carried_to_the_application_and_not_read_on_the_way() {
+        let held = Arc::new(Application::new());
+
+        // The application's own connection, turned around.
+        let (engine, application) = UnixStream::pair().expect("a pair of connections");
+        let (reading, writing) = engine.into_split();
+        let attending = Arc::clone(&held);
+        tokio::spawn(async move {
+            let (queue, queued) = tokio::sync::mpsc::unbounded_channel::<String>();
+            let writer = tokio::spawn(draining(writing, queued));
+            let _ = answer_calls(
+                &attending,
+                Frames::new(BufReader::new(reading), MAX_FRAME_BYTES),
+                queue,
+                writer,
+            )
+            .await;
+        });
+        let (theirs, mut ours) = application.into_split();
+        let mut arriving = BufReader::new(theirs).lines();
+
+        // And a caller off this machine, on a connection of its own.
+        let host = Arc::new(Host::over(Arc::new(Projects::over(Vec::new(), None)), None));
+        let (mut caller, door) = tokio::io::duplex(64 * 1024);
+        let serving = Arc::clone(&host);
+        let carrying = Arc::clone(&held);
+        tokio::spawn(async move {
+            let _ = attend(
+                &serving,
+                &carrying,
+                &Arc::new(Devices::default()),
+                door,
+                &Naming { by_path: false },
+            )
+            .await;
+        });
+
+        let asked = json!({"url": "https://example.test/a", "method": "GET"});
+        send(
+            &mut caller,
+            &json!({
+                "jsonrpc": "2.0", "id": 7, "method": EXTENSION_FETCH,
+                "params": {"id": "a-package", "request": asked},
+            }),
+        )
+        .await;
+
+        let carried: Value = serde_json::from_str(
+            &arriving
+                .next_line()
+                .await
+                .expect("the line is readable")
+                .expect("a request arrived"),
+        )
+        .expect("it is JSON");
+        assert_eq!(carried["method"], EXTENSION_FETCH);
+        assert_eq!(carried["params"]["id"], "a-package");
+        assert_eq!(carried["params"]["request"], asked);
+        // Nothing else. A member the engine added would be a permission the
+        // engine decided.
+        assert_eq!(
+            carried["params"]
+                .as_object()
+                .expect("an object")
+                .keys()
+                .collect::<Vec<_>>(),
+            vec!["id", "request"]
+        );
+
+        let answer = json!({"jsonrpc": "2.0", "id": carried["id"], "result": {"status": 200}});
+        ours.write_all(format!("{answer}\n").as_bytes())
+            .await
+            .expect("the application answers");
+
+        let answered = next_answer(&mut caller).await;
+        assert_eq!(answered["id"], 7, "the answer found the call: {answered}");
+        assert_eq!(answered["result"]["status"], 200);
+    }
+
+    /// With nobody attending there is no machine to make the request from, and
+    /// the caller is told so rather than left waiting on its own patience.
+    #[tokio::test]
+    async fn a_request_with_no_application_behind_it_is_refused_at_once() {
+        let host = Arc::new(Host::over(Arc::new(Projects::over(Vec::new(), None)), None));
+        let (mut caller, door) = tokio::io::duplex(64 * 1024);
+        let serving = Arc::clone(&host);
+        tokio::spawn(async move {
+            let _ = attend(
+                &serving,
+                &Arc::new(Application::new()),
+                &Arc::new(Devices::default()),
+                door,
+                &Naming { by_path: false },
+            )
+            .await;
+        });
+
+        send(
+            &mut caller,
+            &json!({
+                "jsonrpc": "2.0", "id": 1, "method": EXTENSION_FETCH,
+                "params": {"id": "a-package", "request": {"url": "https://example.test/a", "method": "GET"}},
+            }),
+        )
+        .await;
+        let answered = next_answer(&mut caller).await;
+        assert!(
+            answered["error"]["message"]
+                .as_str()
+                .expect("a refusal in words")
+                .contains("not on the other end"),
+            "{answered}"
+        );
     }
 }

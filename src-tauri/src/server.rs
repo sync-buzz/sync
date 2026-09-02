@@ -236,7 +236,8 @@ pub fn start<R: Runtime>(app: &AppHandle<R>, running: &RunningServer) -> Result<
     // for rather than assumed by the binary, so a `sync-mcp` started by hand to
     // serve agents is still exactly that.
     let socket = host_socket(app)?;
-    let mut child = Command::new(binary(app)?)
+    let mut starting = Command::new(binary(app)?);
+    starting
         .arg("--registry")
         .arg(&registry)
         .arg("--http")
@@ -248,14 +249,19 @@ pub fn start<R: Runtime>(app: &AppHandle<R>, running: &RunningServer) -> Result<
         .env(sync_memory::SERVER_TOKEN_VARIABLE, &settings.token)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::null())
-        .stderr(log(app))
-        .spawn()
-        .map_err(|error| {
-            ProjectError::new(
-                "server_failed",
-                format!("the MCP server could not be started: {error}"),
-            )
-        })?;
+        .stderr(log(app));
+    // The third door, and the only one that is not on this machine. Absent
+    // where the person has not asked to be reachable, which is how *off* is
+    // said: there is no second switch for the engine to disagree with.
+    if let Some(identity) = crate::remote::identity_for_engine(app) {
+        starting.env(sync_memory::REMOTE_KEY_VARIABLE, identity);
+    }
+    let mut child = starting.spawn().map_err(|error| {
+        ProjectError::new(
+            "server_failed",
+            format!("the MCP server could not be started: {error}"),
+        )
+    })?;
 
     let leash = child.stdin.take();
     if let Ok(mut held) = running.leash.lock() {
@@ -285,6 +291,10 @@ pub fn start<R: Runtime>(app: &AppHandle<R>, running: &RunningServer) -> Result<
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
     remember(running, &socket);
+    // The engine came up holding no devices — it keeps them in memory and has
+    // just lost the set. Stated again here so that a restart, whatever caused
+    // it, is not a person's paired phone quietly ceasing to be admitted.
+    crate::remote::announce(app);
     Ok(())
 }
 

@@ -14,6 +14,7 @@ import type { ManifestBadge } from "@/lib/extension-host/client";
 import type { Packages } from "@/lib/extension-host/packages";
 import type { OpenProject } from "@/lib/project/types";
 import type { FrameId } from "@/lib/shell-frames";
+import { said } from "@/lib/refusal";
 
 /**
  * The sections a project has, built by running what it declared.
@@ -96,7 +97,8 @@ const NOTHING: Areas = { sections: [], failures: [], isLoading: true };
  * rebuilt — losing exactly the state this window's mounting rules exist to
  * keep. The version is in the key because an update is a different package, and
  * the module URL is in it because a folder's contents can change under a
- * version that did not.
+ * version that did not — the URL carries the served file's modification time,
+ * which is what makes that true rather than merely intended.
  */
 function runOf(id: string, version: string, ui: string | null): string {
   return `${id}@${version}#${ui ?? ""}`;
@@ -143,7 +145,7 @@ export function useAreas(project: OpenProject, packages: Packages): Areas {
             outcome =
               refused instanceof ActivationFailure
                 ? refused
-                : new ActivationFailure(id, String(refused));
+                : new ActivationFailure(id, said(refused));
             activations.current.set(key, outcome);
           }
         }

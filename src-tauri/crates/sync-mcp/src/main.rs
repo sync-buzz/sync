@@ -28,6 +28,7 @@ mod link;
 mod own;
 mod projects;
 mod published;
+mod remote;
 mod server;
 mod socket;
 
@@ -44,6 +45,7 @@ type Embeddings = Option<std::sync::Arc<dyn memory_hub_mcp::EmbeddingProvider>>;
 type Answering = (projects::Projects, Embeddings);
 
 fn main() -> Fallible {
+    recording();
     match invocation()? {
         Invocation::Say(message) => {
             println!("{message}");
@@ -67,6 +69,27 @@ fn main() -> Fallible {
             serve_http(projects, embeddings, address, socket)
         }
     }
+}
+
+/// Start writing down what happens.
+///
+/// To standard error, which the application collects into its own log
+/// directory — so this is where a line about a device that connected an hour
+/// ago is found, and the reason such a line is not an `eprintln!`: it needs a
+/// time on it and a level to be filtered by, and a person reading a log after
+/// the fact needs both.
+///
+/// Quiet by default. `RUST_LOG` raises it, which is how somebody chasing a
+/// connection that will not establish asks `iroh` what it is seeing.
+fn recording() {
+    use tracing_subscriber::EnvFilter;
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    // Ignored rather than reported: this is called once at start-up, and the
+    // only way it fails is being called twice.
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(std::io::stderr)
+        .try_init();
 }
 
 /// Serve the window over stdio.
@@ -229,6 +252,12 @@ fn serve_http(
                 return http::serve(agents, address, token).await;
             };
             let host = std::sync::Arc::new(host::Host::over(projects, embeddings));
+            // Held by both doors: the socket is where the application states
+            // the set, and the network door is what reads it. One of them can
+            // be closed and the other still needs the handle, so it is made
+            // here rather than by either.
+            let devices = std::sync::Arc::new(remote::Devices::default());
+            open_to_devices(&host, &application, &devices);
             // **The agents' door goes in the background, and the host door is
             // the one this process lives on.** The port is fixed, written into
             // every agent's configuration, and therefore collidable — and Sync
@@ -238,13 +267,66 @@ fn serve_http(
             // this machine its agents, and never its memory.
             tokio::spawn(async move {
                 if let Err(error) = http::serve(agents, address, token).await {
-                    eprintln!("the agents' door did not open: {error}");
+                    tracing::error!(%error, "the agents' door did not open");
                 }
             });
-            socket::serve(host, application, path)
+            socket::serve(host, application, devices, path)
                 .await
                 .map_err(Into::into)
         })
+}
+
+/// Open the door devices come through, where this machine has an identity.
+///
+/// The key's absence is how the person's *off* arrives here: there is no second
+/// switch to disagree with it, and an installation that has never been asked
+/// for remote access never binds a UDP socket or talks to a relay.
+///
+/// In the background, and a failure to bind is a line rather than the end of
+/// the process. The rule the host socket established: whatever this machine
+/// will not give out costs it that door and never its memory.
+fn open_to_devices(
+    host: &std::sync::Arc<host::Host>,
+    application: &std::sync::Arc<application::Application>,
+    devices: &std::sync::Arc<remote::Devices>,
+) {
+    let Ok(stated) = std::env::var(sync_memory::REMOTE_KEY_VARIABLE) else {
+        return;
+    };
+    let key = match identity(&stated) {
+        Ok(key) => key,
+        Err(error) => {
+            tracing::error!(%error, "the network door did not open");
+            return;
+        }
+    };
+    let host = std::sync::Arc::clone(host);
+    let application = std::sync::Arc::clone(application);
+    let devices = std::sync::Arc::clone(devices);
+    tokio::spawn(async move {
+        if let Err(error) = remote::serve(host, application, devices, key).await {
+            tracing::error!(%error, "the network door did not open");
+        }
+    });
+}
+
+/// Read this machine's identity out of the thirty-two bytes it was given.
+fn identity(stated: &str) -> Result<iroh::SecretKey, String> {
+    let stated = stated.trim();
+    if stated.len() != 64 {
+        return Err(format!(
+            "{} holds {} characters, and a key is 64 of them in hex",
+            sync_memory::REMOTE_KEY_VARIABLE,
+            stated.len()
+        ));
+    }
+    let mut key = [0_u8; 32];
+    for (index, byte) in key.iter_mut().enumerate() {
+        let at = index * 2;
+        *byte = u8::from_str_radix(&stated[at..at + 2], 16)
+            .map_err(|_| format!("{} is not hex", sync_memory::REMOTE_KEY_VARIABLE))?;
+    }
+    Ok(iroh::SecretKey::from_bytes(&key))
 }
 
 /// Serve an agent over stdio, speaking MCP.

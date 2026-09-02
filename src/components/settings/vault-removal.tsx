@@ -12,6 +12,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import type { VaultEntry } from "@/lib/settings/vault";
+import { said } from "@/lib/refusal";
 
 /**
  * Taking a secret out, and what taking it out does not do.
@@ -75,7 +76,7 @@ function Confirmation({
       await onForget(entry);
       onDone();
     } catch (refused) {
-      setFailure(refused instanceof Error ? refused.message : String(refused));
+      setFailure(said(refused));
       setBusy(false);
     }
   };

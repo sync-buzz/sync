@@ -30,6 +30,9 @@ mod error;
 /// consume, and nothing more — a re-export nobody imports is a promise this
 /// crate has not been asked to keep.
 pub mod mapping;
+/// Every operation of the host channel, written once for both of its clients.
+pub mod operations;
+pub mod pairing;
 mod process;
 mod protocol;
 
@@ -40,13 +43,26 @@ pub use dto::{
     RemoteCheck, ScanOutcome, SearchOutcome, SyncState, ToolDeclaration, TransactionResult,
     TransportStatus, Version,
 };
-pub use error::{MemoryError, MemoryErrorKind, Result};
+pub use error::{CommandError, MemoryError, MemoryErrorKind, Result};
+pub use operations::{Effect, Operations, effect};
 /// The environment variable the MCP server's bearer token travels in.
 ///
 /// Named here because both sides need the same word and neither owns it: the
 /// window puts the token in the environment it starts the server with, and the
 /// server reads it back. An argument would have put it in `ps`.
 pub const SERVER_TOKEN_VARIABLE: &str = "SYNC_MCP_TOKEN";
+
+/// The environment variable this machine's own network identity travels in.
+///
+/// Thirty-two bytes in hex: the key an `iroh` endpoint is built from, and
+/// therefore the name devices dial. It is minted and kept by the application,
+/// in the keychain, and reaches the engine the same way the bearer token does
+/// and for the same reason — an argument is readable by every process here
+/// through `ps`, and a machine's identity is exactly what must not be.
+///
+/// Absent, the engine opens no network door. That is how *off* is spelled:
+/// there is no flag to disagree with the key's absence.
+pub const REMOTE_KEY_VARIABLE: &str = "SYNC_REMOTE_KEY";
 
 pub use mapping::{
     Dependents, Document, DocumentEdits, ENTITY_KINDS, Entity, EntityKind, GUIDANCE_FIELD, Link,
@@ -55,6 +71,9 @@ pub use mapping::{
 };
 pub use process::{BinarySource, EngineBinary, LaunchConfig, resolve_binary};
 pub use protocol::{
-    ATTACH, ATTEND, CHANNEL_VERSION, Connection, MAX_FRAME_BYTES, METHODS, PROJECT_RESOURCE,
-    PROJECTS, REVISION_RESOURCE, TOOL_CALL, Transport, tool_result,
+    ATTACH, ATTEND, CHANNEL_VERSION, Connection, EXTENSION_FETCH, EXTENSION_FILE, EXTENSION_FORGET,
+    EXTENSION_INSTALL, EXTENSION_LIST, EXTENSION_OCCASION, EXTENSION_REPOINT, MAX_FRAME_BYTES,
+    METHODS, PROJECT_RESOURCE, PROJECTS, REGISTRY_CACHED, REGISTRY_INDEX, REGISTRY_LEDGER,
+    REMOTE_DEVICES, REMOTE_GREETING, REMOTE_HELLO, REMOTE_IDLE, REVISION_RESOURCE, SCHEDULE_OFF,
+    SCHEDULE_REMEMBER, SCHEDULE_SWITCH, TOOL_CALL, Transport, carried, tool_result,
 };

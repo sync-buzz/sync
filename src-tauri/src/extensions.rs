@@ -283,7 +283,29 @@ pub struct InstalledExtension {
 
 impl InstalledExtension {
     fn of(installed: Installed) -> Self {
-        let served = |path: &String| format!("{SCHEME}://{}/{path}", installed.manifest.id);
+        // The token is what makes a rebuilt file a *different* URL, and without
+        // it nothing a person does reaches the window. `cache-control:
+        // no-store` in `serve` is honoured by the fetch and is beside the
+        // point: a webview memoises an ES module by its specifier, so the
+        // second `import()` of one URL never asks the network at all. An
+        // extension served from a folder could therefore be reinstalled, rebuilt
+        // and version-bumped, and the window went on running the code it had
+        // imported when it started — which is exactly what a person writing one
+        // does all day.
+        //
+        // The modification time rather than the version: a folder being written
+        // changes many times per version, and a token that only moved with the
+        // manifest would fix reinstalling and leave rebuilding broken. For an
+        // artefact it is stable anyway, the directory being named after its own
+        // content and never written twice.
+        let served = |path: &String| {
+            let stamp = std::fs::metadata(installed.root.join(path))
+                .and_then(|meta| meta.modified())
+                .ok()
+                .and_then(|at| at.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0, |since| since.as_millis());
+            format!("{SCHEME}://{}/{path}?v={stamp}", installed.manifest.id)
+        };
         let ui = installed.manifest.ui.as_ref().map(&served);
         let styles = installed.manifest.styles.as_ref().map(&served);
 
@@ -345,16 +367,51 @@ pub fn extension_install_folder<R: Runtime>(
 /// Everything this machine can load, whatever any project declares.
 #[tauri::command]
 pub fn extension_list<R: Runtime>(app: AppHandle<R>) -> Result<Vec<InstalledExtension>, String> {
-    store(&app)?
+    listed(&app)
+}
+
+/// Everything this machine can load.
+///
+/// Split from the command because a phone asks the same question over the
+/// channel, and a second body for it would be a second answer to *what is
+/// installed here*.
+pub(crate) fn listed<R: Runtime>(app: &AppHandle<R>) -> Result<Vec<InstalledExtension>, String> {
+    store(app)?
         .list()
         .map(|all| all.into_iter().map(InstalledExtension::of).collect())
         .map_err(|error| error.to_string())
 }
 
+/// One file of one installed artefact, with what it is.
+///
+/// The same two answers [`serve`] gives a webview on this machine, for a
+/// webview that is not on it: the id is resolved through the pointer rather
+/// than trusted, and the path is refused if it leaves the artefact. Both checks
+/// are here rather than at either caller — a phone cannot make them, and a
+/// machine that made them twice would eventually make them differently.
+pub(crate) fn file_of<R: Runtime>(
+    app: &AppHandle<R>,
+    id: &str,
+    path: &str,
+) -> Result<(Vec<u8>, &'static str), String> {
+    let installed = store(app)?
+        .resolve(id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("nothing on this machine serves `{id}`"))?;
+    let file = within(&installed.root, path).ok_or("that path leaves the extension")?;
+    let bytes = std::fs::read(&file).map_err(|error| format!("`{path}`: {error}"))?;
+    let media = media_type(&file);
+    Ok((bytes, media))
+}
+
 /// Stops serving an id on this machine. The artefact and its records stay.
 #[tauri::command]
 pub fn extension_forget<R: Runtime>(app: AppHandle<R>, id: String) -> Result<(), String> {
-    store(&app)?.forget(&id).map_err(|error| error.to_string())
+    forget_now(&app, &id)
+}
+
+pub(crate) fn forget_now<R: Runtime>(app: &AppHandle<R>, id: &str) -> Result<(), String> {
+    store(app)?.forget(id).map_err(|error| error.to_string())
 }
 
 /// What the registry says exists, from the network or from what was cached.
@@ -374,11 +431,18 @@ pub fn extension_forget<R: Runtime>(app: AppHandle<R>, id: String) -> Result<(),
 /// still not held while a request is in flight.
 #[tauri::command]
 pub async fn registry_index<R: Runtime>(app: AppHandle<R>) -> Result<Fetched<Index>, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        registry(&app)?.index().map_err(|error| error.to_string())
-    })
-    .await
-    .map_err(|error| format!("reading the registry did not finish: {error}"))?
+    tauri::async_runtime::spawn_blocking(move || index_now(&app))
+        .await
+        .map_err(|error| format!("reading the registry did not finish: {error}"))?
+}
+
+/// The index itself, on whatever thread the caller already put itself on.
+///
+/// Blocking, and every caller says so in its own way: the command hands it to
+/// the blocking pool, and the channel's carrier is already on a thread of its
+/// own.
+pub(crate) fn index_now<R: Runtime>(app: &AppHandle<R>) -> Result<Fetched<Index>, String> {
+    registry(app)?.index().map_err(|error| error.to_string())
 }
 
 /// What the last fetch left on the disk, and nothing over the network.
@@ -393,7 +457,11 @@ pub async fn registry_index<R: Runtime>(app: AppHandle<R>) -> Result<Fetched<Ind
 /// nothing to say about updates yet — and the row draws nothing.
 #[tauri::command]
 pub fn registry_cached_index<R: Runtime>(app: AppHandle<R>) -> Result<Option<Index>, String> {
-    registry(&app)?
+    cached_now(&app)
+}
+
+pub(crate) fn cached_now<R: Runtime>(app: &AppHandle<R>) -> Result<Option<Index>, String> {
+    registry(app)?
         .cached_index()
         .map_err(|error| error.to_string())
 }
@@ -406,14 +474,16 @@ pub fn registry_cached_index<R: Runtime>(app: AppHandle<R>) -> Result<Option<Ind
 /// [`registry_index`] is.
 #[tauri::command]
 pub async fn registry_ledger<R: Runtime>(app: AppHandle<R>, id: String) -> Result<Ledger, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        registry(&app)?
-            .ledger(&id)
-            .map(|fetched| fetched.answer)
-            .map_err(|error| error.to_string())
-    })
-    .await
-    .map_err(|error| format!("reading the extension's versions did not finish: {error}"))?
+    tauri::async_runtime::spawn_blocking(move || ledger_now(&app, &id))
+        .await
+        .map_err(|error| format!("reading the extension's versions did not finish: {error}"))?
+}
+
+pub(crate) fn ledger_now<R: Runtime>(app: &AppHandle<R>, id: &str) -> Result<Ledger, String> {
+    registry(app)?
+        .ledger(id)
+        .map(|fetched| fetched.answer)
+        .map_err(|error| error.to_string())
 }
 
 /// The package a call is being made for, or why it may not be made.
@@ -597,8 +667,15 @@ pub fn extension_repoint<R: Runtime>(
     app: AppHandle<R>,
     pointer: Pointer,
 ) -> Result<InstalledExtension, String> {
-    store(&app)?
-        .repoint(&pointer)
+    repoint_now(&app, &pointer)
+}
+
+pub(crate) fn repoint_now<R: Runtime>(
+    app: &AppHandle<R>,
+    pointer: &Pointer,
+) -> Result<InstalledExtension, String> {
+    store(app)?
+        .repoint(pointer)
         .map(InstalledExtension::of)
         .map_err(|error| error.to_string())
 }
@@ -622,31 +699,66 @@ pub async fn extension_install_registry<R: Runtime>(
     app: AppHandle<R>,
     artefact: Artefact,
 ) -> Result<InstalledExtension, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let downloads = extensions_dir(&app)?.join("downloads");
-        let file = registry(&app)?
-            .download(&artefact, &downloads)
-            .map_err(|error| error.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || install_now(&app, &artefact))
+        .await
+        .map_err(|error| format!("installing from the registry did not finish: {error}"))?
+}
 
-        let installed = Archive::open(&file, SIGNING_KEY)
-            .map_err(|error| error.to_string())
-            .and_then(|archive| {
-                store(&app)?
-                    .install(&archive, Source::Registry)
-                    .map(InstalledExtension::of)
-                    .map_err(|error| error.to_string())
-            });
+/// Download and install, on the thread the caller is already on.
+///
+/// The downloaded file is removed either way: a `.syncext` nobody installed is
+/// litter with no owner, and the one that was installed has been copied into
+/// the artefact directory by then.
+pub(crate) fn install_now<R: Runtime>(
+    app: &AppHandle<R>,
+    artefact: &Artefact,
+) -> Result<InstalledExtension, String> {
+    let downloads = extensions_dir(app)?.join("downloads");
+    let file = registry(app)?
+        .download(artefact, &downloads)
+        .map_err(|error| error.to_string())?;
 
-        drop(std::fs::remove_file(&file));
-        installed
-    })
-    .await
-    .map_err(|error| format!("installing from the registry did not finish: {error}"))?
+    let installed = Archive::open(&file, SIGNING_KEY)
+        .map_err(|error| error.to_string())
+        .and_then(|archive| {
+            store(app)?
+                .install(&archive, Source::Registry)
+                .map(InstalledExtension::of)
+                .map_err(|error| error.to_string())
+        });
+
+    drop(std::fs::remove_file(&file));
+    installed
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The token that busts the window's module cache never reaches the disk.
+    ///
+    /// `served` hangs `?v=<mtime>` on every URL, and the path a request is
+    /// resolved through is [`tauri::http::Uri::path`], which excludes the
+    /// query. Written down because the two halves are in different languages
+    /// and nothing else would fail if that stopped being true: a token treated
+    /// as part of the path makes every extension serve 404 and the window draw
+    /// no sections at all.
+    #[test]
+    fn the_cache_busting_token_is_not_part_of_the_path() {
+        let uri: tauri::http::Uri = format!("{SCHEME}://routines/ui/index.js?v=1756339200000")
+            .parse()
+            .expect("the served URL parses");
+
+        assert_eq!(uri.path(), "/ui/index.js");
+        assert_eq!(uri.query(), Some("v=1756339200000"));
+
+        let root = Path::new("/tmp/routines");
+        assert_eq!(
+            within(root, uri.path()),
+            Some(root.join("ui/index.js")),
+            "the query must not reach the file that is read"
+        );
+    }
 
     fn sending(
         host: &str,

@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 
 use serde_json::{Value, json};
+use sync_memory::Operations as _;
 
 const BINARY: &str = env!("CARGO_BIN_EXE_sync-mcp");
 

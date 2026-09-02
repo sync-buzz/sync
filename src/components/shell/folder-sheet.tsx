@@ -11,6 +11,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { said } from "@/lib/refusal";
 
 /**
  * The one question a folder asks, making it or renaming it: what is it called.
@@ -101,7 +102,7 @@ function FolderForm({
       await onSubmit(trimmed);
       onDone();
     } catch (refused) {
-      setFailure(refused instanceof Error ? refused.message : String(refused));
+      setFailure(said(refused));
       setBusy(false);
     }
   };

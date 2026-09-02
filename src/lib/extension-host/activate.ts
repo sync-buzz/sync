@@ -18,6 +18,7 @@ import type {
   ManifestBadge,
 } from "@/lib/extension-host/client";
 import { FRAMES, type FrameId } from "@/lib/shell-frames";
+import { said } from "@/lib/refusal";
 
 export type { ActivationResult, AreaModule, AreaProviderProps, ExtensionHost };
 
@@ -217,36 +218,60 @@ export function refuseUnrunnable(extension: InstalledExtension): string | null {
  * anything with identity or a design in it, its own copy of anything that is a
  * pure rule.
  *
- * Keyed by URL, which already carries the version and the artefact digest, so
- * an update brings its own sheet and a reload of the same package does not add
- * a second. Nothing removes them: a stylesheet whose extension is no longer
- * mounted styles nothing, and taking one away while a frozen area still holds
- * its markup would undress a section a person is about to return to.
+ * Keyed by the extension rather than by the URL, and remembering which URL it
+ * last took. **The note here used to say the URL "already carries the version
+ * and the artefact digest", and it carried neither** — it was
+ * `scheme://<id>/<path>`, the same string for every version of a package for
+ * ever. Rust now hangs the served file's modification time on the end, which is
+ * what makes a rebuilt sheet a different URL at all; this side has to notice
+ * that the URL changed, which a set of URLs cannot do.
+ *
+ * The old sheet goes when the new one has loaded, never before: removing first
+ * would show one unstyled frame of a section somebody is looking at. What is
+ * still true is that nothing is removed when an extension is merely unmounted —
+ * a frozen area still holds its markup, and undressing it would greet a person
+ * returning to the section.
  */
-const adopted = new Set<string>();
+const adopted = new Map<string, string>();
 
 function adoptStyles(extension: InstalledExtension): Promise<void> {
   const href = extension.styles;
-  if (href === null || adopted.has(href)) return Promise.resolve();
-  adopted.add(href);
+  const { id } = extension.manifest;
+  if (href === null || adopted.get(id) === href) return Promise.resolve();
+  const previous = adopted.get(id);
+  adopted.set(id, href);
 
   return new Promise((settle) => {
     const link = document.createElement("link");
     link.rel = "stylesheet";
     link.href = href;
-    link.dataset.extension = extension.manifest.id;
+    link.dataset.extension = id;
     // Resolved either way. A stylesheet that will not load is a section drawn
     // without its own rules, which is worth seeing and reporting; refusing the
     // activation over it would take away a working section because its spacing
     // did not arrive.
-    link.addEventListener("load", () => settle());
+    link.addEventListener("load", () => {
+      retire(previous);
+      settle();
+    });
     link.addEventListener("error", () => {
-      adopted.delete(href);
-      console.warn(`The stylesheet of ${extension.manifest.id} did not load.`, href);
+      // Put back what was there, so the next attempt is a fresh one rather than
+      // a URL this map already believes is adopted.
+      if (previous === undefined) adopted.delete(id);
+      else adopted.set(id, previous);
+      console.warn(`The stylesheet of ${id} did not load.`, href);
       settle();
     });
     document.head.append(link);
   });
+}
+
+/** Takes away the sheet a newer one has just replaced. */
+function retire(href: string | undefined): void {
+  if (href === undefined) return;
+  for (const link of document.querySelectorAll('link[rel="stylesheet"]')) {
+    if (link.getAttribute("href") === href) link.remove();
+  }
 }
 
 export async function activate(extension: InstalledExtension): Promise<Activation> {
@@ -281,7 +306,7 @@ export async function activate(extension: InstalledExtension): Promise<Activatio
   } catch (refused) {
     throw new ActivationFailure(
       id,
-      `Its code could not be loaded: ${refused instanceof Error ? refused.message : String(refused)}`,
+      `Its code could not be loaded: ${said(refused)}`,
     );
   }
 
@@ -298,7 +323,7 @@ export async function activate(extension: InstalledExtension): Promise<Activatio
   } catch (threw) {
     throw new ActivationFailure(
       id,
-      `It threw while starting: ${threw instanceof Error ? threw.message : String(threw)}`,
+      `It threw while starting: ${said(threw)}`,
     );
   }
 

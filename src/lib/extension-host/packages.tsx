@@ -14,6 +14,7 @@ import {
   installedExtensions,
   type InstalledExtension,
 } from "@/lib/extension-host/client";
+import { said } from "@/lib/refusal";
 
 /**
  * What is unpacked on this machine, read once and shared by everything that
@@ -66,7 +67,7 @@ export function usePackagesState(): Packages {
       setAll(await installedExtensions());
       setFailure(null);
     } catch (refused) {
-      setFailure(refused instanceof Error ? refused.message : String(refused));
+      setFailure(said(refused));
     } finally {
       setIsLoading(false);
     }

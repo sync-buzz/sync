@@ -22,7 +22,7 @@ use std::process::Command;
 use serde_json::json;
 use sync_memory::{
     DocumentEdits, ENTITY_KINDS, Entity, EntityKind, LaunchConfig, Link, MemoryClient, OWN_KINDS,
-    TYPE_KIND, type_definitions, type_record,
+    Operations as _, TYPE_KIND, type_definitions, type_record,
 };
 
 fn engine_binary() -> Option<PathBuf> {

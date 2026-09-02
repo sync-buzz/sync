@@ -26,6 +26,13 @@ thiserror = "2"
 [target.'cfg(target_os = "macos")'.dependencies]
 apple-native-keyring-store = { version = "1.0.2", features = ["keychain"] }
 
+# The same crate on the phone, and a different store, because iOS has only one:
+# the Protected Data keychain. The reason the Mac does not use it — that it
+# takes the entries out of Keychain Access, where a person looks at what Sync is
+# holding — does not arise there, since a phone has no such window either way.
+[target.'cfg(target_os = "ios")'.dependencies]
+apple-native-keyring-store = { version = "1.0.2", features = ["protected"] }
+
 [lints.rust]
 unsafe_code = "forbid"
 unused_must_use = "deny"

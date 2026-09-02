@@ -13,6 +13,7 @@ import {
 } from "@/lib/extension-host/client";
 import { usePackages } from "@/lib/extension-host/packages";
 import { cn } from "@/lib/utils";
+import { said } from "@/lib/refusal";
 
 /**
  * What this machine has unpacked, and what this project does with it.
@@ -83,7 +84,7 @@ export function useAddPackage(): {
           : installExtensionFolder(chosen));
         await packages.reload();
       } catch (refused) {
-        setFailure(refused instanceof Error ? refused.message : String(refused));
+        setFailure(said(refused));
       } finally {
         setBusy(false);
       }
@@ -119,7 +120,7 @@ export function useForgetPackage(): {
         await forgetExtension(id);
         await packages.reload();
       } catch (refused) {
-        setFailure(refused instanceof Error ? refused.message : String(refused));
+        setFailure(said(refused));
       } finally {
         setBusy(false);
       }
@@ -158,7 +159,7 @@ export function useActivationOutcomes(
         try {
           await activate(extension);
         } catch (refused) {
-          outcome = refused instanceof Error ? refused.message : String(refused);
+          outcome = said(refused);
         }
         if (!current) return;
         setOutcomes((all) => ({ ...all, [extension.manifest.id]: outcome }));

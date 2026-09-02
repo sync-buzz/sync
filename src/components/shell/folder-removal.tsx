@@ -12,6 +12,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { said } from "@/lib/refusal";
 
 /**
  * Deleting a folder, and everything filed under it.
@@ -109,7 +110,7 @@ function FolderRemoval({
       await onDelete(folder);
       onDone();
     } catch (refused) {
-      setFailure(refused instanceof Error ? refused.message : String(refused));
+      setFailure(said(refused));
       setBusy(false);
     }
   };

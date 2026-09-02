@@ -86,12 +86,143 @@ pub const ATTACH: &str = "project.attach";
 /// with no window anywhere.
 pub const ATTEND: &str = "host.attend";
 
+/// The call that hands the engine the secrets its network door will accept.
+///
+/// Only ever heard on the socket in the application's own directory. The set
+/// lives in the keychain, and one module of the application is the only thing
+/// that opens that — *how* a secret is kept and *who may ask for one* are kept
+/// two questions with two answers, and an engine reading it would be a second
+/// answer to the second. So the application reads it and states it here, and
+/// the door holds it in memory for as long as it is open.
+///
+/// Refused on the network door itself, and that is the point of naming it here
+/// rather than leaving it an ordinary operation: a device that could add a
+/// device would be a device that cannot be revoked.
+pub const REMOTE_DEVICES: &str = "remote.devices";
+
+/// The first thing a device says on the network door, before anything else.
+///
+/// It carries the secret the person's own machine minted when they paired that
+/// device. Nothing else on that connection is answered until it does, and a
+/// connection that has not said it within [`REMOTE_GREETING`] is closed.
+pub const REMOTE_HELLO: &str = "remote.hello";
+
+/// How long a network connection has to prove who it is.
+///
+/// A connection that has said nothing is costing this process a task, a buffer
+/// and a file descriptor for nothing, and the one caller this door exists for
+/// sends its first line immediately. Ten seconds is far longer than a phone on
+/// a bad connection needs and far shorter than a person would wait to notice.
+pub const REMOTE_GREETING: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// How long an established network connection may say nothing at all.
+///
+/// A phone whose screen went off stops speaking without closing anything, and
+/// the connection it leaves behind would otherwise be held until the process
+/// ends. Ten minutes, because reconnecting is cheap and a person coming back to
+/// a screen they left open should find it working.
+pub const REMOTE_IDLE: std::time::Duration = std::time::Duration::from_secs(600);
+
 /// What the engine asks the application to run, over [`ATTEND`].
 ///
 /// The one request that travels in that direction today. Named here beside the
 /// others because both ends spell it, and a name spelled twice is a name that
 /// gets renamed once.
 pub const TOOL_CALL: &str = "extension.tool";
+
+/// What a caller off this machine asks so that a package's request is made
+/// *here*, over [`ATTEND`].
+///
+/// The engine carries it and reads none of it. What a package may reach is a
+/// sentence in the manifest of the artefact installed on this machine, and the
+/// secret it signs with is in this machine's keychain — so both the check and
+/// the request belong on the machine the application is running on, and this
+/// name is the whole of the engine's part in it.
+///
+/// It is deliberately not the door for a package that wants a secret *in its
+/// hand*: there is no name here for that, and a build with no local Rust behind
+/// it is refused by there being nothing to call.
+pub const EXTENSION_FETCH: &str = "extension.fetch";
+
+/// Everything one package's artefact is, asked of the machine holding it.
+///
+/// A phone draws a package and has none of it on disk. It reads what is
+/// installed, it reads the files that make up the code, and it asks for a
+/// package to be installed or forgotten — and every one of those is a fact
+/// about the machine's artefact directory rather than about any project, which
+/// is why they travel this way rather than as operations of the surface.
+pub const EXTENSION_LIST: &str = "extension.list";
+/// One file inside one installed artefact, as bytes.
+pub const EXTENSION_FILE: &str = "extension.file";
+/// Download what the registry named and install it, on the machine.
+pub const EXTENSION_INSTALL: &str = "extension.install";
+/// Stop serving an id on the machine.
+pub const EXTENSION_FORGET: &str = "extension.forget";
+/// Point an id back at the artefact it was serving, which is how an update is
+/// rolled back.
+pub const EXTENSION_REPOINT: &str = "extension.repoint";
+/// What the registry says exists, fetched or from the cache beside it.
+pub const REGISTRY_INDEX: &str = "registry.index";
+/// What the last fetch left on the disk, asking nobody.
+pub const REGISTRY_CACHED: &str = "registry.cached";
+/// Every version one package has published.
+pub const REGISTRY_LEDGER: &str = "registry.ledger";
+
+/// Run the handler a package declared for an occasion, on the machine that
+/// holds it.
+///
+/// Taking an extension on is three steps in one order — publish its types, run
+/// this, write the declaration — and the middle one is a module evaluated in an
+/// isolate beside the artefact. A window that is not on that machine asks for it
+/// the same way it asks for anything else there.
+pub const EXTENSION_OCCASION: &str = "extension.occasion";
+
+/// What this installation decided about a project's clocks, as opposed to what
+/// the project declares.
+///
+/// Kept beside the artefacts rather than in the project's memory, because it is
+/// a decision about this machine: a clock runs where the packages are, and
+/// switching one off is somebody saying *not on this computer* rather than
+/// *not in this project*. So a phone reads and writes the computer's answer
+/// rather than keeping one of its own — there is nothing on a phone for a clock
+/// to run on.
+pub const SCHEDULE_REMEMBER: &str = "schedule.remember";
+/// Which of a project's clocks this machine has switched off.
+pub const SCHEDULE_OFF: &str = "schedule.off";
+/// Switch one clock on or off, on the machine that runs it.
+pub const SCHEDULE_SWITCH: &str = "schedule.switch";
+
+/// Whether a door carries this call to the application rather than answering
+/// it.
+///
+/// One list rather than a condition in each door, because two doors read it and
+/// they must agree: the engine's, which carries the call over [`ATTEND`], and
+/// the application's, which refuses by name anything it was not asked to
+/// answer. A name added to one and forgotten in the other is a call that
+/// arrives somewhere with nothing to run it.
+///
+/// Everything here is about the machine rather than about a project — an
+/// artefact on its disk, a registry it fetches, a secret in its keychain — so
+/// none of them is an [`Operation`](crate) and none of them names a project.
+#[must_use]
+pub fn carried(method: &str) -> bool {
+    matches!(
+        method,
+        EXTENSION_FETCH
+            | EXTENSION_LIST
+            | EXTENSION_FILE
+            | EXTENSION_INSTALL
+            | EXTENSION_FORGET
+            | EXTENSION_REPOINT
+            | REGISTRY_INDEX
+            | REGISTRY_CACHED
+            | REGISTRY_LEDGER
+            | EXTENSION_OCCASION
+            | SCHEDULE_REMEMBER
+            | SCHEDULE_OFF
+            | SCHEDULE_SWITCH
+    )
+}
 
 /// A bidirectional line-delimited JSON channel to the engine.
 ///

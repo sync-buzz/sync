@@ -52,6 +52,20 @@ serde = { version = "1", features = ["derive"] }
 # properties come back alphabetised, and the argument that answers "which
 # project" would sit wherever its name happens to fall.
 serde_json = { version = "1", features = ["preserve_order"] }
+# The door a phone comes through. QUIC with hole punching and a relay to fall
+# back on, so remote access is not "while you are on the same Wi-Fi" — and the
+# connection is encrypted and both ends authenticated by their keys before a
+# byte of the channel crosses it, which is what lets the pairing secret travel
+# on it at all. Hand-rolling this would be hand-rolling NAT traversal.
+iroh = "1.1"
+# What the network door says happened. `eprintln!` has no timestamp and no
+# level, and this door's lines are read after the fact by somebody asking when
+# a device connected and what was refused.
+tracing = "0.1"
+# The subscriber, in the sidecar only: without one every `tracing` line in this
+# process is computed and dropped. Writes to stderr, which the application
+# already collects into its log directory.
+tracing-subscriber = { version = "0.3", features = ["env-filter", "time"] }
 # `io-util` for the host socket's line framing, `net` for the socket itself.
 tokio = { version = "1", features = [
     "macros",

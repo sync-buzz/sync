@@ -47,6 +47,8 @@ use sync_handlers::{HandlerError, Host, Limits};
 use tauri::{AppHandle, Manager, Runtime};
 
 use crate::extensions::{asked_for, fetch_now, store};
+use sync_memory::Operations as _;
+
 use crate::memory::MemorySessions;
 use crate::vault::{VAULT_CAPABILITY, address, for_package_now};
 
@@ -403,27 +405,43 @@ pub async fn extension_handler_call<R: Runtime>(
     payload: Value,
 ) -> Result<Option<Value>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let installed = store(&app)?
-            .resolve(&id)
-            .map_err(|error| error.to_string())?
-            .ok_or_else(|| format!("`{id}` is not installed on this machine"))?;
-
-        // Resolved by the manifest rather than here, and that is what keeps the
-        // occasions one thing: an install, a clock and a tool an agent named
-        // are three callers asking *which function is this*, and asking it in
-        // three places is how one of them quietly gets a different answer. What
-        // this layer decides is who may ask, which is the division the crate
-        // boundary already draws.
-        //
-        // A package that declares nothing for an occasion is the ordinary case
-        // rather than a failure: most extensions want none of them.
-        let Some(handler) = installed.manifest.handler_for(&occasion) else {
-            return Ok(None);
-        };
-        run(&app, &installed, &project, handler, &payload).map(Some)
+        occasion_now(&app, &project, &id, &occasion, &payload)
     })
     .await
     .map_err(|error| format!("running the handler did not finish: {error}"))?
+}
+
+/// The handler for one occasion, on the thread the caller is already on.
+///
+/// Split from the command because a phone asks for the same thing over the
+/// channel: taking an extension on is the window publishing its types, running
+/// this, and writing the declaration — three steps in that order, wherever the
+/// window happens to be running.
+pub(crate) fn occasion_now<R: Runtime>(
+    app: &AppHandle<R>,
+    project: &str,
+    id: &str,
+    occasion: &str,
+    payload: &Value,
+) -> Result<Option<Value>, String> {
+    let installed = store(app)?
+        .resolve(id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("`{id}` is not installed on this machine"))?;
+
+    // Resolved by the manifest rather than here, and that is what keeps the
+    // occasions one thing: an install, a clock and a tool an agent named are
+    // three callers asking *which function is this*, and asking it in three
+    // places is how one of them quietly gets a different answer. What this
+    // layer decides is who may ask, which is the division the crate boundary
+    // already draws.
+    //
+    // A package that declares nothing for an occasion is the ordinary case
+    // rather than a failure: most extensions want none of them.
+    let Some(handler) = installed.manifest.handler_for(occasion) else {
+        return Ok(None);
+    };
+    run(app, &installed, project, handler, payload).map(Some)
 }
 
 /// Run one named handler of one package, for one project.

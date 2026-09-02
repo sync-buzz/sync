@@ -217,10 +217,23 @@ pub fn schedule_remember<R: Runtime>(
     project: String,
     extensions: Vec<String>,
 ) -> Result<(), ProjectError> {
+    remember_now(&app, &guard, &project, extensions)
+}
+
+/// The same, for a caller that has the application rather than a command's
+/// arguments — a phone, over the channel. A clock runs on the machine that has
+/// the packages, so what it is switched to is that machine's answer and there
+/// is only ever one of it.
+pub(crate) fn remember_now<R: Runtime>(
+    app: &AppHandle<R>,
+    guard: &ScheduleFile,
+    project: &str,
+    extensions: Vec<String>,
+) -> Result<(), ProjectError> {
     let _held = guard.0.lock().map_err(|_| poisoned())?;
-    let mut store = Store::read(&app);
-    store.remember(&project, extensions);
-    store.write(&app)
+    let mut store = Store::read(app);
+    store.remember(project, extensions);
+    store.write(app)
 }
 
 /// Which extensions' clocks are switched off in this project.
@@ -241,10 +254,18 @@ pub fn schedule_switched_off<R: Runtime>(
     guard: State<'_, ScheduleFile>,
     project: String,
 ) -> Result<Vec<String>, ProjectError> {
+    switched_off_now(&app, &guard, &project)
+}
+
+pub(crate) fn switched_off_now<R: Runtime>(
+    app: &AppHandle<R>,
+    guard: &ScheduleFile,
+    project: &str,
+) -> Result<Vec<String>, ProjectError> {
     let _held = guard.0.lock().map_err(|_| poisoned())?;
-    Ok(Store::read(&app)
+    Ok(Store::read(app)
         .state
-        .get(&project)
+        .get(project)
         .map(|state| state.off.clone())
         .unwrap_or_default())
 }
@@ -270,10 +291,20 @@ pub fn schedule_switch<R: Runtime>(
     id: String,
     on: bool,
 ) -> Result<(), ProjectError> {
+    switch_now(&app, &guard, &project, &id, on)
+}
+
+pub(crate) fn switch_now<R: Runtime>(
+    app: &AppHandle<R>,
+    guard: &ScheduleFile,
+    project: &str,
+    id: &str,
+    on: bool,
+) -> Result<(), ProjectError> {
     let _held = guard.0.lock().map_err(|_| poisoned())?;
-    let mut store = Store::read(&app);
-    store.switch(&project, &id, on);
-    store.write(&app)
+    let mut store = Store::read(app);
+    store.switch(project, id, on);
+    store.write(app)
 }
 
 fn poisoned() -> ProjectError {

@@ -375,15 +375,49 @@ fn a_stylesheet_crosses_to_the_window_as_a_url() {
         .cloned()
         .expect("the package this test just installed is in it");
 
-    assert_eq!(
-        entry["styles"].as_str(),
-        Some(format!("syncext://{DRAWS}/ui/index.css").as_str()),
+    // The URL is the window's only handle on the file, and it is built here so
+    // that the window never builds it itself.
+    let styles = entry["styles"].as_str().expect("a stylesheet URL: {entry}");
+    let module = entry["ui"].as_str().expect("a module URL: {entry}");
+    assert!(
+        styles.starts_with(&format!("syncext://{DRAWS}/ui/index.css?v=")),
         "the window never builds this string itself: {entry}"
     );
-    assert_eq!(
-        entry["ui"].as_str(),
-        Some(format!("syncext://{DRAWS}/ui/index.js").as_str()),
+    assert!(
+        module.starts_with(&format!("syncext://{DRAWS}/ui/index.js?v=")),
         "and the module is served the same way: {entry}"
+    );
+
+    // **A rebuilt file has to be a different URL**, and this is the assertion
+    // the whole token exists for. A webview memoises an ES module by its
+    // specifier: with one URL per package for ever, somebody writing an
+    // extension rebuilt it, saw nothing change, and had no way to tell that the
+    // window was still running the code it imported at launch. Nothing else in
+    // this suite would notice if the token stopped moving.
+    std::thread::sleep(std::time::Duration::from_millis(10));
+    write(
+        root.join("ui/index.js"),
+        "export default () => ({ probe: null });\n",
+    );
+
+    let again = invoke(&webview, "extension_list", json!({})).expect("the list reads again");
+    let rebuilt = again
+        .as_array()
+        .expect("a list")
+        .iter()
+        .find(|entry| entry["manifest"]["id"] == DRAWS)
+        .cloned()
+        .expect("still installed");
+
+    assert_ne!(
+        rebuilt["ui"].as_str(),
+        Some(module),
+        "a rebuilt module is a different URL, or the window goes on running the old one: {rebuilt}"
+    );
+    assert_eq!(
+        rebuilt["styles"].as_str(),
+        Some(styles),
+        "and a file nobody touched keeps its URL, so a section is not remounted for nothing: {rebuilt}"
     );
 
     invoke(&webview, "extension_forget", json!({ "id": DRAWS })).expect("it is forgotten");

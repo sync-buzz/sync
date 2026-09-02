@@ -12,6 +12,7 @@ import {
 } from "@/lib/extension-host/client";
 import type { Packages } from "@/lib/extension-host/packages";
 import { refuseIncompatible } from "@/lib/extension-api/version";
+import { said } from "@/lib/refusal";
 
 /**
  * What is newer than what a project is running, and whether it may be offered.
@@ -187,7 +188,7 @@ export function useLedger(id: string | null): Ledger {
           setAnswered({
             id,
             ledger: null,
-            failure: refused instanceof Error ? refused.message : String(refused),
+            failure: said(refused),
           });
         }
       },

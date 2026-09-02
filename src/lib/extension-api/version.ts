@@ -40,6 +40,19 @@ import { satisfies, valid, validRange } from "semver";
  * point of the number is that a manifest can state a range and be believed. The
  * cost is honest major bumps, which is the cost of meaning it.
  *
+ * **3.6.0** makes the published theme keep the promise it already stated. Its
+ * names are unchanged and no rule about them moved; what changed is what they
+ * are worth at paint. A size or a spacing step written as a number inside
+ * `@theme inline` is compiled *into* every utility that uses it, so `text-sm`
+ * became `12px` in the window and `12px` again inside every package — a value
+ * shipped, not a reference, and nothing on the document could move it
+ * afterwards. Colours never had the problem, because each of them was already
+ * written as a `var()`. Now the metrics are too, and a build that wants a
+ * different scale — a phone, or a person who reads at a different size —
+ * changes one place and every package follows with nothing rebuilt. A package
+ * built against 3.5 keeps the numbers it compiled, which is why this is a
+ * minor and not a break.
+ *
  * **3.5.0** is one field, and it is the field 3.4.0 needed and did not have.
  * `SessionRow` carries `project` beside `cwd`: whose conversation it is, and
  * where the agent is working. The two are the same until a conversation is held
@@ -511,7 +524,7 @@ import { satisfies, valid, validRange } from "semver";
  * `AreaModule`, `ActivationResult` — arrived in the same commit, which on its
  * own would have been a minor.
  */
-export const SYNC_API_VERSION = "3.5.0" as const;
+export const SYNC_API_VERSION = "3.6.0" as const;
 
 /**
  * What this build can do, as opposed to what its surface looks like.

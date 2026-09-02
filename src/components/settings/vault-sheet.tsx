@@ -12,6 +12,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import type { VaultEntry } from "@/lib/settings/vault";
+import { said } from "@/lib/refusal";
 
 /**
  * Putting a secret in, and replacing the one that is there.
@@ -112,7 +113,7 @@ function SecretForm({
       setSecret("");
       onDone();
     } catch (refused) {
-      setFailure(refused instanceof Error ? refused.message : String(refused));
+      setFailure(said(refused));
       setBusy(false);
     }
   };

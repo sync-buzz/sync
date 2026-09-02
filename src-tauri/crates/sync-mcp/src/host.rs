@@ -307,6 +307,28 @@ mod tests {
         assert_eq!(listed["projects"][0]["project"], "A");
     }
 
+    /// Every operation says what it does to the project, and the list that says
+    /// so is in the crate both clients read.
+    ///
+    /// The check is here rather than there because only this side knows what
+    /// the surface actually holds. A client off this machine replays a call
+    /// whose answer never arrived, and it may only do that for a call that
+    /// wrote nothing — so an operation added here and left out of that list is
+    /// a duplicate record on somebody's phone, arriving once in a while, with
+    /// nothing on either end saying why.
+    #[test]
+    fn every_operation_says_whether_it_writes() {
+        let unclassified: Vec<&str> = surface()
+            .methods()
+            .into_iter()
+            .filter(|method| sync_memory::effect(method).is_none())
+            .collect();
+        assert!(
+            unclassified.is_empty(),
+            "these operations are not named in `sync_memory::effect`: {unclassified:?}"
+        );
+    }
+
     /// A caller that states nothing is answered, and the answer is where it
     /// finds the number it did not send.
     #[test]

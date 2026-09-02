@@ -7,6 +7,7 @@ import {
   type FetchedRegistry,
   type ListedExtension,
 } from "@/lib/extension-host/client";
+import { said } from "@/lib/refusal";
 
 /**
  * What exists anywhere, as the window asks it.
@@ -85,7 +86,7 @@ export function useMarketplace(): Marketplace {
           setAnswered({
             attempt,
             fetched: null,
-            failure: refused instanceof Error ? refused.message : String(refused),
+            failure: said(refused),
           });
         }
       },

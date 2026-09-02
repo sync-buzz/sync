@@ -29,7 +29,7 @@ use std::process::Command;
 use std::process::Output;
 
 use serde::{Deserialize, Serialize};
-use sync_memory::{MemoryClient, ProjectSettings};
+use sync_memory::{MemoryClient, Operations as _, ProjectSettings};
 use tauri::{AppHandle, Manager, Runtime, State};
 
 use crate::memory::MemorySessions;

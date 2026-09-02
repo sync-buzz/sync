@@ -367,7 +367,20 @@ fn open_store() -> Result<Arc<CredentialStore>, VaultError> {
     Ok(store)
 }
 
-#[cfg(not(target_os = "macos"))]
+/// The phone's, and the only store it has.
+///
+/// Unconfigured on purpose: with no access group stated, an item goes to the
+/// application's own, which is the one thing on a phone that no other
+/// application can read. Naming a group here would widen that to whoever else
+/// is signed into the same group, and nothing asks for it.
+#[cfg(target_os = "ios")]
+fn open_store() -> Result<Arc<CredentialStore>, VaultError> {
+    let store: Arc<CredentialStore> =
+        apple_native_keyring_store::protected::Store::new().map_err(translate)?;
+    Ok(store)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "ios")))]
 fn open_store() -> Result<Arc<CredentialStore>, VaultError> {
     Err(VaultError::Nowhere)
 }
