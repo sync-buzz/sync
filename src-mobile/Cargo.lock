@@ -4798,7 +4798,7 @@ dependencies = [
 
 [[package]]
 name = "sync-mobile"
-version = "0.10.5"
+version = "0.11.0"
 dependencies = [
  "base64 0.22.1",
  "iroh",
