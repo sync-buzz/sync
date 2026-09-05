@@ -12,6 +12,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 
 import type {
   FolderProbe,
+  OpenProject,
   ProjectFailure,
   ProjectSettings,
   ProjectSettingsProbe,
@@ -165,6 +166,67 @@ export function loadProjectSettings(
   path: string,
 ): Promise<ProjectSettingsProbe> {
   return call<ProjectSettingsProbe>("project_settings_load", { project: path });
+}
+
+/**
+ * Open one registered project, having asked it what it calls itself.
+ *
+ * The registry's name is what a person chose from, and the project's own record
+ * is what the window is titled and addressed by afterwards — the same two the
+ * Mac's opening flow reads, minus every step of it that is about a directory.
+ *
+ * **Memory that would not answer is refused rather than opened.** A project's
+ * record is written whole, so a window holding an empty list of extensions
+ * because the memory was busy would, on the first install, take every other
+ * extension out of that project for everybody. No record at all is a different
+ * answer and an ordinary one: a registered repository that declares nothing.
+ *
+ * @throws ProjectError when the project's memory would not answer.
+ */
+export async function openRegistered(
+  key: string,
+  name: string,
+): Promise<OpenProject> {
+  const known = await loadProjectSettings(key);
+  if (known.memoryError !== null) {
+    // The computer's own words and no kind of ours. Nothing branches on this —
+    // what a person is shown is the sentence the memory refused with, where
+    // they asked for the project.
+    throw new Error(known.memoryError);
+  }
+  return {
+    ...(known.settings ?? {
+      name,
+      identifier: key,
+      description: "",
+      language: "en",
+      installed: [],
+    }),
+    path: key,
+  };
+}
+
+/**
+ * The project this phone was last looking at, and where it is written down.
+ *
+ * Only a phone has these: on a Mac a window is the application and a reload is
+ * something a person did, while here the system reloads the webview on its own
+ * — coming back from the background, or reclaiming the content process — and
+ * everything the window was holding goes with it. Which project somebody had
+ * open is the piece of that they would notice.
+ *
+ * The key and nothing else. What the project is called and what it declares are
+ * read from the computer the same way they are read when somebody taps a row,
+ * so a project renamed or removed while this phone was away is answered by the
+ * computer rather than out of a copy that went stale in a pocket.
+ */
+export function heldPlace(): Promise<string | null> {
+  return call<string | null>("place_held", {});
+}
+
+/** Write down where this phone is, or that it is nowhere. */
+export function holdPlace(project: string | null): Promise<void> {
+  return call<void>("place_hold", { project });
 }
 
 /** The projects this installation answers for. */

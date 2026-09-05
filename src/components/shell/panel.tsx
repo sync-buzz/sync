@@ -1,4 +1,9 @@
+"use client";
+
+import { createPortal } from "react-dom";
 import type { ReactNode } from "react";
+
+import { useBandSlot } from "@/lib/shell-bands";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 
@@ -38,7 +43,15 @@ export function PanelHeader({
   children?: ReactNode;
 }) {
   return (
-    <div className="flex h-(--panel-header-height) shrink-0 items-center justify-between gap-2 border-b border-separator pr-2 pl-3">
+    <div
+      // A band rather than the list, which is a distinction only the phone
+      // reads: there the column is a screen, and tapping something in the list
+      // goes on to the workspace while tapping a control in a band stays put.
+      // Marked on the band rather than on every row, because a package brings
+      // its own rows and the bands are the shell's.
+      data-panel-band="true"
+      className="flex h-(--panel-header-height) shrink-0 items-center justify-between gap-2 border-b border-separator pr-2 pl-3"
+    >
       <h2 className="truncate text-sm font-semibold text-fg-secondary">
         {title}
       </h2>
@@ -77,8 +90,16 @@ export function PanelBody({
  * it.
  */
 export function PanelFooter({ children }: { children: ReactNode }) {
+  // Offered a band of its own — a phone's — the controls go there instead. What
+  // they are and what they do is untouched; only where they stand differs.
+  const band = useBandSlot();
+  if (band !== null) return createPortal(children, band);
+
   return (
-    <div className="flex h-(--panel-header-height) shrink-0 items-center gap-1 border-t border-separator px-1.5">
+    <div
+      data-panel-band="true"
+      className="flex h-(--panel-header-height) shrink-0 items-center gap-1 border-t border-separator px-1.5"
+    >
       {children}
     </div>
   );

@@ -21,9 +21,9 @@
 use serde_json::{Value, json};
 
 use crate::dto::{
-    ContentView, EntityInput, FetchOutcome, FolderEntry, Handshake, Listing, MemoryPresence,
-    ModelStatus, ProjectSettings, RecordView, ScanOutcome, SearchOutcome, SyncState,
-    TransactionResult, TransportStatus,
+    ContentView, EntityInput, FetchOutcome, FolderAttachment, FolderEntry, Handshake, Listing,
+    MemoryPresence, ModelStatus, ProjectSettings, RecordView, ScanOutcome, SearchOutcome,
+    SyncState, TransactionResult, TransportStatus, TypeRemoval,
 };
 use crate::error::{MemoryError, Result};
 use crate::mapping::{Dependents, Document, DocumentEdits, RecordType, RecordsPage};
@@ -87,7 +87,16 @@ pub fn effect(method: &str) -> Option<Effect> {
         | crate::REGISTRY_INDEX
         | crate::REGISTRY_CACHED
         | crate::REGISTRY_LEDGER
-        | crate::SCHEDULE_OFF => Effect::Reads,
+        | crate::SCHEDULE_OFF
+        // What is running, what could be run, and what one conversation has
+        // already said. Asking twice answers the same question twice: none of
+        // them raises a process or says a word into one.
+        | crate::SESSION_CATALOG
+        | crate::SESSION_LIVE
+        | crate::SESSION_REMEMBERED
+        | crate::SESSION_FOR_RECORD
+        | crate::SESSION_BACKLOG
+        | crate::AGENT_ADAPTERS => Effect::Reads,
         "documents.create"
         | "documents.create_file"
         | "documents.move"
@@ -133,7 +142,35 @@ pub fn effect(method: &str) -> Option<Effect> {
         // business. Nothing here may decide that asking again is free.
         | crate::EXTENSION_OCCASION
         | crate::SCHEDULE_REMEMBER
-        | crate::SCHEDULE_SWITCH => Effect::Writes,
+        | crate::SCHEDULE_SWITCH
+        // Talking to an agent, where replaying a call that may already have
+        // arrived is the failure this list exists to prevent: a prompt sent
+        // twice is a turn run twice, and an answer to a permission question
+        // asked again is a second answer to a question already settled.
+        //
+        // The quieter ones are here for the same reason rather than for their
+        // own. Opening and resuming raise a process; renaming, cancelling,
+        // closing and forgetting change what a person will find in the list;
+        // choosing a mode or an option is a message to the agent. A watch is
+        // one too: asked again it is a second watch, which is why a device that
+        // lost its connection says so deliberately, from the sequence number it
+        // stopped at, rather than having it replayed underneath it.
+        | crate::SESSION_OPEN
+        | crate::SESSION_PROMPT
+        | crate::SESSION_RESUME
+        | crate::SESSION_FORGET_REMEMBERED
+        | crate::SESSION_RENAME
+        | crate::SESSION_CANCEL
+        | crate::SESSION_CLOSE
+        | crate::SESSION_FORGET
+        | crate::SESSION_KEPT_AS
+        | crate::SESSION_SET_MODE
+        | crate::SESSION_SET_OPTION
+        | crate::SESSION_PERMISSION_RESPOND
+        | crate::SESSION_SUBSCRIBE
+        | crate::SESSION_UNSUBSCRIBE
+        | crate::AGENT_ADAPTERS_PREPARE
+        | crate::AGENT_ADAPTERS_FORGET => Effect::Writes,
         _ => return None,
     })
 }
@@ -1061,6 +1098,136 @@ pub trait Operations {
         let answer = self.request("project.reconcile", &json!({"full_rebuild": full_rebuild}))?;
         Ok(answer)
     }
+
+    // ── Sequences ───────────────────────────────────────────────────────────
+    //
+    // Some of what the window asks for is not one operation but a short,
+    // fixed order of them: write, then read back what the writing produced.
+    // The order is a decision — that the window is answered with what is now
+    // true rather than with a receipt — and it belongs beside the operations
+    // rather than beside either caller.
+    //
+    // Written here for the reason the vocabulary above is: **there are two
+    // clients.** A sequence spelled out at each of them is a sequence that can
+    // disagree with itself, and it did. The phone answered a save with the
+    // transaction's receipt where the Mac answered with the record, so the
+    // window read a title off a receipt, found none, and the screen went out
+    // from under whoever was typing. Nothing in either signature said so.
+
+    /// Change a record, and answer with the record as it now stands.
+    ///
+    /// The read is not a nicety: the engine applies a patch to the stored
+    /// record, so what a save produces is knowable only by asking. A caller
+    /// given the receipt would have to ask anyway, and the one that forgot
+    /// would draw the record it sent instead of the record that exists.
+    ///
+    /// # Errors
+    ///
+    /// Returns the engine failure from either step.
+    fn document_after_update(
+        &mut self,
+        key: &str,
+        edits: &DocumentEdits,
+    ) -> Result<Option<Document>> {
+        self.update_document(key, edits)?;
+        self.document(key)
+    }
+
+    /// Add a type, and answer with the corpus it now belongs to.
+    ///
+    /// # Errors
+    ///
+    /// Returns the engine failure from either step.
+    fn types_after_create(
+        &mut self,
+        kind: &str,
+        title: &str,
+        description: &str,
+        icon: &str,
+    ) -> Result<Vec<RecordType>> {
+        self.create_type(kind, title, description, icon)?;
+        self.list_types()
+    }
+
+    /// Change a type, and answer with the corpus it belongs to.
+    ///
+    /// # Errors
+    ///
+    /// Returns the engine failure from either step.
+    fn types_after_update(
+        &mut self,
+        kind: &str,
+        title: &str,
+        description: &str,
+        icon: &str,
+    ) -> Result<Vec<RecordType>> {
+        self.update_type(kind, title, description, icon)?;
+        self.list_types()
+    }
+
+    /// Remove a type and everything written as it, and say what that cost.
+    ///
+    /// # Errors
+    ///
+    /// Returns the engine failure from either step.
+    fn types_after_delete(&mut self, kind: &str) -> Result<TypeRemoval> {
+        let removed = self.delete_type(kind)?;
+        Ok(TypeRemoval {
+            types: self.list_types()?,
+            removed,
+        })
+    }
+
+    /// Publish an extension's types, and answer with the corpus they joined.
+    ///
+    /// # Errors
+    ///
+    /// Returns the engine failure from either step.
+    fn types_after_publishing(&mut self, types: &Value) -> Result<Vec<RecordType>> {
+        self.publish_extension_types(types)?;
+        self.list_types()
+    }
+
+    /// Attach a folder, and answer with both halves of what that did.
+    ///
+    /// # Errors
+    ///
+    /// Returns the engine failure from either step.
+    fn folder_attachment(
+        &mut self,
+        kind: &str,
+        title: &str,
+        description: &str,
+        icon: &str,
+        folder: &str,
+    ) -> Result<FolderAttachment> {
+        let scan = self.attach_folder(kind, title, description, icon, folder)?;
+        Ok(FolderAttachment {
+            types: self.list_types()?,
+            scan,
+        })
+    }
+
+    /// Answer what a file was, then reconcile the folders it belongs to.
+    ///
+    /// The scan is the second half rather than a separate ask: resolving one
+    /// unmatched file can settle others — a rename answered is a rename no
+    /// longer offered — and a window left holding the old list would offer a
+    /// person a question that has already been answered.
+    ///
+    /// # Errors
+    ///
+    /// Returns the engine failure from either step.
+    fn scan_after_resolving(
+        &mut self,
+        locator: &str,
+        content_hash: &str,
+        kind: &str,
+        adopt: Option<&str>,
+    ) -> Result<ScanOutcome> {
+        self.resolve_unmatched(locator, content_hash, kind, adopt)?;
+        self.scan()
+    }
 }
 
 /// Read an answer into the shape its operation promises.
@@ -1075,7 +1242,159 @@ pub(crate) fn parse<T: serde::de::DeserializeOwned>(value: Value) -> Result<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Effect, effect};
+    #![allow(clippy::expect_used)]
+
+    /// Every call of the session family says what it does to the machine.
+    ///
+    /// The same check the engine makes of its own operations, made here because
+    /// nothing on that side ever sees these: they are carried past the surface
+    /// to the application, so a name added to the channel and forgotten in the
+    /// list above would be a call a phone that lost its network decides about
+    /// by falling through to *unknown*. That is safe by construction — unknown
+    /// is treated as a write — and it is safe by luck rather than by anybody
+    /// having thought about it, which is what this turns into a red build.
+    #[test]
+    fn every_call_about_a_session_says_whether_it_writes() {
+        let unclassified: Vec<&str> = crate::protocol::SESSIONS
+            .iter()
+            .copied()
+            .filter(|method| effect(method).is_none())
+            .collect();
+        assert!(
+            unclassified.is_empty(),
+            "these are not named in `effect`: {unclassified:?}"
+        );
+    }
+
+    /// And every one of them is carried rather than dispatched.
+    ///
+    /// Two doors read that list — the engine's, which hands the call to the
+    /// application, and the application's, which refuses by name anything it
+    /// was not asked to answer. A session call missing from it reaches the
+    /// engine's surface instead, where there is no operation by that name and
+    /// nothing to raise an agent with.
+    #[test]
+    fn every_call_about_a_session_is_carried_to_the_application() {
+        for method in crate::protocol::SESSIONS {
+            assert!(
+                crate::carried(method),
+                "`{method}` would be dispatched at the engine, which cannot answer it"
+            );
+        }
+    }
+
+    /// The five that name a project are five of the family and not a sixth set.
+    #[test]
+    fn only_calls_of_the_family_name_a_project() {
+        for method in crate::protocol::SESSIONS
+            .iter()
+            .filter(|method| crate::names_a_project(method))
+        {
+            assert!(crate::about_a_session(method), "{method}");
+        }
+        assert!(!crate::names_a_project(crate::SESSION_PROMPT));
+        assert!(crate::names_a_project(crate::SESSION_OPEN));
+    }
+
+    use serde_json::{Value, json};
+
+    use super::{Effect, Operations, effect};
+    use crate::mapping::DocumentEdits;
+
+    /// A machine that answers in order and remembers what it was asked.
+    struct Heard {
+        asked: std::cell::RefCell<Vec<String>>,
+        answers: std::cell::RefCell<std::collections::VecDeque<Value>>,
+    }
+
+    impl Heard {
+        fn answering(answers: Vec<Value>) -> Self {
+            Self {
+                asked: std::cell::RefCell::new(Vec::new()),
+                answers: std::cell::RefCell::new(answers.into()),
+            }
+        }
+
+        fn order(&self) -> Vec<String> {
+            self.asked.borrow().clone()
+        }
+    }
+
+    impl Operations for Heard {
+        fn request(&mut self, method: &str, _params: &Value) -> crate::Result<Value> {
+            self.asked.borrow_mut().push(method.to_owned());
+            Ok(self.answers.borrow_mut().pop_front().unwrap_or(Value::Null))
+        }
+    }
+
+    /// A save answers with the record, and the read is what makes that true.
+    ///
+    /// The order is the claim. Both clients call this one function, so a
+    /// sequence that is right here is right on a Mac and on a phone — which is
+    /// the whole reason it is here rather than at either of them.
+    #[test]
+    fn a_save_writes_and_then_reads_the_record_back() {
+        // A whole record rather than the two members this asserts on: the
+        // engine's own shape is what the read has to survive, and a body that
+        // parses only because the test was lenient would prove nothing about
+        // the answer a window is handed.
+        let record = json!({
+            "key": "k",
+            "kind": "note",
+            "title": "A title",
+            "content": "",
+            "freshness": "unverified",
+            "scope": [],
+            "observed": [],
+            "tags": [],
+            "links": [],
+            "archived": false,
+            "fields": {},
+            "contentBinary": false,
+            "contentMissing": false,
+            "isFolder": false,
+            "presence": "present",
+        });
+        let mut heard = Heard::answering(vec![json!({"revision": "a", "written": []}), record]);
+
+        let document = heard
+            .document_after_update("k", &DocumentEdits::default())
+            .expect("the engine answered");
+
+        assert_eq!(heard.order(), ["documents.update", "documents.get"]);
+        assert_eq!(
+            document.expect("a record came back").title,
+            "A title",
+            "a window draws the record, so a receipt in its place is a window with no title to draw"
+        );
+    }
+
+    /// Removing a type answers with the corpus and with what it cost.
+    #[test]
+    fn removing_a_type_answers_with_the_corpus_and_the_count() {
+        let mut heard = Heard::answering(vec![json!(7), json!([])]);
+
+        let removal = heard
+            .types_after_delete("note")
+            .expect("the engine answered");
+
+        assert_eq!(heard.order(), ["types.delete", "types.list"]);
+        assert_eq!(removal.removed, 7);
+        assert!(removal.types.is_empty());
+    }
+
+    /// Attaching a folder answers with both halves of what it did.
+    #[test]
+    fn attaching_a_folder_answers_with_the_types_and_the_scan() {
+        let mut heard = Heard::answering(vec![json!({"scanned": 3, "applied": 3}), json!([])]);
+
+        let attached = heard
+            .folder_attachment("doc", "Doc", "", "File", "docs")
+            .expect("the engine answered");
+
+        assert_eq!(heard.order(), ["types.attach_folder", "types.list"]);
+        assert_eq!(attached.scan.scanned, 3);
+    }
 
     /// Every call a door carries to the application says what it does.
     ///

@@ -31,6 +31,7 @@ mod published;
 mod remote;
 mod server;
 mod socket;
+mod watching;
 
 type Fallible = Result<(), Box<dyn std::error::Error>>;
 
@@ -257,7 +258,12 @@ fn serve_http(
             // be closed and the other still needs the handle, so it is made
             // here rather than by either.
             let devices = std::sync::Arc::new(remote::Devices::default());
-            open_to_devices(&host, &application, &devices);
+            // Held by both doors for the same reason `devices` is, and for one
+            // of its own: a watch is minted on the connection a device asked
+            // on, and the events for it arrive on the *other* door — the
+            // application's. One register, or an event has nowhere to go.
+            let subscriptions = std::sync::Arc::new(watching::Subscriptions::default());
+            open_to_devices(&host, &application, &devices, &subscriptions);
             // **The agents' door goes in the background, and the host door is
             // the one this process lives on.** The port is fixed, written into
             // every agent's configuration, and therefore collidable — and Sync
@@ -270,7 +276,7 @@ fn serve_http(
                     tracing::error!(%error, "the agents' door did not open");
                 }
             });
-            socket::serve(host, application, devices, path)
+            socket::serve(host, application, devices, subscriptions, path)
                 .await
                 .map_err(Into::into)
         })
@@ -289,6 +295,7 @@ fn open_to_devices(
     host: &std::sync::Arc<host::Host>,
     application: &std::sync::Arc<application::Application>,
     devices: &std::sync::Arc<remote::Devices>,
+    subscriptions: &std::sync::Arc<watching::Subscriptions>,
 ) {
     let Ok(stated) = std::env::var(sync_memory::REMOTE_KEY_VARIABLE) else {
         return;
@@ -303,8 +310,9 @@ fn open_to_devices(
     let host = std::sync::Arc::clone(host);
     let application = std::sync::Arc::clone(application);
     let devices = std::sync::Arc::clone(devices);
+    let subscriptions = std::sync::Arc::clone(subscriptions);
     tokio::spawn(async move {
-        if let Err(error) = remote::serve(host, application, devices, key).await {
+        if let Err(error) = remote::serve(host, application, devices, subscriptions, key).await {
             tracing::error!(%error, "the network door did not open");
         }
     });

@@ -29,9 +29,20 @@ import { cn } from "@/lib/utils";
 export function SyncIndicator({
   sync,
   onOpen,
+  className,
 }: {
   sync: SyncStatus;
   onOpen: () => void;
+  /**
+   * What the band it is in makes of it — a height and a size of type.
+   *
+   * The sentence, the colour and the silence are this component's and are not
+   * offered: they are what the state *is*, and a caller that could change them
+   * would be a second place deciding what memory being behind looks like. What
+   * a caller does decide is the room it has, and a phone's band is a different
+   * size from a Mac's.
+   */
+  className?: string;
 }) {
   const said = sentence(sync);
   if (!said) return null;
@@ -50,6 +61,7 @@ export function SyncIndicator({
       className={cn(
         "min-w-0 text-xs font-normal",
         overwrote ? "text-warning" : "text-fg-tertiary",
+        className,
       )}
     >
       <span className="truncate">{said}</span>

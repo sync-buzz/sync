@@ -42,6 +42,7 @@ use sync_memory::{MAX_FRAME_BYTES, REMOTE_GREETING, REMOTE_HELLO, REMOTE_IDLE};
 use crate::application::Application;
 use crate::host::Host;
 use crate::socket::{Frame, Frames, Naming, attend_read, refusal, write};
+use crate::watching::Subscriptions;
 
 /// What this door is called when two ends agree what they are speaking.
 ///
@@ -239,13 +240,14 @@ pub(crate) async fn serve(
     host: Arc<Host>,
     application: Arc<Application>,
     devices: Arc<Devices>,
+    subscriptions: Arc<Subscriptions>,
     key: SecretKey,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let endpoint = bound(key).await?;
     let identity = endpoint.id().to_string();
     devices.identified(&identity);
     tracing::info!(endpoint = %identity, "the network door is open");
-    attending(host, application, devices, endpoint).await;
+    attending(host, application, devices, subscriptions, endpoint).await;
     Ok(())
 }
 
@@ -269,12 +271,14 @@ async fn attending(
     host: Arc<Host>,
     application: Arc<Application>,
     devices: Arc<Devices>,
+    subscriptions: Arc<Subscriptions>,
     endpoint: Endpoint,
 ) {
     while let Some(incoming) = endpoint.accept().await {
         let host = Arc::clone(&host);
         let application = Arc::clone(&application);
         let devices = Arc::clone(&devices);
+        let subscriptions = Arc::clone(&subscriptions);
         // Per connection, for the reason the socket spawns per connection: one
         // device's call must not be behind another's.
         tokio::spawn(async move {
@@ -288,7 +292,9 @@ async fn attending(
                 }
             };
             let who = connection.remote_id().to_string();
-            if let Err(error) = admit(&host, &application, &devices, connection).await {
+            if let Err(error) =
+                admit(&host, &application, &devices, &subscriptions, connection).await
+            {
                 // Ended is ordinary — a phone put away, a network changed — so
                 // the reason is what makes the line worth writing.
                 tracing::info!(device = %who, %error, "a device's connection ended");
@@ -302,6 +308,7 @@ async fn admit(
     host: &Arc<Host>,
     application: &Arc<Application>,
     devices: &Arc<Devices>,
+    subscriptions: &Arc<Subscriptions>,
     connection: iroh::endpoint::Connection,
 ) -> io::Result<()> {
     let who = connection.remote_id().to_string();
@@ -355,6 +362,7 @@ async fn admit(
         host,
         application,
         devices,
+        subscriptions,
         lines.patience(REMOTE_IDLE),
         writing,
         &Naming { by_path: false },
@@ -429,6 +437,7 @@ mod tests {
             host,
             Arc::new(Application::new()),
             Arc::clone(&devices),
+            Arc::new(Subscriptions::default()),
             door,
         ));
 

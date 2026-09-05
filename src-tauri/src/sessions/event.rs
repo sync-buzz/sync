@@ -47,16 +47,6 @@ pub enum Status {
     Ready,
     /// A turn is running: the agent is working.
     Working,
-    /// A turn has been said into it and is waiting its turn to run.
-    ///
-    /// The one state a delegated conversation has that an ordinary one cannot:
-    /// a conversation has one delegated run under it at a time
-    /// ([`crate::work::delegated`]), so the second one's first turn is recorded,
-    /// visible, and not yet started. It is a word of its own rather than
-    /// [`Self::Working`] because the wait is as long as the run above it — an
-    /// hour of a row saying an agent is working when no agent has been asked
-    /// anything is the kind of lie nobody catches.
-    Queued,
     /// The agent is waiting for an answer to a permission request.
     Asking,
     /// It ended by itself, or its process died.

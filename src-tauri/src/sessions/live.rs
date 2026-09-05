@@ -252,6 +252,24 @@ pub struct Session {
     process: tokio::sync::Mutex<Option<AgentProcess>>,
 }
 
+/// Something being shown a conversation as it happens, from off this machine.
+///
+/// A trait with one method because the thing on the other side of it is not a
+/// window: it is a device, reached through the engine's channel, and the only
+/// question this file may ask of it is whether it is still there. What a window
+/// on *this* machine gets is next door in [`State::sink`], a Tauri channel, and
+/// the two are deliberately not one type — a window is addressed by the
+/// runtime and a device by a number this machine minted, and merging them would
+/// mean inventing a name for whichever half the caller is not.
+pub trait Watcher: Send + Sync {
+    /// Show it one event, and say whether it is still worth showing more.
+    ///
+    /// `false` is the device having gone. It is not a failure and nothing is
+    /// reported: a phone put in a pocket is the ordinary end of a watch, and
+    /// the session drops it and goes on.
+    fn saw(&self, event: &SessionEvent) -> bool;
+}
+
 #[derive(Default)]
 struct State {
     status: Status,
@@ -261,6 +279,20 @@ struct State {
     next_seq: u64,
     next_request_id: u64,
     sink: Option<Channel<SessionEvent>>,
+    /// Everybody off this machine watching this conversation, by the number
+    /// the engine's door minted for each watch.
+    ///
+    /// **Beside [`Self::sink`] rather than instead of it, and a map rather than
+    /// one more slot.** The sink is replaced on every subscription because one
+    /// screen at a time reads a session and a second subscription is that
+    /// screen remounting — which is true of a window and false of everything
+    /// else. A phone is not that screen remounting: somebody glancing at a
+    /// conversation from the next room would have taken the live view away from
+    /// the machine it is running on, and left a window that goes quiet with
+    /// nothing to say why. Two phones are two watches for the same reason, and
+    /// a phone that reconnected before its last watch was noticed gone is a
+    /// third.
+    watchers: HashMap<u64, Arc<dyn Watcher>>,
     open_questions: HashMap<u64, oneshot::Sender<Option<schema::PermissionOptionId>>>,
     connection: Option<Arc<AgentConnection>>,
     acp_session: Option<schema::SessionId>,
@@ -491,6 +523,52 @@ impl Session {
         self.locked().sink = None;
     }
 
+    /// The same, for somebody watching from off this machine.
+    ///
+    /// Two things make it its own method rather than an argument to the one
+    /// above. It is added rather than substituted, for the reason
+    /// [`State::watchers`] gives. And it starts where the watcher stopped:
+    /// `since` is the last sequence number that watcher has already been shown,
+    /// and everything at or below it is not replayed.
+    ///
+    /// **That is what makes a connection dropping cost nothing.** A device whose
+    /// network went is not holding a subscription any more, so it asks for
+    /// another one — and without `since` the conversation would arrive a second
+    /// time, into a transcript that already holds it. The device knows where it
+    /// stopped and nothing else does, so it is the device that says.
+    ///
+    /// Answers with how many events had already fallen off the front of the
+    /// history, exactly as a window is told: a transcript that quietly begins in
+    /// the middle reads as the whole of it whichever screen is reading.
+    pub fn watch(&self, subscription: u64, watcher: &Arc<dyn Watcher>, since: Option<u64>) -> u64 {
+        let (backlog, dropped) = {
+            let mut state = self.locked();
+            state.watchers.insert(subscription, Arc::clone(watcher));
+            (state.history.clone(), state.dropped)
+        };
+        for event in backlog {
+            if since.is_some_and(|seen| event.seq() <= seen) {
+                continue;
+            }
+            if !watcher.saw(&event) {
+                self.locked().watchers.remove(&subscription);
+                break;
+            }
+        }
+        dropped
+    }
+
+    /// Stop showing this conversation to one watcher off this machine.
+    ///
+    /// By the number rather than by the session, because a conversation may
+    /// have several and letting go of the wrong one is letting go of somebody
+    /// else's screen. A number nothing holds is not a failure: it is what a
+    /// device asking twice looks like, and what the engine saying a connection
+    /// ended looks like when the device had already said so.
+    pub fn stop_watching(&self, subscription: u64) {
+        self.locked().watchers.remove(&subscription);
+    }
+
     /// Everything this session has said, without watching it say any more.
     ///
     /// The same backlog [`Self::subscribe`] replays and the same count of what
@@ -503,9 +581,9 @@ impl Session {
         (state.history.clone(), state.dropped)
     }
 
-    /// Records an event and forwards it to whoever is watching.
+    /// Records an event and forwards it to everybody watching.
     fn emit(&self, build: impl FnOnce(u64, u64) -> SessionEvent) {
-        let (event, sink) = {
+        let (event, sink, watchers) = {
             let mut state = self.locked();
             let seq = state.next_seq;
             state.next_seq += 1;
@@ -516,10 +594,23 @@ impl Session {
                 state.history.drain(..excess);
                 state.dropped += excess as u64;
             }
-            (event, state.sink.clone())
+            let watchers: Vec<(u64, Arc<dyn Watcher>)> = state
+                .watchers
+                .iter()
+                .map(|(at, watcher)| (*at, Arc::clone(watcher)))
+                .collect();
+            (event, state.sink.clone(), watchers)
         };
         if let Some(sink) = sink {
-            let _ = sink.send(event);
+            let _ = sink.send(event.clone());
+        }
+        // Outside the lock, because a watcher writes into a socket and holding
+        // this session's state while it does would put every other caller
+        // behind whoever has the slowest network.
+        for (subscription, watcher) in watchers {
+            if !watcher.saw(&event) {
+                self.locked().watchers.remove(&subscription);
+            }
         }
     }
 
@@ -1066,6 +1157,19 @@ impl Sessions {
         self.locked().values().cloned().collect()
     }
 
+    /// Let go of one watch, wherever it is.
+    ///
+    /// Across every session rather than one, because a number is all the caller
+    /// has: the engine says a device's connection ended and names what it held,
+    /// and which conversation each of those was watching is a fact this side
+    /// never wrote down. Walking a handful of sessions to drop one entry costs
+    /// nothing and saves keeping a second index in step with the first.
+    pub fn stop_watching(&self, subscription: u64) {
+        for session in self.all() {
+            session.stop_watching(subscription);
+        }
+    }
+
     fn locked(&self) -> std::sync::MutexGuard<'_, HashMap<String, Arc<Session>>> {
         self.inner
             .lock()
@@ -1127,6 +1231,165 @@ mod tests {
             None,
             None,
         )
+    }
+
+    /// A watcher that writes down what it was shown, and can be told to have
+    /// gone.
+    struct Somewhere {
+        saw: Mutex<Vec<u64>>,
+        there: std::sync::atomic::AtomicBool,
+    }
+
+    impl Somewhere {
+        fn watching() -> Arc<Self> {
+            Arc::new(Self {
+                saw: Mutex::new(Vec::new()),
+                there: std::sync::atomic::AtomicBool::new(true),
+            })
+        }
+
+        fn seen(&self) -> Vec<u64> {
+            self.saw
+                .lock()
+                .unwrap_or_else(|held| held.into_inner())
+                .clone()
+        }
+    }
+
+    impl Watcher for Somewhere {
+        fn saw(&self, event: &SessionEvent) -> bool {
+            if !self.there.load(Ordering::SeqCst) {
+                return false;
+            }
+            self.saw
+                .lock()
+                .unwrap_or_else(|held| held.into_inner())
+                .push(event.seq());
+            true
+        }
+    }
+
+    /// A device watching a conversation does not take the live view away from
+    /// the machine running it.
+    ///
+    /// The failure this stops is quiet and would read as a defect in the
+    /// window: somebody glances at a conversation from the next room, and the
+    /// screen they left at their desk stops moving with nothing anywhere saying
+    /// why. The desktop's own sink is replaced on every subscription because
+    /// one screen at a time reads a session — which is true of a window and
+    /// false of a phone.
+    #[test]
+    fn a_device_watching_does_not_replace_the_window_watching() {
+        let session = session();
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let writing = Arc::clone(&heard);
+        session.subscribe(Channel::new(move |_| {
+            writing
+                .lock()
+                .unwrap_or_else(|held| held.into_inner())
+                .push(());
+            Ok(())
+        }));
+        let phone: Arc<dyn Watcher> = Somewhere::watching();
+        session.watch(1, &phone, None);
+
+        session.set_status(Status::Working, None);
+
+        assert_eq!(
+            heard.lock().unwrap_or_else(|held| held.into_inner()).len(),
+            1,
+            "the window at the desk stopped hearing its own conversation"
+        );
+    }
+
+    /// Two devices are two watches, and both are shown everything.
+    #[test]
+    fn two_devices_are_two_watches() {
+        let session = session();
+        let first = Somewhere::watching();
+        let second = Somewhere::watching();
+        let one: Arc<dyn Watcher> = Arc::clone(&first) as Arc<dyn Watcher>;
+        let two: Arc<dyn Watcher> = Arc::clone(&second) as Arc<dyn Watcher>;
+        session.watch(1, &one, None);
+        session.watch(2, &two, None);
+
+        session.set_status(Status::Working, None);
+
+        assert_eq!(first.seen().len(), 1);
+        assert_eq!(second.seen().len(), 1);
+    }
+
+    /// A watch taken again begins where that watcher stopped.
+    ///
+    /// This is what makes a connection dropping cost a person nothing. The
+    /// conversation went on running while the phone was away, so what it wants
+    /// back is what was said meanwhile — and the window's own fold appends
+    /// rather than replaces, so a full replay would write everything the person
+    /// had already read a second time, below itself.
+    #[test]
+    fn a_watch_taken_again_replays_only_what_was_missed() {
+        let session = session();
+        for _ in 0..4 {
+            session.emit(|seq, at_ms| SessionEvent::Status {
+                seq,
+                at_ms,
+                status: Status::Working,
+                detail: None,
+            });
+        }
+
+        let phone = Somewhere::watching();
+        let watching: Arc<dyn Watcher> = Arc::clone(&phone) as Arc<dyn Watcher>;
+        session.watch(9, &watching, Some(1));
+
+        assert_eq!(
+            phone.seen(),
+            vec![2, 3],
+            "the phone was shown what it had already read"
+        );
+    }
+
+    /// A watcher with nothing behind it is let go of rather than written to for
+    /// ever.
+    ///
+    /// A phone in a pocket is the ordinary end of a watch. Without this the
+    /// conversation goes on serialising every word its agent writes for a
+    /// device that is not there — for as long as the conversation runs.
+    #[test]
+    fn a_watcher_that_has_gone_stops_being_written_to() {
+        let session = session();
+        let phone = Somewhere::watching();
+        let watching: Arc<dyn Watcher> = Arc::clone(&phone) as Arc<dyn Watcher>;
+        session.watch(1, &watching, None);
+
+        phone.there.store(false, Ordering::SeqCst);
+        session.set_status(Status::Working, None);
+        phone.there.store(true, Ordering::SeqCst);
+        session.set_status(Status::Ready, None);
+
+        assert!(
+            phone.seen().is_empty(),
+            "the session went on writing to a device that had gone: {:?}",
+            phone.seen()
+        );
+    }
+
+    /// Letting go of a watch by its number leaves the others where they were.
+    #[test]
+    fn one_watch_is_let_go_of_and_the_rest_stay() {
+        let session = session();
+        let staying = Somewhere::watching();
+        let leaving = Somewhere::watching();
+        let one: Arc<dyn Watcher> = Arc::clone(&staying) as Arc<dyn Watcher>;
+        let two: Arc<dyn Watcher> = Arc::clone(&leaving) as Arc<dyn Watcher>;
+        session.watch(1, &one, None);
+        session.watch(2, &two, None);
+
+        session.stop_watching(2);
+        session.set_status(Status::Working, None);
+
+        assert_eq!(staying.seen().len(), 1);
+        assert!(leaving.seen().is_empty());
     }
 
     #[test]

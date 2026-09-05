@@ -4798,10 +4798,14 @@ dependencies = [
 
 [[package]]
 name = "sync-mobile"
-version = "0.1.0"
+version = "0.10.5"
 dependencies = [
  "base64 0.22.1",
  "iroh",
+ "objc2",
+ "objc2-core-foundation",
+ "objc2-ui-kit",
+ "rustls",
  "serde",
  "serde_json",
  "sync-memory",

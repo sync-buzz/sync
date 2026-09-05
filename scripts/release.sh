@@ -105,6 +105,9 @@ cd "$REPO_ROOT"
 TAURI_CONF="$REPO_ROOT/src-tauri/tauri.conf.json"
 CARGO_TOML="$REPO_ROOT/src-tauri/Cargo.toml"
 PKG_JSON="$REPO_ROOT/package.json"
+MOBILE_CONF="$REPO_ROOT/src-mobile/tauri.conf.json"
+MOBILE_CARGO="$REPO_ROOT/src-mobile/Cargo.toml"
+MOBILE_PROJECT="$REPO_ROOT/src-mobile/gen/apple/project.yml"
 
 # --- phase 2: assemble and commit the update manifest ------------------------
 # Runs INSTEAD of the bump-and-tag flow and touches no manifest: all it needs is
@@ -250,20 +253,33 @@ if [ "$DRY_RUN" -eq 1 ]; then
   exit 0
 fi
 
-# --- the source of truth, and its two mirrors --------------------------------
+# --- the source of truth, and its mirrors ------------------------------------
 # The first "version" key of each file. In tauri.conf.json that is the bundle's,
 # above everything a plugin contributes; in Cargo.toml the anchored pattern
 # matches the package's own bare line and not the inline `{ version = "..." }`
 # tables of the dependencies below it.
+#
+# The phone is mirrored too, and its own mirror is two files rather than one:
+# the version App Store Connect reads is `CFBundleShortVersionString` in the
+# generated Xcode project, not the one in `tauri.conf.json`. That project is
+# written once by `tauri ios init` and never rewritten, so nothing else would
+# ever bring the two into step — a phone build would go on calling itself
+# whatever it was called the day the project was generated, and the store would
+# believe it. The build number is set at build time with `--build-number`,
+# because Apple requires it to rise between uploads of one version.
 V="$VERSION" perl -i -pe 'if (!$d && /"version":/) { s/"version": "[^"]*"/"version": "$ENV{V}"/; $d=1 }' "$TAURI_CONF"
 V="$VERSION" perl -i -pe 'if (!$d && /^version = "/) { s/"[^"]*"/"$ENV{V}"/; $d=1 }' "$CARGO_TOML"
 V="$VERSION" perl -i -pe 'if (!$d && /"version":/) { s/"version": "[^"]*"/"version": "$ENV{V}"/; $d=1 }' "$PKG_JSON"
+V="$VERSION" perl -i -pe 'if (!$d && /"version":/) { s/"version": "[^"]*"/"version": "$ENV{V}"/; $d=1 }' "$MOBILE_CONF"
+V="$VERSION" perl -i -pe 'if (!$d && /^version = "/) { s/"[^"]*"/"$ENV{V}"/; $d=1 }' "$MOBILE_CARGO"
+V="$VERSION" perl -i -pe 's/CFBundleShortVersionString: .*/CFBundleShortVersionString: $ENV{V}/; s/CFBundleVersion: ".*"/CFBundleVersion: "$ENV{V}"/' "$MOBILE_PROJECT"
 
 # --- refresh the lockfile so the commit is self-consistent -------------------
 ( cd "$REPO_ROOT/src-tauri" && { "$CARGO" update --workspace --offline 2>/dev/null || "$CARGO" update --workspace; } )
 
 # --- commit and tag ----------------------------------------------------------
-git add "$TAURI_CONF" "$CARGO_TOML" "$PKG_JSON" "$REPO_ROOT/src-tauri/Cargo.lock"
+git add "$TAURI_CONF" "$CARGO_TOML" "$PKG_JSON" "$REPO_ROOT/src-tauri/Cargo.lock" \
+  "$MOBILE_CONF" "$MOBILE_CARGO" "$MOBILE_PROJECT" "$REPO_ROOT/src-mobile/Cargo.lock"
 git commit -m "release: $TAG"
 git tag -a "$TAG" -m "$TAG"
 

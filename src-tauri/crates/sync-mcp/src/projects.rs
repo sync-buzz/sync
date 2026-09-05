@@ -364,6 +364,25 @@ impl Projects {
         )
     }
 
+    /// The key a registered project is called by, given where it is.
+    ///
+    /// The reverse of [`Self::holding`], and it exists for one caller: the
+    /// answer to a device. A device names a project by key and is told where
+    /// nothing is, so an answer carrying a directory would be handing back the
+    /// one thing the call it answers was not allowed to say. `None` for a path
+    /// this machine has not registered — a working tree somebody made, most
+    /// often — which the caller reads as *not a project*, never as *the project
+    /// with no name*.
+    #[must_use]
+    pub fn key_at(&self, path: &Path) -> Option<String> {
+        self.refresh();
+        self.entries()
+            .naming
+            .values()
+            .find(|named| named.path == path)
+            .map(|named| named.identifier.clone())
+    }
+
     /// The keys, in the order they are listed.
     #[must_use]
     pub fn keys(&self) -> Vec<String> {

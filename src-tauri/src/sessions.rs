@@ -665,6 +665,35 @@ pub fn session_subscribe(
     Ok(lookup(&sessions, &key)?.subscribe(events))
 }
 
+/// Watches a session on behalf of somebody who is not on this machine.
+///
+/// The remote half of [`session_subscribe`], and the two differ in exactly the
+/// two ways a device differs from a window. It is **added** to whoever is
+/// already watching rather than replacing them, because a person glancing at a
+/// conversation from the next room must not take the live view away from the
+/// machine running it. And it starts from where that device stopped: `since` is
+/// the last sequence number it was shown, so a connection that dropped costs a
+/// re-subscription and not a transcript written twice.
+///
+/// The number is not minted here. It is minted by the engine's door, on the
+/// connection the device asked over, because that is the only place that knows
+/// which connection the events have to be written onto — and it arrives with
+/// the call, which is why this takes one rather than answering with one.
+///
+/// # Errors
+///
+/// [`ProjectError`] when the key names no session — a conversation that ended
+/// between a device listing it and asking to watch it.
+pub fn session_watched(
+    sessions: &State<'_, Sessions>,
+    key: &str,
+    subscription: u64,
+    since: Option<u64>,
+    watcher: &Arc<dyn live::Watcher>,
+) -> Result<u64, ProjectError> {
+    Ok(lookup(sessions, key)?.watch(subscription, watcher, since))
+}
+
 /// Writes down where a conversation is, so it outlives this run.
 ///
 /// Best effort, deliberately. A pointer that could not be written costs the
@@ -1145,8 +1174,8 @@ pub(crate) fn send<R: Runtime>(
 ) -> Result<(), ProjectError> {
     let (connection, acp_session) = ready(session)?;
     // Whether this is the turn a delegated conversation was opened to run, and
-    // taken here because everything below branches on it: what the agent is
-    // told, what the row says while it waits, and where the answer goes.
+    // taken here because two things below branch on it: what the agent is told,
+    // and where the answer goes when the turn ends.
     let owed = session
         .parent
         .clone()
@@ -1154,7 +1183,7 @@ pub(crate) fn send<R: Runtime>(
     let text = match &owed {
         // Said by the host rather than by whoever delegated, because the host
         // is what takes the last words and hands them on.
-        Some(_) => crate::work::delegated::briefed(&turn.text),
+        Some(parent) => crate::work::delegated::briefed(&turn.text, parent),
         None => turn.text,
     };
     // Recorded before it is sent, so the transcript holds it whether or not the
@@ -1166,16 +1195,11 @@ pub(crate) fn send<R: Runtime>(
     // here rather than only at open: a conversation the list could only call
     // "Untitled" is one nobody can pick out of it after a restart.
     remember(app, session);
-    // Queued rather than working until the slot below is in hand. Set before
-    // the task rather than inside it so there is no moment where a conversation
-    // that is about to wait says it is running.
-    session.set_status(
-        match owed {
-            Some(_) => Status::Queued,
-            None => Status::Working,
-        },
-        None,
-    );
+    // Set here rather than inside the task below, so a conversation is working
+    // from the moment the turn is accepted rather than from whenever the
+    // runtime gets to it. A delegated turn is no different: it waits for
+    // nothing ([`crate::work::delegated`]).
+    session.set_status(Status::Working, None);
     let request =
         schema::PromptRequest::new(acp_session, blocks(text, &turn.attachments, turn.sent));
 
@@ -1185,17 +1209,6 @@ pub(crate) fn send<R: Runtime>(
     let afterwards = app.clone();
     let project = session.project.to_string_lossy().into_owned();
     tauri::async_runtime::spawn(async move {
-        // Held for the length of the turn, and only by the turn a delegated
-        // conversation exists to run. **The turn rather than the agent**: what
-        // two delegated runs at once would damage is a working tree, and a
-        // process that is up and has been asked nothing touches nothing.
-        let slot = match &owed {
-            Some(parent) => Some(crate::work::delegated::slot(&afterwards, &project, parent).await),
-            None => None,
-        };
-        if owed.is_some() {
-            watching.set_status(Status::Working, None);
-        }
         let ending = match connection.prompt(request).await {
             Ok(response) => {
                 let reason = serde_json::to_value(response.stop_reason)
@@ -1219,10 +1232,6 @@ pub(crate) fn send<R: Runtime>(
         if let Some(parent) = owed {
             crate::work::delegated::finished(&afterwards, &project, &parent, &watching, ending);
         }
-        // After the answer is written down, so the conversation that takes the
-        // slot next cannot start before the one it is waiting on has accounted
-        // for itself.
-        drop(slot);
         // A turn ending is the moment a conversation becomes free, and free is
         // the whole of what an outcome waiting for this one waits for.
         crate::work::delegated::deliver(&afterwards, &project);

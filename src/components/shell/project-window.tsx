@@ -12,6 +12,7 @@ import { createPortal } from "react-dom";
 import { AppHeader } from "@/components/shell/app-header";
 import { EXTENSIONS_AREA } from "@/components/shell/areas";
 import { EXTENSIONS_AREA_MODULE } from "@/components/shell/extensions-area";
+import { MobileWindow } from "@/components/shell/mobile-window";
 import { openers } from "@/components/shell/opening";
 import { PrimarySidebar } from "@/components/shell/primary-sidebar";
 import type { ProjectSetup } from "@/components/shell/project-setup";
@@ -26,6 +27,7 @@ import {
 import { useMemoryMenu } from "@/lib/app-menu";
 import type { AreaIntent } from "@/lib/area-intent";
 import { CompositionProvider, useComposition } from "@/lib/composition";
+import { useDevice } from "@/lib/device";
 import type { AreaModule } from "@/lib/extension-host/activate";
 import { useAreas, type MountedArea } from "@/lib/extension-host/areas";
 import { useSectionOrder } from "@/lib/project/use-section-order";
@@ -42,6 +44,7 @@ import {
 import { updatesFor, useCachedIndex } from "@/lib/extension-host/updates";
 import { useSyncState } from "@/lib/memory/use-sync-state";
 import type { OpenProject } from "@/lib/project/types";
+import { ColumnProvider } from "@/lib/shell-bands";
 import { FRAMES } from "@/lib/shell-frames";
 import {
   PANEL_GEOMETRY,
@@ -83,22 +86,47 @@ export function ProjectWindow({
   project,
   setup,
   onProjectChanged,
+  onOpenSettings,
+  onLeave,
 }: {
   project: OpenProject;
   setup: ProjectSetup;
   /** Installing or removing an extension changes what the project is. */
   onProjectChanged: (project: OpenProject) => void;
+  /**
+   * Raise what this phone is, which the window above draws and this one only
+   * asks for. Absent on a Mac, where the same thing is a window of its own and
+   * is reached from the menu bar rather than from inside a project.
+   */
+  onOpenSettings?: () => void;
+  /**
+   * Close the project and go back to choosing one, where that is a thing the
+   * window can do. On a Mac it is not: a project is what a window *is*, and
+   * one is left by closing the window. A phone has one window and no way to
+   * close it, so the choice it was opened from is a level above this screen.
+   */
+  onLeave?: () => void;
 }) {
   // What this machine has unpacked, read once for the whole window. A
   // declaration in the project's record resolves against this list, and both
   // the catalogue and the sections read the same copy of it.
   const packages = usePackagesState();
   const composition = useComposition(project, packages, onProjectChanged);
+  // Which machine this is, which is what decides the arrangement of the
+  // columns and nothing else about them. Everything below is built once and
+  // read by both: what an area draws and what the window knows about it are
+  // the same either way — only where the columns end up differs, and how wide
+  // whatever is in one of them has to make itself is the column's own business.
+  const isPhone = useDevice() === "phone";
 
   // The sections this project has, which is what running its packages produced.
   // Nothing in this file decides what they are, and nothing in it could: the
   // catalogue at the foot of the column is the only area the window owns.
-  const { sections: brought, isLoading } = useAreas(project, packages);
+  const {
+    sections: brought,
+    unavailable: elsewhere,
+    isLoading,
+  } = useAreas(project, packages);
   // And the order somebody put them in, which is this Mac's business rather
   // than the project's: the declaration decides what the sections are, and a
   // person decides where they sit. Applied here rather than in the sidebar so
@@ -286,7 +314,7 @@ export function ProjectWindow({
 
   const navigatorLeads = !collapsed.contextNavigator;
 
-  const columns = (
+  const desktopColumns = (
     <>
       <AppHeader
         project={project}
@@ -398,6 +426,34 @@ export function ProjectWindow({
           <AreaSlot attach={slotRefs.Inspector} />
         </ResizablePanel>
       </ResizablePanelGroup>
+    </>
+  );
+
+  const columns = (
+    <>
+      {isPhone ? (
+        <MobileWindow
+          project={project}
+          sections={sections}
+          unavailable={elsewhere}
+          catalogue={CATALOGUE}
+          badges={badges}
+          updates={updates}
+          active={activeKey === null ? null : (mounted.get(activeKey) ?? null)}
+          attachNavigator={slotRefs.Navigator}
+          attachWorkspace={slotRefs.Workspace}
+          attachInspector={slotRefs.Inspector}
+          sync={sync}
+          intent={asked}
+          onSelectArea={selectArea}
+          onSearch={() => setSearching(true)}
+          onOpenSync={() => setSyncOpen(true)}
+          onOpenSettings={onOpenSettings}
+          onLeave={onLeave}
+        />
+      ) : (
+        desktopColumns
+      )}
 
       <SearchPalette
         project={project}
@@ -592,7 +648,14 @@ function AreaColumns({
             inert={!active}
             className={cn("absolute inset-0", active ? null : "invisible")}
           >
-            <Column />
+            {/* Which column this is, said to whatever the column draws. The
+                only thing that reads it is a band asking where it belongs —
+                see `src/lib/shell-bands.tsx`. It is stated here because this
+                is the one place that knows, and it travels through the portal
+                because context follows the tree a thing was rendered in. */}
+            <ColumnProvider value={column}>
+              <Column />
+            </ColumnProvider>
           </div>,
           slot,
           `${areaKey}-${column}`,

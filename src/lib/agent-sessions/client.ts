@@ -52,9 +52,14 @@ export type SessionStatus =
   /** A turn is running. */
   | "working"
   /**
-   * A turn has been said into it and is waiting its turn to run. What a
-   * conversation delegated from one that already has a delegated run under it
-   * says until that one is finished.
+   * A turn has been said into a conversation and has not started.
+   *
+   * **Nothing in this build reports it.** A delegated turn starts when it is
+   * ordered, however many are already going under the same conversation:
+   * they share one working tree, and whose tree it is answers who decides
+   * (`src-tauri/src/work/delegated.rs`). The member is kept rather than
+   * dropped because dropping something a status can be is a major, and the
+   * number would go on a word instead of on anything a package can be handed.
    */
   | "queued"
   /** Stopped on a question only a person can answer. */

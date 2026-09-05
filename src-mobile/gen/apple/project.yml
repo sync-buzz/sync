@@ -1,8 +1,10 @@
 name: sync-mobile
 options:
-  bundleIdPrefix: buzz.sync
+  bundleIdPrefix: buzz.sync.app
   deploymentTarget:
-    iOS: 14.0
+    # What the phone was actually built and looked at on. Fourteen was the
+    # generator's default and nobody has ever run this on it.
+    iOS: 17.0
 fileGroups: [../../src]
 configs:
   debug: debug
@@ -11,7 +13,8 @@ settingGroups:
   app:
     base:
       PRODUCT_NAME: Sync
-      PRODUCT_BUNDLE_IDENTIFIER: buzz.sync
+      PRODUCT_BUNDLE_IDENTIFIER: buzz.sync.app
+      DEVELOPMENT_TEAM: 5YBHMN5PDS
 targetTemplates:
   app:
     type: application
@@ -30,7 +33,14 @@ targets:
     sources:
       - path: Sources
       - path: Assets.xcassets
+      # Not a source: the Rust side is a static library the linker is pointed at
+      # through `LIBRARY_SEARCH_PATHS` below, and `-lapp` in the flags. Left as
+      # a source, the generator files it as a *resource* — and a 705 MB build
+      # artefact, for an architecture the device does not even run, is copied
+      # into the application and shipped. Ninety-seven per cent of what went to
+      # the store was that.
       - path: Externals
+        buildPhase: none
       - path: sync-mobile_iOS
       - path: assets
         buildPhase: resources
@@ -51,8 +61,8 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
-        CFBundleShortVersionString: 0.1.0
-        CFBundleVersion: "0.1.0"
+        CFBundleShortVersionString: 0.10.5
+        CFBundleVersion: "0.10.5"
     entitlements:
       path: sync-mobile_iOS/sync-mobile_iOS.entitlements
     scheme:
@@ -66,6 +76,7 @@ targets:
         VALID_ARCHS: arm64 
         LIBRARY_SEARCH_PATHS[arch=x86_64]: $(inherited) $(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)
         LIBRARY_SEARCH_PATHS[arch=arm64]: $(inherited) $(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)
+        OTHER_LDFLAGS: $(inherited) -lapp
         ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES: true
         EXCLUDED_ARCHS[sdk=iphoneos*]: x86_64
       groups: [app]
@@ -81,7 +92,25 @@ targets:
       - sdk: SystemConfiguration.framework
       - sdk: WebKit.framework
     preBuildScripts:
-      - script: pnpm tauri ios xcode-script -v --platform ${PLATFORM_DISPLAY_NAME:?} --sdk-root ${SDKROOT:?} --framework-search-paths "${FRAMEWORK_SEARCH_PATHS:?}" --header-search-paths "${HEADER_SEARCH_PATHS:?}" --gcc-preprocessor-definitions "${GCC_PREPROCESSOR_DEFINITIONS:-}" --configuration ${CONFIGURATION:?} ${FORCE_COLOR} ${ARCHS:?}
+      - script: |
+          # Xcode runs a script phase with a login shell's PATH stripped down to
+          # the system's own, so `pnpm` — installed under the home directory,
+          # and itself a shell script that execs `node` — is not on it, and
+          # neither is the Node the version manager selected. The phase fails
+          # with `pnpm: command not found` before it has done anything, and the
+          # failure surfaces inside Xcode rather than in the CLI.
+          #
+          # Restored here rather than in a shell profile, because a build server
+          # and a colleague's machine have neither this profile nor this shell.
+          # The version manager is asked which Node it would have chosen, so
+          # updating Node does not silently pin this file to an old one.
+          export PATH="$HOME/Library/pnpm:/opt/homebrew/bin:/usr/local/bin:$PATH"
+          if ! command -v node >/dev/null 2>&1 && [ -r "$HOME/.nvm/alias/default" ]; then
+            want="$(cat "$HOME/.nvm/alias/default")"
+            found="$(ls -d "$HOME"/.nvm/versions/node/v"${want#v}"* 2>/dev/null | tail -1)"
+            [ -n "$found" ] && export PATH="$found/bin:$PATH"
+          fi
+          pnpm tauri ios xcode-script -v --platform ${PLATFORM_DISPLAY_NAME:?} --sdk-root ${SDKROOT:?} --framework-search-paths "${FRAMEWORK_SEARCH_PATHS:?}" --header-search-paths "${HEADER_SEARCH_PATHS:?}" --gcc-preprocessor-definitions "${GCC_PREPROCESSOR_DEFINITIONS:-}" --configuration ${CONFIGURATION:?} ${FORCE_COLOR} ${ARCHS:?}
         name: Build Rust Code
         basedOnDependencyAnalysis: false
         outputFiles:

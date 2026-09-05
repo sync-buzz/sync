@@ -123,6 +123,11 @@ export function ExtensionNavigator({
                   icon={entry.packaged?.manifest.icon}
                   trailing={entry.version}
                   isActive={entry.id === selectedId}
+                  // Still a row and still opens: what is unavailable is the
+                  // extension's sections, not the page about it, and the page
+                  // is where the reason is written out. Dropping it from the
+                  // list would take away the one place it can be read.
+                  dimmed={entry.unavailable !== null}
                   onSelect={() => onSelect(entry.id)}
                 />
               ))}
@@ -213,6 +218,7 @@ function Row({
   icon,
   trailing,
   isActive,
+  dimmed,
   onSelect,
 }: {
   label: string;
@@ -220,6 +226,14 @@ function Row({
   icon: string | null | undefined | LucideIcon;
   trailing?: string;
   isActive: boolean;
+  /**
+   * The package is in this project and does nothing on this machine.
+   *
+   * A tier and not a state: the row behaves exactly as the others do, because
+   * what it opens — the page describing the package — works everywhere. What
+   * the weight says is that the sections it brings are not here.
+   */
+  dimmed?: boolean;
   onSelect: () => void;
 }) {
   const Glyph = typeof icon === "function" ? icon : null;
@@ -230,7 +244,10 @@ function Row({
       data-active={isActive}
       aria-current={isActive ? "true" : undefined}
       onClick={onSelect}
-      className="flex h-(--control-height-lg) w-full items-center gap-2.5 rounded-(--radius-control) px-2 text-left text-base text-fg-secondary transition-colors duration-(--motion-duration-fast) ease-shell hover:bg-hover hover:text-fg data-[active=true]:bg-selected data-[active=true]:font-medium data-[active=true]:text-fg"
+      className={cn(
+        "flex h-(--control-height-lg) w-full items-center gap-2.5 rounded-(--radius-control) px-2 text-left text-base text-fg-secondary transition-colors duration-(--motion-duration-fast) ease-shell hover:bg-hover hover:text-fg data-[active=true]:bg-selected data-[active=true]:font-medium data-[active=true]:text-fg",
+        dimmed && "text-fg-tertiary",
+      )}
     >
       {Glyph === null ? (
         <KindGlyph
@@ -478,7 +495,13 @@ function MarketplaceCard({
       <button
         type="button"
         onClick={onOpen}
-        className="flex h-full w-full flex-col gap-2 rounded-(--radius-surface) border border-separator bg-panel/60 p-3 text-left transition-colors duration-(--motion-duration-fast) ease-shell hover:bg-panel"
+        className={cn(
+          "flex h-full w-full flex-col gap-2 rounded-(--radius-surface) border border-separator bg-panel/60 p-3 text-left transition-colors duration-(--motion-duration-fast) ease-shell hover:bg-panel",
+          // Held back rather than crossed out. The card still opens, because
+          // the page behind it is where the reason is written and where the
+          // package can still be installed for the machines that do run it.
+          entry.unavailable === null ? null : "opacity-60",
+        )}
       >
         <div className="flex items-start gap-2">
           <span
@@ -513,11 +536,20 @@ function MarketplaceCard({
 
         {packaged === null ? null : <PackageTags extension={packaged} />}
 
-        {/* Two different refusals, and only ever one of them. The first is true
-            of the package whether or not anybody ran it; the second is what
-            happened when somebody did. */}
+        {/* Three different things it could say, and only ever one of them. The
+            first is true of the package whether or not anybody ran it; the
+            second is true of this machine and says nothing about the package,
+            which is why it is not in the danger tier; the third is what
+            happened when somebody ran it. The second comes before the third
+            because on a phone the activation was refused for exactly this
+            reason, and printing both would be the same sentence twice, once in
+            red. */}
         {entry.unrunnable !== null ? (
           <p className="text-xs leading-4 text-danger">{entry.unrunnable}</p>
+        ) : entry.unavailable !== null ? (
+          <p className="text-xs leading-4 text-fg-secondary">
+            {entry.unavailable}
+          </p>
         ) : outcome !== null && outcome !== "" ? (
           <p className="font-mono text-xs leading-4 text-danger">{outcome}</p>
         ) : packaged !== null && outcome === "" ? (
@@ -702,6 +734,16 @@ export function ExtensionPage({
           {entry.unrunnable === null ? null : (
             <p className="rounded-(--radius-surface) border border-separator bg-panel/60 px-3 py-2 text-sm leading-5 text-danger">
               {entry.unrunnable}
+            </p>
+          )}
+
+          {/* Said in the same place and in a quieter tier, because it is not a
+              fault and nothing here is to be fixed. Every control on the page
+              stays as it was: installing this from a phone is a decision about
+              a repository, and the computer that opens it next honours it. */}
+          {entry.unavailable === null ? null : (
+            <p className="rounded-(--radius-surface) border border-separator bg-panel/60 px-3 py-2 text-sm leading-5 text-fg-secondary">
+              {entry.unavailable}
             </p>
           )}
 

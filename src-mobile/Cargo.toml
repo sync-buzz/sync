@@ -18,7 +18,7 @@ name = "sync-mobile"
 description = "Sync for iOS"
 # The crate's own. What the phone shows is stated in `tauri.conf.json`, and the
 # two are kept equal by hand.
-version = "0.1.0"
+version = "0.10.5"
 edition = "2024"
 rust-version = "1.91"
 publish = false
@@ -43,6 +43,12 @@ iroh = "1.1"
 # Only to derive what a command answers with. The shapes the window reads back
 # are `sync-memory`'s; what is derived here is the handful this application
 # composes itself, and every one of those is about the phone.
+# Named for one line of `run`, and it is not optional. What builds an HTTPS
+# client in this tree is `iroh` reaching a relay, and the `rustls` it brings
+# arrives with no crypto provider chosen — so the first client built panics
+# unless the process has said which one it uses. Depending on it here is how
+# this application gets to say it.
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2.11.3", features = [] }
@@ -59,6 +65,12 @@ sync-vault = { path = "../src-tauri/crates/sync-vault" }
 # write the streams are, and the clock a call is given a deadline by.
 tokio = { version = "1", features = ["rt-multi-thread", "io-util", "time"] }
 
+[dev-dependencies]
+# The mock application the routing test below stands on. A feature rather than
+# a crate, and only ever compiled for a test: what it buys is the one question
+# nothing else here can ask — whether this phone answers to a name at all.
+tauri = { version = "2.11.3", features = ["test"] }
+
 # The camera, and only for the one thing a camera is for here: reading the code
 # a computer puts on its screen. It is a dependency of the target rather than of
 # the crate because its Rust half exists only where there is a camera to ask
@@ -69,4 +81,10 @@ tokio = { version = "1", features = ["rt-multi-thread", "io-util", "time"] }
 # plugin documents: there is no Android application here, and a gate naming one
 # would describe a target this repository does not build.
 [target.'cfg(target_os = "ios")'.dependencies]
+# The one place this application speaks to UIKit, and it is about geometry
+# rather than about anything a person sees: the webview has to be told to fill
+# the screen it was given. `src-mobile/src/lib.rs` says why.
+objc2 = "0.6"
+objc2-core-foundation = "0.3"
+objc2-ui-kit = { version = "0.3", features = ["UIView", "UIWindow", "UIScrollView", "UIResponder"] }
 tauri-plugin-barcode-scanner = "2.4"

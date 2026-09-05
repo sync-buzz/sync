@@ -2,10 +2,10 @@
 
 import { useMemo } from "react";
 
-import { refuseUnrunnable } from "@/lib/extension-host/activate";
+import { refuseUnrunnable, unavailableFor } from "@/lib/extension-host/activate";
 import type { InstalledExtension, ListedExtension } from "@/lib/extension-host/client";
 import type { Packages } from "@/lib/extension-host/packages";
-import { refuseIncompatible } from "@/lib/extension-api/version";
+import { refuseIncompatible, unavailableHere } from "@/lib/extension-api/version";
 
 /**
  * What the catalogue has to show, and where each entry comes from.
@@ -89,6 +89,17 @@ export interface CatalogueEntry {
    * activation, so a card says *needs a newer Sync* without anything being run.
    */
   readonly unrunnable: string | null;
+  /**
+   * Why this machine cannot show it, though nothing about it is wrong.
+   *
+   * Separate from [`unrunnable`] because they mean opposite things about the
+   * project. That one is a package this project should not be carrying; this
+   * one is a package it is right to carry and that this screen has nothing to
+   * run — a shell on a phone. So it greys a card out and leaves every button on
+   * it alone: installing one from a phone is a decision about a repository that
+   * a computer will honour.
+   */
+  readonly unavailable: string | null;
 }
 
 /**
@@ -108,6 +119,7 @@ function undeliverable(id: string, version: string): CatalogueEntry {
     listed: null,
     declared: true,
     unrunnable: null,
+    unavailable: null,
   };
 }
 
@@ -124,6 +136,7 @@ function entryOf(
     listed,
     declared,
     unrunnable: refuseUnrunnable(packaged),
+    unavailable: unavailableFor(packaged),
   };
 }
 
@@ -145,6 +158,13 @@ function availableOf(listed: ListedExtension): CatalogueEntry {
     listed,
     declared: false,
     unrunnable: refuseIncompatible({
+      syncApi: listed.syncApi,
+      capabilities: [...listed.capabilities],
+    }),
+    // The index carries the capabilities, so a card can say *not from a phone*
+    // about something nobody has downloaded — which is the same economy the
+    // line above is for, and the same one it would break to abandon here.
+    unavailable: unavailableHere({
       syncApi: listed.syncApi,
       capabilities: [...listed.capabilities],
     }),

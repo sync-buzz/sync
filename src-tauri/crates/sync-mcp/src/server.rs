@@ -115,6 +115,23 @@ Work you are doing right now is the exception. That is done, not filed.
 
 Be proactive: run this unprompted. What is not written down dies with the conversation.
 
+## The branch is the person's, not yours
+
+You are standing in somebody's working tree, and they may be working in it while you are. \
+So the branch that is checked out is the branch you work in. Do not switch branches, make \
+one, stash, or commit unless you were asked to: somebody who comes back to a branch they \
+did not choose has lost whatever they were in the middle of, and no amount of correct work \
+makes up for that.
+
+A tree of its own is something work is *given*, never something an agent takes. Where you \
+have been put in one, stay in it. Where you think the work needs one, say so and let the \
+person decide — they may already be using the tree you would have made, or want it \
+somewhere else, or want the work here after all.
+
+The same rule is what keeps two agents out of each other's way, and it is the reason it is \
+stated rather than left to sense: two of you in one tree are two of you editing the same \
+files, and neither can see the other's half-finished edit.
+
 ## Name a record, never its key
 
 A key is an address, not a name. `d-3ad25f` tells a reader nothing about what it points \

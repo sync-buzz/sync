@@ -38,12 +38,21 @@ export interface ChannelStatus {
   readonly connected: boolean;
 }
 
-/** What a window with no computer can do about it. */
+/** What a window with no computer can do about it, and what it has when it has one. */
 export interface Pairing {
   /** Still finding out. The window says it is starting while this holds. */
   readonly isAsking: boolean;
   /** Whether this window must be paired before it can show anything. */
   readonly needed: boolean;
+  /**
+   * The computer this phone has, and `null` before the application has said.
+   *
+   * The pairing screen needs none of this — it exists because there is nothing
+   * here. It is carried for the screen on the other side of that: a phone that
+   * is paired is a phone whose owner can ask *to what*, and answering that
+   * anywhere else would mean a second reader of the same channel.
+   */
+  readonly computer: ChannelStatus | null;
   readonly isBusy: boolean;
   /** The refusal, in the words of whoever refused. */
   readonly failure: string | null;
@@ -55,6 +64,23 @@ export interface Pairing {
   readonly pairByHand: (endpoint: string, secret: string) => Promise<void>;
   /** Take the person to the switch they turned off. */
   readonly openCameraSettings: () => Promise<void>;
+  /**
+   * Ask the application again.
+   *
+   * Whether the computer is *answering* is not settled once: a laptop is shut,
+   * a network changes, and the phone goes on holding the same key. So the one
+   * screen that reports it asks when it is opened rather than showing what was
+   * true at launch.
+   */
+  readonly refresh: () => Promise<void>;
+  /**
+   * Forget the computer: the connection and the key with it.
+   *
+   * The window ends up where a phone with no computer belongs — the pairing
+   * screen — because that is what `needed` says once the answer comes back
+   * unpaired. Nothing here navigates.
+   */
+  readonly forget: () => Promise<void>;
 }
 
 export function usePairing(): Pairing {
@@ -84,6 +110,27 @@ export function usePairing(): Pairing {
       listening = false;
     };
   }, [isPhone]);
+
+  const refresh = useCallback(async () => {
+    if (!isPhone) return;
+    try {
+      setStatus(await invoke<ChannelStatus>("channel_status", {}));
+    } catch (refused: unknown) {
+      setFailure(said(refused));
+    }
+  }, [isPhone]);
+
+  const forget = useCallback(async () => {
+    setBusy(true);
+    setFailure(null);
+    try {
+      setStatus(await invoke<ChannelStatus>("channel_forget", {}));
+    } catch (refused: unknown) {
+      setFailure(said(refused));
+    } finally {
+      setBusy(false);
+    }
+  }, []);
 
   const readCode = useCallback(async () => {
     setBusy(true);
@@ -137,11 +184,14 @@ export function usePairing(): Pairing {
   return {
     isAsking: isPhone && status === null,
     needed: isPhone && status !== null && !status.paired,
+    computer: status,
     isBusy,
     failure,
     cameraRefused,
     readCode,
     pairByHand,
     openCameraSettings,
+    refresh,
+    forget,
   };
 }

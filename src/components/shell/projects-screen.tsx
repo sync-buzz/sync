@@ -1,10 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { FolderGit2 } from "lucide-react";
+import { FolderGit2, SlidersHorizontal } from "lucide-react";
 
-import { registeredProjects } from "@/lib/project/client";
-import { loadProjectSettings } from "@/lib/project/client";
+import { BarButton, WindowBar } from "@/components/shell/mobile-chrome";
+import { openRegistered, registeredProjects } from "@/lib/project/client";
 import type { OpenProject } from "@/lib/project/types";
 import { said } from "@/lib/refusal";
 
@@ -31,8 +31,19 @@ import { said } from "@/lib/refusal";
  */
 export function ProjectsScreen({
   onOpened,
+  onOpenSettings,
 }: {
   onOpened: (project: OpenProject) => void;
+  /**
+   * What this phone is, in the band under the list.
+   *
+   * This is the root of the phone, and until now it was the one screen with no
+   * way off it but into a project: somebody whose computer had stopped
+   * answering could read that there were no projects and had nothing to do
+   * about it. What the band leads to is where they can see what this phone
+   * dials, and take it off that computer.
+   */
+  onOpenSettings: () => void;
 }) {
   const [projects, setProjects] = useState<readonly Listed[] | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
@@ -71,17 +82,11 @@ export function ProjectsScreen({
       setOpening(project.path);
       setFailure(null);
       try {
-        const known = await loadProjectSettings(project.path).catch(() => null);
-        onOpened({
-          ...(known?.settings ?? {
-            name: project.name,
-            identifier: project.identifier,
-            description: "",
-            language: "en",
-            installed: [],
-          }),
-          path: project.path,
-        });
+        // The same function the window calls when it comes back to a project by
+        // itself, after the system reloaded the webview. One opening flow, so a
+        // project reached the second way is the same project in every respect
+        // as one somebody tapped.
+        onOpened(await openRegistered(project.path, project.name));
       } catch (refused: unknown) {
         setFailure(said(refused));
       } finally {
@@ -92,47 +97,68 @@ export function ProjectsScreen({
   );
 
   return (
-    <div
-      className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-workspace px-4"
-      // The head and foot a phone keeps for itself, asked for rather than
-      // measured — the same two the screen before this one covers.
-      style={{
-        paddingTop: "max(1rem, env(safe-area-inset-top))",
-        paddingBottom: "max(var(--header-height), env(safe-area-inset-bottom))",
-      }}
-    >
-      <h1 className="px-2 pt-2 pb-4 text-2xl font-semibold text-fg">Projects</h1>
+    <div className="flex min-h-0 flex-1 flex-col bg-workspace">
+      <div
+        className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4"
+        // The head a phone keeps for itself, asked for rather than measured. The
+        // foot is not padded here any more: the band below is outside this
+        // scroller and keeps its own clearance, so a list long enough to scroll
+        // ends against a bar rather than against the hardware.
+        style={{ paddingTop: "max(1rem, env(safe-area-inset-top))" }}
+      >
+        <h1 className="px-2 pt-2 pb-4 text-2xl font-semibold text-fg">Projects</h1>
 
-      {projects === null ? null : projects.length === 0 ? (
-        <Nothing failure={failure} />
-      ) : (
-        <ul className="flex flex-col gap-px">
-          {projects.map((project) => (
-            <li key={project.path}>
-              <button
-                type="button"
-                disabled={opening !== null}
-                onClick={() => void open(project)}
-                className="flex w-full items-center gap-3 rounded-(--radius-control) px-2 py-3 text-left transition-colors duration-(--motion-duration-fast) ease-shell active:bg-hover disabled:opacity-50"
-              >
-                <span
-                  aria-hidden="true"
-                  className="flex size-8 shrink-0 items-center justify-center rounded-(--radius-surface) border border-separator-strong bg-panel text-fg-secondary"
+        {projects === null ? null : projects.length === 0 ? (
+          <Nothing failure={failure} />
+        ) : (
+          <ul className="flex flex-col gap-px">
+            {projects.map((project) => (
+              <li key={project.path}>
+                <button
+                  type="button"
+                  disabled={opening !== null}
+                  onClick={() => void open(project)}
+                  className="flex w-full items-center gap-3 rounded-(--radius-control) px-2 py-3 text-left transition-colors duration-(--motion-duration-fast) ease-shell active:bg-hover disabled:opacity-50"
                 >
-                  <FolderGit2 className="size-4" />
-                </span>
-                <span className="min-w-0 flex-1 truncate text-base text-fg">
-                  {project.name}
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+                  <span
+                    aria-hidden="true"
+                    className="flex size-8 shrink-0 items-center justify-center rounded-(--radius-surface) border border-separator-strong bg-panel text-fg-secondary"
+                  >
+                    <FolderGit2 className="size-4" />
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-base text-fg">
+                    {project.name}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
 
-      {failure !== null && projects !== null && projects.length > 0 ? (
-        <p className="px-2 pt-4 text-sm text-danger">{failure}</p>
-      ) : null}
+        {failure !== null && projects !== null && projects.length > 0 ? (
+          <p className="px-2 pt-4 text-sm text-danger">{failure}</p>
+        ) : null}
+      </div>
+
+      {/* One control, at the end of the screen — the same place, with the same
+          icon, that the list of a project's sections keeps it in. Two roots and
+          one habit: a person learns where this is once. */}
+      <div
+        className="shrink-0 border-t border-separator"
+        style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
+      >
+        <WindowBar>
+          {/* The leading end, empty. A band with one control puts it at the
+              trailing end, which is where the same control is on the screen a
+              project opens on to. */}
+          <span aria-hidden />
+          <BarButton
+            label="Settings"
+            icon={SlidersHorizontal}
+            onPress={onOpenSettings}
+          />
+        </WindowBar>
+      </div>
     </div>
   );
 }

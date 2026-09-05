@@ -50,6 +50,7 @@ use sync_memory::{
 use crate::application::Application;
 use crate::host::Host;
 use crate::remote::Devices;
+use crate::watching::Subscriptions;
 
 /// What a connection may name a project by.
 ///
@@ -98,6 +99,7 @@ pub async fn serve(
     host: Arc<Host>,
     application: Arc<Application>,
     devices: Arc<Devices>,
+    subscriptions: Arc<Subscriptions>,
     path: PathBuf,
 ) -> io::Result<()> {
     let listener = bind(&path)?;
@@ -106,6 +108,7 @@ pub async fn serve(
         let host = Arc::clone(&host);
         let application = Arc::clone(&application);
         let devices = Arc::clone(&devices);
+        let subscriptions = Arc::clone(&subscriptions);
         // Per connection, because one window has several projects open and a
         // call in one of them must not be behind a call in another.
         tokio::spawn(async move {
@@ -116,6 +119,7 @@ pub async fn serve(
                 &host,
                 &application,
                 &devices,
+                &subscriptions,
                 stream,
                 &Naming { by_path: true },
             )
@@ -182,6 +186,7 @@ pub(crate) async fn attend<S>(
     host: &Arc<Host>,
     application: &Arc<Application>,
     devices: &Arc<Devices>,
+    subscriptions: &Arc<Subscriptions>,
     stream: S,
     naming: &Naming,
 ) -> io::Result<()>
@@ -195,6 +200,7 @@ where
         host,
         application,
         devices,
+        subscriptions,
         Frames::new(BufReader::new(reading), MAX_FRAME_BYTES),
         writing,
         naming,
@@ -214,6 +220,7 @@ pub(crate) async fn attend_read<R, W>(
     host: &Arc<Host>,
     application: &Arc<Application>,
     devices: &Arc<Devices>,
+    subscriptions: &Arc<Subscriptions>,
     mut lines: Frames<R>,
     writing: W,
     naming: &Naming,
@@ -231,11 +238,23 @@ where
     let writer = tokio::spawn(draining(writing, queued));
 
     let mut attached: Option<PathBuf> = None;
+    // The watches taken on this connection, so that the end of it can be said
+    // once and in one message rather than discovered per event by an
+    // application that cannot see this far.
+    let mut mine: Vec<u64> = Vec::new();
     // Calls in flight on this connection, and the reading loop waits here when
     // they are all taken. Back-pressure rather than a queue that grows: a
     // caller sending faster than this machine answers is a caller that should
     // be made to wait, not one whose work should be accumulated in memory.
     let running = Arc::new(tokio::sync::Semaphore::new(AT_ONCE));
+    // What a carried call is handed to the application with. Built once,
+    // because none of the four changes for the life of a connection.
+    let carrying = Carrying {
+        host,
+        application,
+        subscriptions,
+        naming,
+    };
 
     let outcome = loop {
         let line = match lines.next().await {
@@ -282,7 +301,7 @@ where
                 &queue,
                 &json!({"jsonrpc": "2.0", "id": id, "result": {"attending": true}}),
             );
-            return answer_calls(application, lines, queue, writer).await;
+            return answer_calls(application, subscriptions, lines, queue, writer).await;
         }
 
         if let Some(answer) =
@@ -307,17 +326,9 @@ where
         // to gain by refusing it: the answer would be the same wherever the
         // caller is, because none of these depends on where the caller is.
         if carried(method) {
-            let Ok(permit) = Arc::clone(&running).acquire_owned().await else {
+            if !onward(&carrying, &running, &queue, &mut mine, (id, method, params)).await {
                 break Ok(());
-            };
-            let application = Arc::clone(application);
-            let queue = queue.clone();
-            let method = method.to_owned();
-            tokio::spawn(async move {
-                let answered = application.call(&method, params).await;
-                say(&queue, &answered_with(&id, answered));
-                drop(permit);
-            });
+            }
             continue;
         }
 
@@ -376,6 +387,12 @@ where
         });
     };
 
+    // Whoever was watching a conversation over this connection is not watching
+    // it any more. Said before the wait below, because the wait is for answers
+    // already queued and an event queued after this point would be written into
+    // a stream nobody is reading.
+    nobody_is_watching(application, subscriptions, &mine);
+
     // Let go of this loop's own sender, then wait. The calls still running hold
     // senders of their own, so the channel closes when the last of them has
     // queued its answer and the writer stops when it has written it — a
@@ -384,6 +401,217 @@ where
     drop(queue);
     let _ = writer.await;
     outcome
+}
+
+/// What one connection carries a call to the application with.
+///
+/// Four handles that never change for the life of a connection, held together
+/// so that carrying a call takes one argument rather than four. What varies per
+/// call is the call.
+struct Carrying<'a> {
+    host: &'a Arc<Host>,
+    application: &'a Arc<Application>,
+    subscriptions: &'a Arc<Subscriptions>,
+    naming: &'a Naming,
+}
+
+/// Hand one call to the application, and say whether this connection is still
+/// worth reading.
+///
+/// Everything carried is a fact about the machine rather than about the
+/// contents of a project — an artefact on its disk, the registry it fetches, a
+/// secret in its keychain, a process it raised — and the checks that go with
+/// them are all on that side. A package's own request is the clearest case:
+/// what it may reach is a sentence in the manifest of the artefact installed
+/// there, so the check and the request are both there and this door's whole
+/// part is to carry the call.
+///
+/// Not refused on this machine's own socket either, and there is nothing to
+/// gain by refusing it: the answer would be the same wherever the caller is,
+/// because none of these depends on where the caller is.
+///
+/// `false` means the connection has ended — the queue this would have answered
+/// on has no writer left.
+async fn onward(
+    carrying: &Carrying<'_>,
+    running: &Arc<tokio::sync::Semaphore>,
+    queue: &tokio::sync::mpsc::UnboundedSender<String>,
+    mine: &mut Vec<u64>,
+    (id, method, mut params): (Value, &str, Value),
+) -> bool {
+    // The key becomes the path the agent will be raised in, here and nowhere
+    // else. Replaced rather than removed — which is where this parts company
+    // with an operation: the application works *in* the project and has to be
+    // told which one, while the engine's surface is handed a project already
+    // and would be confused by a second name for it.
+    let by_key = !carrying.naming.by_path;
+    let mut asked: Option<String> = None;
+    if by_key && sync_memory::names_a_project(method) {
+        match a_key_into_a_path(carrying.host, &mut params) {
+            Ok(key) => asked = Some(key),
+            Err(why) => return say(queue, &refusal(&id, &why)),
+        }
+    }
+    // A watch is bound to this connection *before* the application hears about
+    // it, and that order is the whole of it: the agent may say something
+    // between being asked to watch and the answer reaching this line, and an
+    // event arriving under a number nothing holds yet is a word of somebody's
+    // conversation dropped in silence.
+    let watching = (method == sync_memory::SESSION_SUBSCRIBE).then(|| {
+        let watch = carrying.subscriptions.mint(queue.clone());
+        if let Some(members) = params.as_object_mut() {
+            members.insert("subscription".to_owned(), json!(watch));
+        }
+        mine.push(watch);
+        watch
+    });
+    let Ok(permit) = Arc::clone(running).acquire_owned().await else {
+        return false;
+    };
+    let application = Arc::clone(carrying.application);
+    let subscriptions = Arc::clone(carrying.subscriptions);
+    let host = Arc::clone(carrying.host);
+    let queue = queue.clone();
+    let method = method.to_owned();
+    tokio::spawn(async move {
+        let answered = application.call(&method, params).await;
+        // A watch the application refused is let go of now rather than when the
+        // connection ends: the number was minted on the way in and nothing on
+        // the other side is holding it.
+        if let (Some(watch), true) = (watching, answered.is_err()) {
+            subscriptions.ended(&[watch]);
+        }
+        let answered = if by_key && sync_memory::about_a_session(&method) {
+            answered.map(|answer| named_by_key(&host, answer, asked.as_deref()))
+        } else {
+            answered
+        };
+        say(&queue, &answered_with(&id, answered));
+        drop(permit);
+    });
+    true
+}
+
+/// Tell the application about the watches this connection took with it.
+///
+/// One message naming all of them rather than one per watch, and it is the only
+/// way the application can find out: it writes events into a socket to an
+/// engine that is still there, and the connection that ended is a hop further
+/// on. Without it a phone put in a pocket leaves a conversation serialising
+/// every word its agent writes into a queue nobody drains.
+fn nobody_is_watching(
+    application: &Arc<Application>,
+    subscriptions: &Arc<Subscriptions>,
+    mine: &[u64],
+) {
+    let gone = subscriptions.ended(mine);
+    if gone.is_empty() {
+        return;
+    }
+    let application = Arc::clone(application);
+    tokio::spawn(async move {
+        let _ = application
+            .call(sync_memory::SESSION_DROPPED, json!({"subscriptions": gone}))
+            .await;
+    });
+}
+
+/// The key a device named its project by, turned into where that project is.
+///
+/// The same resolution [`about_a_project`] makes for an operation, made again
+/// here because a carried call does not go through it — and made *without*
+/// spending the key: the engine's surface is handed a project and would choke
+/// on a second name for one, while the application is handed nothing and has to
+/// be told.
+///
+/// A key the registry does not hold is a refusal by name. Nothing is derived
+/// from it and no directory is looked for, which is the difference between a
+/// key and a path and the reason a connection from elsewhere gets only the
+/// first.
+fn a_key_into_a_path(host: &Arc<Host>, params: &mut Value) -> Result<String, String> {
+    let key = params
+        .get("project")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            format!(
+                "this call names the project it is about — `project`, a key as `{PROJECTS}` lists them"
+            )
+        })?
+        .to_owned();
+    let found = host
+        .project_named(&key)
+        .ok_or_else(|| format!("this machine holds no project called `{key}`"))?;
+    if let Some(members) = params.as_object_mut() {
+        members.insert(
+            "project".to_owned(),
+            json!(found.to_string_lossy().into_owned()),
+        );
+    }
+    Ok(key)
+}
+
+/// An answer with every project in it named the way the device that asked names
+/// them.
+///
+/// The other half of [`a_key_into_a_path`], and it exists because the answer to
+/// a call about conversations is full of directories: a row says which project
+/// it belongs to and where its agent is working, and a pointer says only the
+/// second. Both are paths on somebody else's computer. A device chose that
+/// project by key and picks its own conversations out by comparing with it, so
+/// the key is at once the only thing it can use and the only thing it may be
+/// told.
+///
+/// **`worktree` is removed rather than translated.** A device cannot name a
+/// tree, throw it away or open one, so what the member carries is the layout of
+/// somebody's disk in exchange for nothing.
+///
+/// **`project` and `cwd` become keys, by three rules in this order**, and the
+/// order is what makes them cover the two shapes an answer comes in:
+///
+/// 1. the registry knows the project at that path — a live row's `project`;
+/// 2. the object itself said which project it belongs to — a live row's `cwd`
+///    when the agent is working in a tree;
+/// 3. the call named one — a dormant pointer, which carries `cwd` and nothing
+///    to say whose it is, in a list that was asked for by key.
+///
+/// Rules two and three both answer a conversation being held in a working tree
+/// by naming the project instead. That is not a rounding: the conversation
+/// belongs to that project, and the tree is the part this device is not shown.
+fn named_by_key(host: &Arc<Host>, answer: Value, asked: Option<&str>) -> Value {
+    match answer {
+        Value::Array(items) => Value::Array(
+            items
+                .into_iter()
+                .map(|item| named_by_key(host, item, asked))
+                .collect(),
+        ),
+        Value::Object(members) => {
+            let mut members: serde_json::Map<String, Value> = members
+                .into_iter()
+                .filter(|(name, _)| name != "worktree")
+                .map(|(name, value)| (name, named_by_key(host, value, asked)))
+                .collect();
+            let named = |members: &serde_json::Map<String, Value>, member: &str| {
+                members
+                    .get(member)
+                    .and_then(Value::as_str)
+                    .and_then(|path| host.key_at(std::path::Path::new(path)))
+            };
+            let belongs = named(&members, "project");
+            if let Some(key) = belongs.clone() {
+                members.insert("project".to_owned(), json!(key));
+            }
+            if members.contains_key("cwd")
+                && let Some(key) = named(&members, "cwd")
+                    .or(belongs)
+                    .or_else(|| asked.map(ToOwned::to_owned))
+            {
+                members.insert("cwd".to_owned(), json!(key));
+            }
+            Value::Object(members)
+        }
+        other => other,
+    }
 }
 
 /// One outcome, as the answer to the call that asked for it.
@@ -588,6 +816,7 @@ fn about_this_connection(
 /// failed rather than left, so an agent hears why now rather than in a minute.
 async fn answer_calls<R>(
     application: &Arc<Application>,
+    subscriptions: &Arc<Subscriptions>,
     mut lines: Frames<R>,
     queue: tokio::sync::mpsc::UnboundedSender<String>,
     writer: tokio::task::JoinHandle<()>,
@@ -625,6 +854,18 @@ where
                 tracing::warn!("an answer on the channel back could not be read as JSON");
                 continue;
             };
+            // The one thing on this connection that is not an answer, and the
+            // only message this process ever sends that nobody asked for. It
+            // carries no id because it expects none: an event is a word of a
+            // conversation on its way to whoever is watching, and a device that
+            // has stopped watching is a fact this side already holds.
+            if answer.get("method").and_then(Value::as_str) == Some(sync_memory::SESSION_EVENT) {
+                let said = answer.get("params").unwrap_or(&Value::Null);
+                if let Some(subscription) = said.get("subscription").and_then(Value::as_u64) {
+                    subscriptions.deliver(subscription, said.get("event").unwrap_or(&Value::Null));
+                }
+                continue;
+            }
             let Some(id) = answer.get("id").and_then(Value::as_u64) else {
                 continue;
             };
@@ -863,6 +1104,7 @@ mod tests {
             let writer = tokio::spawn(draining(writing, queued));
             let _ = answer_calls(
                 &attending,
+                &Arc::new(Subscriptions::default()),
                 Frames::new(BufReader::new(reading), MAX_FRAME_BYTES),
                 queue,
                 writer,
@@ -916,6 +1158,7 @@ mod tests {
                 &host,
                 &application,
                 &Arc::new(Devices::default()),
+                &Arc::new(Subscriptions::default()),
                 engine,
                 &Naming { by_path: true },
             )
@@ -985,6 +1228,7 @@ mod tests {
             let writer = tokio::spawn(draining(writing, queued));
             let _ = answer_calls(
                 &attending,
+                &Arc::new(Subscriptions::default()),
                 Frames::new(BufReader::new(reading), MAX_FRAME_BYTES),
                 queue,
                 writer,
@@ -1122,6 +1366,7 @@ mod tests {
                 &host,
                 &application,
                 &Arc::new(Devices::default()),
+                &Arc::new(Subscriptions::default()),
                 engine,
                 &Naming { by_path: true },
             )
@@ -1163,6 +1408,146 @@ mod tests {
     ///
     /// The registry is given one project so that the refusals below are refusals
     /// about *naming* rather than about an empty machine.
+    /// A door that holds one project, for the two translations below.
+    fn holding_a_project() -> Arc<Host> {
+        Arc::new(Host::over(
+            Arc::new(Projects::over(
+                vec![crate::projects::Registered {
+                    path: PathBuf::from("/w/a"),
+                    name: "A".to_owned(),
+                    identifier: "A".to_owned(),
+                }],
+                None,
+            )),
+            None,
+        ))
+    }
+
+    /// A device names its project by key and the application is handed a path.
+    ///
+    /// Replaced rather than spent, which is where this parts company with an
+    /// operation: the engine's surface is given a project and would choke on a
+    /// second name for one, and the application is given nothing and has to be
+    /// told where to raise the agent.
+    #[test]
+    fn a_key_becomes_the_path_the_agent_will_be_raised_in() {
+        let mut params = json!({"project": "A", "agentId": "claude"});
+
+        let key = a_key_into_a_path(&holding_a_project(), &mut params).expect("a known project");
+
+        assert_eq!(key, "A");
+        assert_eq!(params["project"], "/w/a");
+        assert_eq!(
+            params["agentId"], "claude",
+            "the rest of the call is untouched"
+        );
+    }
+
+    /// A key the registry does not hold is refused by name, and nothing is
+    /// derived from it.
+    #[test]
+    fn a_key_this_machine_does_not_hold_is_refused_rather_than_guessed() {
+        let mut params = json!({"project": "B"});
+
+        let refused =
+            a_key_into_a_path(&holding_a_project(), &mut params).expect_err("no such project");
+
+        assert!(refused.contains('B'), "{refused}");
+        assert_eq!(params["project"], "B", "nothing was put in its place");
+    }
+
+    /// A call of the family that names none says so, rather than being answered
+    /// about whatever the connection last looked at.
+    #[test]
+    fn a_call_that_names_no_project_is_told_to_name_one() {
+        let mut params = json!({"agentId": "claude"});
+
+        let refused =
+            a_key_into_a_path(&holding_a_project(), &mut params).expect_err("it names nothing");
+
+        assert!(refused.contains(PROJECTS), "{refused}");
+    }
+
+    /// A live row goes back to a device naming its project the way the device
+    /// named it, and saying nothing about anybody's disk.
+    #[test]
+    fn a_live_row_is_answered_in_the_keys_the_device_asked_in() {
+        let answered = named_by_key(
+            &holding_a_project(),
+            json!([{
+                "key": "s0",
+                "project": "/w/a",
+                "cwd": "/w/a",
+                "agentName": "Claude",
+            }]),
+            None,
+        );
+
+        assert_eq!(answered[0]["project"], "A");
+        assert_eq!(answered[0]["cwd"], "A");
+        assert_eq!(answered[0]["agentName"], "Claude");
+    }
+
+    /// A conversation held in a working tree is answered as the project's, and
+    /// the tree does not travel at all.
+    ///
+    /// Both halves matter. The tree is a directory a device cannot name, open
+    /// or throw away, so sending it is the layout of somebody's disk in
+    /// exchange for nothing — and a `cwd` left as that directory would be the
+    /// same disclosure through the other member.
+    #[test]
+    fn a_conversation_in_a_working_tree_is_answered_as_the_project_s() {
+        let answered = named_by_key(
+            &holding_a_project(),
+            json!([{
+                "project": "/w/a",
+                "cwd": "/w/trees/a-3f9",
+                "worktree": {"path": "/w/trees/a-3f9", "branch": "sync/a-3f9"},
+            }]),
+            None,
+        );
+
+        assert_eq!(answered[0]["project"], "A");
+        assert_eq!(answered[0]["cwd"], "A");
+        assert!(
+            answered[0].get("worktree").is_none(),
+            "the tree reached the device: {answered}"
+        );
+    }
+
+    /// A dormant pointer carries a directory and nothing to say whose it is, so
+    /// it is answered with the key the call named.
+    ///
+    /// The third of the three rules, and the only one the answer itself cannot
+    /// supply: the list was asked for by key, and that key is what these rows
+    /// are.
+    #[test]
+    fn a_pointer_with_no_project_on_it_is_named_by_the_call_that_asked() {
+        let answered = named_by_key(
+            &holding_a_project(),
+            json!([{"acpSession": "abc", "cwd": "/w/trees/a-3f9", "title": "A talk"}]),
+            Some("A"),
+        );
+
+        assert_eq!(answered[0]["cwd"], "A");
+        assert_eq!(answered[0]["title"], "A talk");
+    }
+
+    /// Nothing else in an answer is touched.
+    ///
+    /// Said out loud because the walk is recursive and blunt by design: it
+    /// visits every object in the answer, and a rule that reached further than
+    /// these three members would be quietly editing an agent's own words.
+    #[test]
+    fn the_rest_of_an_answer_crosses_unchanged() {
+        let said = json!({
+            "events": [{"kind": "update", "payload": {"text": "the path /w/a is in the prose"}}],
+            "dropped": 2,
+        });
+
+        assert_eq!(named_by_key(&holding_a_project(), said.clone(), None), said);
+    }
+
     fn from_elsewhere() -> (tokio::io::DuplexStream, Arc<Host>) {
         let registered = vec![crate::projects::Registered {
             path: PathBuf::from("/w/a"),
@@ -1178,6 +1563,7 @@ mod tests {
                 &serving,
                 &application,
                 &Arc::new(Devices::default()),
+                &Arc::new(Subscriptions::default()),
                 engine,
                 &Naming { by_path: false },
             )
@@ -1472,6 +1858,7 @@ mod tests {
                 &serving,
                 &application,
                 &held,
+                &Arc::new(Subscriptions::default()),
                 engine,
                 &Naming { by_path: true },
             )
@@ -1615,6 +2002,7 @@ mod tests {
                 &host,
                 &application,
                 &Arc::new(Devices::default()),
+                &Arc::new(Subscriptions::default()),
                 engine,
                 &Naming { by_path: false },
             )
@@ -1744,6 +2132,7 @@ mod tests {
             let writer = tokio::spawn(draining(writing, queued));
             let _ = answer_calls(
                 &attending,
+                &Arc::new(Subscriptions::default()),
                 Frames::new(BufReader::new(reading), MAX_FRAME_BYTES),
                 queue,
                 writer,
@@ -1763,6 +2152,7 @@ mod tests {
                 &serving,
                 &carrying,
                 &Arc::new(Devices::default()),
+                &Arc::new(Subscriptions::default()),
                 door,
                 &Naming { by_path: false },
             )
@@ -1823,6 +2213,7 @@ mod tests {
                 &serving,
                 &Arc::new(Application::new()),
                 &Arc::new(Devices::default()),
+                &Arc::new(Subscriptions::default()),
                 door,
                 &Naming { by_path: false },
             )

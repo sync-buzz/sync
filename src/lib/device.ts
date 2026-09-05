@@ -16,12 +16,20 @@
  * so a script that did not run is a window with nothing in it. A missing
  * *command*, by contrast, would be a race dressed as a fact.
  *
- * **This answers one question and must not grow a second.** It is not how a
- * call is routed — the phone's application implements the same command names in
- * Rust, and the window goes on calling them. It is not how the layout is
- * chosen either: the mobile geometry is a question of width, which is why it
- * can be looked at in a browser at all. What it decides is the one state that
- * only a phone can be in — having no computer to ask.
+ * **What it decides is what the machine is, never what a caller wants.** It is
+ * not how a call is routed — the phone's application implements the same
+ * command names in Rust, and the window goes on calling them. What it does
+ * decide is the shape of the window around those calls: the state only a phone
+ * can be in, having no computer to ask, and the arrangement of a frame's
+ * columns, which on a phone is depth rather than width.
+ *
+ * That second one is a device question and not a width question, deliberately.
+ * A narrow window on a Mac is a window somebody chose to make narrow, with a
+ * pointer, a keyboard and a title bar; a phone is a different set of gestures
+ * and a different reach, and an arrangement derived from width alone would give
+ * a pushed navigation stack to a Mac window dragged small. What *is* a width
+ * question is everything inside a column — an area makes itself fit the space
+ * it is given, on either machine, and reads none of this.
  */
 
 import { useSyncExternalStore } from "react";

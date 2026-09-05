@@ -45,7 +45,9 @@
 export {
   SYNC_API_VERSION,
   SYNC_CAPABILITIES,
+  capabilitiesHere,
   refuseIncompatible,
+  unavailableHere,
   supportsApiRange,
   isVersion,
   type ApiRequirement,

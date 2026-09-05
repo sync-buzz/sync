@@ -204,6 +204,22 @@ with a sentence a person can act on, and it is also what lets an extension
 degrade deliberately — asking for a capability is a choice, and reading whether
 one is present is allowed.
 
+That list is what the *build* publishes, and one build is now shown by two
+applications. `capabilitiesHere()` is what the machine in front of somebody
+honours: on a phone it drops `agents.acp`, `vault`, `terminal` and
+`native-menu`, each of which needs something only the computer has. An
+extension that degrades deliberately reads that one.
+
+Two of the four also decide whether a section is opened at all. A package asks
+for `terminal` because it is a terminal and for `vault` because it works
+through a credential it has to read first — there is no smaller version of
+either to fall back to — while a menu that will not open and an agent that
+cannot be raised leave a section that still reads. So on a phone a package
+asking for one of those two is installed as usual, its sections are drawn in
+the list and cannot be opened, and the reason is said once under the group.
+Installing is unaffected either way: what a manifest is checked against is a
+project, and a project is one repository open on more than one machine.
+
 ### `net` is a capability and a list, and neither works alone
 
 The other capabilities are one word each, because what they promise is the same

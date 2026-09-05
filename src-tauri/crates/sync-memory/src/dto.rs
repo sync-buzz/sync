@@ -9,6 +9,8 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
+
+use crate::mapping::RecordType;
 use serde_json::Value;
 
 /// A major/minor pair from the handshake.
@@ -401,6 +403,34 @@ pub struct FolderEntry {
     /// Whatever draws a tree needs it, or it shows that record twice — once as
     /// the folder and once as its own child.
     pub described_by: Option<String>,
+}
+
+/// What removing a type took with it.
+///
+/// The count is the answer to the question the confirmation asked, reported
+/// back from the write rather than from the count the window showed before it:
+/// the two differ if anything was written in between, and the one that happened
+/// is the true one.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TypeRemoval {
+    /// The corpus as it now stands.
+    pub types: Vec<RecordType>,
+    /// How many records of the type were deleted with its definition.
+    pub removed: usize,
+}
+
+/// What attaching a folder produced: the corpus's types, and what the first
+/// scan made of the files already in it.
+///
+/// Both halves matter to the window. The type is what the navigator lists; the
+/// scan is what turned the documents on disk into records, and its unmatched
+/// entries are the one part of attaching that a person has to answer.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderAttachment {
+    pub types: Vec<RecordType>,
+    pub scan: ScanOutcome,
 }
 
 /// What reconciling the attached folders with the records did.

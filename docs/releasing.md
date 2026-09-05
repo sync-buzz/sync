@@ -9,6 +9,19 @@ and `package.json` are mirrors `scripts/release.sh` keeps in step. Nothing
 reads the mirrors; they exist so that a person looking at either file is not
 told something false.
 
+**The phone is mirrored from the same number**, and one of its mirrors is read
+rather than merely looked at: `CFBundleShortVersionString` in
+`src-mobile/gen/apple/project.yml` is the version App Store Connect is told,
+and that file is written once by `tauri ios init` and never rewritten. So the
+script writes it along with `src-mobile/tauri.conf.json` and the phone's crate
+version. The build number is not here: Apple wants it to rise between uploads
+of one version, so it is given at build time with `--build-number`.
+
+The two applications ship by different roads — the Mac through its own updater,
+the phone through the store — and carry one version deliberately: a person
+holding both should be able to say which is older without learning two
+numbering schemes.
+
 ## The two handles
 
 A release happens in two acts, and they are separate on purpose.

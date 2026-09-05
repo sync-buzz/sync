@@ -12,7 +12,7 @@ import type {
 import { netFor } from "@/lib/extension-api/net";
 import { terminalFor } from "@/lib/extension-api/terminal";
 import { vaultFor } from "@/lib/extension-api/vault";
-import { refuseIncompatible } from "@/lib/extension-api/version";
+import { refuseIncompatible, unavailableHere } from "@/lib/extension-api/version";
 import type {
   InstalledExtension,
   ManifestArea,
@@ -171,6 +171,11 @@ function refuseMismatchedSlots(
  * Separate from [`activate`] because the catalogue asks it of packages it is
  * only describing: a card says *needs a newer Sync* by asking this, and asks it
  * of things it has no intention of running.
+ *
+ * It answers for the package and the build, and says nothing about the machine
+ * — that is [`unavailableFor`], and the two are kept apart because they lead to
+ * different places. This one withdraws a package from a project; that one greys
+ * out a section on one screen and leaves the project alone.
  */
 export function refuseUnrunnable(extension: InstalledExtension): string | null {
   // Asked first, because it is the one refusal that is already a sentence: the
@@ -189,6 +194,24 @@ export function refuseUnrunnable(extension: InstalledExtension): string | null {
     }
   }
   return null;
+}
+
+/**
+ * Why this machine cannot show it, though the package is perfectly good.
+ *
+ * The other half of [`refuseUnrunnable`], asked of the same manifest and kept
+ * separate from it on purpose. A project is one repository open on more than
+ * one machine: a package that opens a shell belongs in it, is correctly
+ * declared, and runs on the computer — and on a phone there is nothing behind
+ * the calls it makes. Folding this into the refusal above would make the phone
+ * decide what the project contains, and the first thing anybody would do about
+ * that is stop using the phone to arrange their project.
+ */
+export function unavailableFor(extension: InstalledExtension): string | null {
+  return unavailableHere({
+    syncApi: extension.manifest.engines.syncApi,
+    capabilities: extension.manifest.capabilities,
+  });
 }
 
 /**
@@ -280,6 +303,15 @@ export async function activate(extension: InstalledExtension): Promise<Activatio
 
   const unrunnable = refuseUnrunnable(extension);
   if (unrunnable !== null) throw new ActivationFailure(id, unrunnable);
+
+  // Before the fetch, for the reason every check in this file is: a section
+  // that mounted and then failed at its first call is an hour spent in the
+  // wrong place. The window does not usually get here — `useAreas` asks the
+  // same question and draws the section as unavailable instead of activating
+  // it — and this is what makes that an arrangement of the window rather than
+  // something a caller has to remember.
+  const elsewhere = unavailableFor(extension);
+  if (elsewhere !== null) throw new ActivationFailure(id, elsewhere);
 
   // A package with no module is not a failure and not an oddity: an extension
   // that publishes a vocabulary and a prompt has nothing to run, and its types

@@ -1,8 +1,15 @@
 //! Answering what the engine asks of Sync.
 //!
 //! Every other message between the two goes the other way: Sync asks, the
-//! engine answers. This is the one call that goes from there to here, and it
-//! carries a tool an agent asked for.
+//! engine answers. These are the calls that go from there to here — a tool an
+//! agent asked for, a fact about this machine's packages, and everything about
+//! talking to an agent, which is here because the process is here.
+//!
+//! One thing travels *out* on this connection without having been asked for: a
+//! word of a conversation somebody off this machine is watching, written as a
+//! notification under the number the engine's door minted for that watch. It is
+//! the only such message, and it carries no call — see
+//! [`sync_memory::SESSION_EVENT`].
 //!
 //! **A tool's body runs here because everything it reaches is here.** The
 //! keychain, the host list off the manifest a person installed, the artefact on
@@ -36,8 +43,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use sync_memory::{ATTEND, EXTENSION_FETCH, TOOL_CALL, carried};
+use sync_memory::{ATTEND, EXTENSION_FETCH, SESSION_DROPPED, TOOL_CALL, carried};
 use tauri::{AppHandle, Manager as _, Runtime};
+
+use crate::project::ProjectError;
 
 /// The largest file this channel will carry out of an artefact.
 ///
@@ -117,7 +126,7 @@ fn answer<R: Runtime>(app: &AppHandle<R>, stream: UnixStream) -> std::io::Result
         let id = request.get("id").cloned().unwrap_or(Value::Null);
         let params = request.get("params").cloned().unwrap_or_else(|| json!({}));
 
-        if method != TOOL_CALL && !carried(method) {
+        if method != SESSION_DROPPED && method != TOOL_CALL && !carried(method) {
             say(
                 &writing,
                 &refusal(&id, &format!("Sync does not answer `{method}`")),
@@ -133,14 +142,30 @@ fn answer<R: Runtime>(app: &AppHandle<R>, stream: UnixStream) -> std::io::Result
         let app = app.clone();
         let writing = Arc::clone(&writing);
         std::thread::spawn(move || {
-            let outcome = if method == TOOL_CALL {
-                run(&app, &params)
+            // Answered apart from the rest, because a conversation refuses in a
+            // vocabulary the window branches on: `agent_session_load` is the cue
+            // to continue from a kept transcript rather than from the agent,
+            // `worktree_missing` is a tree somebody deleted, `session_unknown`
+            // is a row that has already ended. Flattened into one kind they all
+            // become a screen that can only apologise — which is what every
+            // other call on this channel is allowed to be, and this one is not.
+            let answered = if sync_memory::about_a_session(&method) {
+                match about_a_conversation(&app, &writing, &method, &params) {
+                    Ok(answer) => json!({"jsonrpc": "2.0", "id": id, "result": answer}),
+                    Err(refused) => refused_as(&id, &refused.kind, &refused.message),
+                }
             } else {
-                about_a_package(&app, &method, &params)
-            };
-            let answered = match outcome {
-                Ok(answer) => json!({"jsonrpc": "2.0", "id": id, "result": answer}),
-                Err(why) => refusal(&id, &why),
+                let outcome = if method == TOOL_CALL {
+                    run(&app, &params)
+                } else if method == SESSION_DROPPED {
+                    nobody_is_watching(&app, &params)
+                } else {
+                    about_a_package(&app, &method, &params)
+                };
+                match outcome {
+                    Ok(answer) => json!({"jsonrpc": "2.0", "id": id, "result": answer}),
+                    Err(why) => refusal(&id, &why),
+                }
             };
             if let Err(error) = say(&writing, &answered) {
                 eprintln!("an answer to the memory engine could not be sent: {error}");
@@ -416,11 +441,288 @@ fn say(stream: &Arc<Mutex<UnixStream>>, message: &Value) -> std::io::Result<()> 
 /// tool that failed is a tool that failed, and what an agent does next is read
 /// the words rather than branch on a code.
 fn refusal(id: &Value, why: &str) -> Value {
+    refused_as(id, "extension_failed", why)
+}
+
+/// The same, keeping the word whoever refused chose.
+///
+/// The one caller is a conversation, and it is the one caller that has such a
+/// word: every kind [`crate::sessions`] refuses with is read by a screen that
+/// does something different for each. Everything else on this channel is a tool
+/// that failed, which is one thing however it failed.
+fn refused_as(id: &Value, kind: &str, why: &str) -> Value {
     json!({"jsonrpc": "2.0", "id": id, "error": {
         "code": -32000,
         "message": why,
-        "data": {"kind": "extension_failed"},
+        "data": {"kind": kind},
     }})
+}
+
+/// Answer one of the calls about talking to an agent.
+///
+/// **Every one of them calls the very function the window's own command calls.**
+/// Not a copy of it, not a narrower version: a phone and this window raise the
+/// same agent, in the same directory, with the same permission questions
+/// waiting in the same place — so a conversation started on one is continued on
+/// the other because there is only ever one conversation. A second
+/// implementation here would be a second answer to *what is running*, and the
+/// two would drift on the first check somebody added to one of them.
+///
+/// The project arrives as a path. The engine's door resolved the key a device
+/// named before this saw the call, exactly as it resolves the key on any other
+/// call from elsewhere, so nothing here knows or asks which door its caller
+/// came through.
+///
+/// # Errors
+///
+/// Whatever the command refused, kind and all.
+fn about_a_conversation<R: Runtime>(
+    app: &AppHandle<R>,
+    writing: &Arc<Mutex<UnixStream>>,
+    method: &str,
+    params: &Value,
+) -> Result<Value, ProjectError> {
+    use sync_memory::{
+        AGENT_ADAPTERS, AGENT_ADAPTERS_FORGET, AGENT_ADAPTERS_PREPARE, SESSION_BACKLOG,
+        SESSION_CANCEL, SESSION_CATALOG, SESSION_CLOSE, SESSION_FOR_RECORD, SESSION_FORGET,
+        SESSION_FORGET_REMEMBERED, SESSION_KEPT_AS, SESSION_LIVE, SESSION_OPEN,
+        SESSION_PERMISSION_RESPOND, SESSION_PROMPT, SESSION_REMEMBERED, SESSION_RENAME,
+        SESSION_RESUME, SESSION_SET_MODE, SESSION_SET_OPTION, SESSION_SUBSCRIBE,
+        SESSION_UNSUBSCRIBE,
+    };
+    use tauri::async_runtime::block_on;
+
+    let sessions = app.state::<crate::sessions::live::Sessions>();
+    let text = |member: &str| -> Result<String, ProjectError> {
+        params
+            .get(member)
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+            .ok_or_else(|| asked_without(member))
+    };
+    let number = |member: &str| -> Result<u64, ProjectError> {
+        params
+            .get(member)
+            .and_then(Value::as_u64)
+            .ok_or_else(|| asked_without(member))
+    };
+    let maybe = |member: &str| {
+        params
+            .get(member)
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+    };
+    match method {
+        SESSION_CATALOG => told(crate::sessions::session_catalog()),
+        SESSION_LIVE => told(crate::sessions::session_live(sessions)),
+        SESSION_OPEN => told(block_on(crate::sessions::session_open(
+            app.clone(),
+            sessions,
+            text("agentId")?,
+            text("project")?,
+            maybe("model"),
+            part(params, "worktree")?,
+            part(params, "under")?,
+        ))?),
+        SESSION_PROMPT => told(block_on(crate::sessions::session_prompt(
+            app.clone(),
+            sessions,
+            text("key")?,
+            text("text")?,
+            part(params, "attachments")?,
+            part(params, "images")?,
+        ))?),
+        SESSION_RESUME => told(block_on(crate::sessions::session_resume(
+            app.clone(),
+            sessions,
+            text("project")?,
+            text("acpSession")?,
+        ))?),
+        SESSION_REMEMBERED => told(crate::sessions::session_remembered(
+            app.clone(),
+            sessions,
+            text("project")?,
+        )?),
+        SESSION_FORGET_REMEMBERED => told(crate::sessions::session_forget_remembered(
+            app.clone(),
+            text("project")?,
+            text("acpSession")?,
+        )?),
+        SESSION_RENAME => told(crate::sessions::session_rename(
+            app.clone(),
+            sessions,
+            text("key")?,
+            text("title")?,
+        )?),
+        SESSION_CANCEL => told(crate::sessions::session_cancel(sessions, text("key")?)?),
+        SESSION_CLOSE => told(block_on(crate::sessions::session_close(
+            sessions,
+            text("key")?,
+        ))?),
+        SESSION_FORGET => told(block_on(crate::sessions::session_forget(
+            sessions,
+            text("key")?,
+        ))?),
+        SESSION_KEPT_AS => told(crate::sessions::session_kept_as(
+            app.clone(),
+            sessions,
+            text("key")?,
+            text("recordKey")?,
+        )?),
+        SESSION_FOR_RECORD => told(crate::sessions::session_for_record(
+            app.clone(),
+            text("project")?,
+            text("recordKey")?,
+        )?),
+        SESSION_SET_MODE => Ok(block_on(crate::sessions::session_set_mode(
+            sessions,
+            text("key")?,
+            text("modeId")?,
+        ))?),
+        SESSION_SET_OPTION => Ok(block_on(crate::sessions::session_set_option(
+            sessions,
+            text("key")?,
+            text("configId")?,
+            text("valueId")?,
+        ))?),
+        SESSION_PERMISSION_RESPOND => told(crate::sessions::session_permission_respond(
+            sessions,
+            text("key")?,
+            number("requestId")?,
+            maybe("optionId"),
+        )?),
+        SESSION_BACKLOG => told(crate::sessions::session_backlog(sessions, text("key")?)?),
+        SESSION_SUBSCRIBE => {
+            let watcher: Arc<dyn crate::sessions::live::Watcher> = Arc::new(Elsewhere {
+                subscription: number("subscription")?,
+                writing: Arc::clone(writing),
+            });
+            let dropped = crate::sessions::session_watched(
+                &sessions,
+                &text("key")?,
+                number("subscription")?,
+                params.get("since").and_then(Value::as_u64),
+                &watcher,
+            )?;
+            // The number goes back with the answer, and it is the door's rather
+            // than this side's: the device that asked has to know what its
+            // events will arrive under, and the alternative was a door
+            // reshaping an answer it did not write.
+            Ok(json!({"subscription": number("subscription")?, "dropped": dropped}))
+        }
+        SESSION_UNSUBSCRIBE => {
+            sessions.stop_watching(number("subscription")?);
+            Ok(Value::Null)
+        }
+        AGENT_ADAPTERS => told(crate::sessions::agent_adapters(app.clone())?),
+        AGENT_ADAPTERS_PREPARE => told(block_on(crate::sessions::agent_adapters_prepare(
+            app.clone(),
+        ))?),
+        AGENT_ADAPTERS_FORGET => told(block_on(crate::sessions::agent_adapters_forget(
+            app.clone(),
+        ))?),
+        // Named in `sync_memory::SESSIONS` and not here: a defect between two
+        // halves of one product, said in a sentence rather than left as a call
+        // that arrives with nothing to run it.
+        _ => Err(ProjectError::new(
+            "session_unsupported",
+            format!("Sync does not answer `{method}`"),
+        )),
+    }
+}
+
+/// One device has stopped watching, whether or not it said so.
+///
+/// The engine is the only side that can see it: this one writes events into a
+/// socket to a process that is still there, and the connection that ended is a
+/// hop further on. Without this a phone put in a pocket leaves a conversation
+/// serialising every word the agent writes into a queue nobody drains.
+///
+/// # Errors
+///
+/// None. A number nothing holds is what a device that said so itself before its
+/// connection ended looks like, and it is not worth a word.
+fn nobody_is_watching<R: Runtime>(app: &AppHandle<R>, params: &Value) -> Result<Value, String> {
+    let sessions = app.state::<crate::sessions::live::Sessions>();
+    for subscription in params
+        .get("subscriptions")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(Value::as_u64)
+    {
+        sessions.stop_watching(subscription);
+    }
+    Ok(Value::Null)
+}
+
+/// A device being shown a conversation, over the channel it asked on.
+///
+/// It writes onto the same socket every answer goes out on, behind the same
+/// lock, so an event and an answer written in the same instant are two lines
+/// rather than two halves of one. Where it goes after that is the engine's
+/// business: the number is what the engine looks up to find the connection.
+struct Elsewhere {
+    subscription: u64,
+    writing: Arc<Mutex<UnixStream>>,
+}
+
+impl crate::sessions::live::Watcher for Elsewhere {
+    fn saw(&self, event: &crate::sessions::event::SessionEvent) -> bool {
+        let Ok(event) = serde_json::to_value(event) else {
+            // An event that will not serialise is a defect in its own shape and
+            // not a device that has gone. Skipping one word is a smaller wrong
+            // than ending somebody's transcript over it.
+            eprintln!("an event of a watched conversation could not be written");
+            return true;
+        };
+        say(
+            &self.writing,
+            &json!({
+                "jsonrpc": "2.0",
+                "method": sync_memory::SESSION_EVENT,
+                "params": {"subscription": self.subscription, "event": event},
+            }),
+        )
+        .is_ok()
+    }
+}
+
+/// A member of a call about a conversation, read into what it stands for.
+///
+/// Absent is the default and never a refusal, because for every member that
+/// reaches this the default is the answer: no working tree, nothing to attach,
+/// no pictures, nothing said about what the conversation stands under. A phone
+/// that omits one is a phone whose caller had nothing to put there, which is the
+/// ordinary case rather than a malformed call.
+fn part<T: serde::de::DeserializeOwned + Default>(
+    params: &Value,
+    member: &str,
+) -> Result<T, ProjectError> {
+    match params.get(member) {
+        None | Some(Value::Null) => Ok(T::default()),
+        Some(value) => serde_json::from_value(value.clone()).map_err(|error| {
+            ProjectError::new(
+                "session_malformed",
+                format!("`{member}` is not one: {error}"),
+            )
+        }),
+    }
+}
+
+/// What a call of this family was missing, said as the engine's mistake.
+fn asked_without(member: &str) -> ProjectError {
+    ProjectError::new(
+        "session_malformed",
+        format!("the memory engine asked about a conversation without `{member}`"),
+    )
+}
+
+/// An answer in the shape a JSON line carries.
+fn told<T: serde::Serialize>(answer: T) -> Result<Value, ProjectError> {
+    serde_json::to_value(answer)
+        .map_err(|error| ProjectError::new("session_malformed", error.to_string()))
 }
 
 #[cfg(test)]

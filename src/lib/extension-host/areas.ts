@@ -7,6 +7,7 @@ import { kindIcon } from "@/components/shell/entity-marks";
 import {
   ActivationFailure,
   activate,
+  unavailableFor,
   type AreaModule,
   type LoadedArea,
 } from "@/lib/extension-host/activate";
@@ -77,16 +78,51 @@ export interface AreaFailure {
   readonly message: string;
 }
 
+/**
+ * A section this project has and this machine has nothing to run.
+ *
+ * Everything a row needs and no module, because there is no module: the
+ * manifest is read, the package is not started, and what is drawn is a name a
+ * person recognises with the reason it cannot be opened. That is the whole
+ * point of carrying it rather than dropping it — a project's sections are the
+ * same everywhere it is open, and one that silently had fewer of them on a
+ * phone would read as a project that had lost something.
+ */
+export interface UnavailableArea {
+  /** `<extension>/<area>`, as a mounted one is keyed. */
+  readonly key: string;
+  readonly extensionId: string;
+  readonly label: string;
+  /** Resolved from the name the manifest gave; neutral when it names none. */
+  readonly icon: LucideIcon;
+  /** Why this machine cannot open it, in a sentence to show beside the name. */
+  readonly reason: string;
+}
+
 export interface Areas {
   /** In the order the project declares its extensions. */
   readonly sections: readonly MountedArea[];
   /** What the project declared and this window could not run, with reasons. */
   readonly failures: readonly AreaFailure[];
+  /**
+   * What the project declared, correctly, and this machine cannot show.
+   *
+   * Empty on a computer, which is why nothing on the Mac reads it: every
+   * capability the surface names is kept there. It is the phone's list, and it
+   * is built here rather than in the phone's own window because what a project
+   * has is one question with one answer, whatever is drawing it.
+   */
+  readonly unavailable: readonly UnavailableArea[];
   /** True until every declared extension has been tried. */
   readonly isLoading: boolean;
 }
 
-const NOTHING: Areas = { sections: [], failures: [], isLoading: true };
+const NOTHING: Areas = {
+  sections: [],
+  failures: [],
+  unavailable: [],
+  isLoading: true,
+};
 
 /**
  * What identifies one run of one package.
@@ -122,6 +158,7 @@ export function useAreas(project: OpenProject, packages: Packages): Areas {
     const run = async () => {
       const sections: MountedArea[] = [];
       const failures: AreaFailure[] = [];
+      const unavailable: UnavailableArea[] = [];
 
       for (const id of declared === "" ? [] : declared.split(",")) {
         const packaged = packages.byId(id);
@@ -133,6 +170,24 @@ export function useAreas(project: OpenProject, packages: Packages): Areas {
         }
 
         const { manifest, pointer } = packaged;
+
+        // Asked before the module is fetched rather than caught after it: a
+        // package whose calls have nothing behind them on this machine would
+        // load, mount, draw and fail at the first thing a person did with it.
+        // The rows it would have brought are kept, named and unopenable.
+        const elsewhere = unavailableFor(packaged);
+        if (elsewhere !== null) {
+          for (const area of manifest.areas) {
+            unavailable.push({
+              key: `${manifest.id}/${area.id}`,
+              extensionId: manifest.id,
+              label: area.label,
+              icon: kindIcon(area.icon),
+              reason: elsewhere,
+            });
+          }
+          continue;
+        }
 
         const key = runOf(manifest.id, manifest.version, packaged.ui);
         let outcome = activations.current.get(key);
@@ -176,7 +231,7 @@ export function useAreas(project: OpenProject, packages: Packages): Areas {
         }
       }
 
-      if (current) setAreas({ sections, failures, isLoading: false });
+      if (current) setAreas({ sections, failures, unavailable, isLoading: false });
     };
 
     void run();

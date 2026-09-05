@@ -20,31 +20,28 @@
 //! runs for a day would be asked about thousands of times for one answer, and
 //! the answer arrives as an ordinary turn anyway.
 //!
-//! # One child at a time
+//! # Every delegated run starts when it is ordered
 //!
 //! Work delegated from a conversation is performed **in that conversation's own
 //! working tree** — an order does not choose where it is carried out
-//! (`docs/background.md` §6.2), and a tree of its own for every delegated run
-//! was weighed and left out. So two of them at once are two agents editing one
-//! set of files, and the second waits for the first.
+//! (`docs/background.md` §6.2). So two of them at once are two agents editing
+//! one set of files, and both go anyway. The tree is the person's, and so is
+//! the decision: somebody who delegates a second piece of work while the first
+//! is going has said what they want happening in it.
 //!
-//! That is the whole of the reason, and it is the whole of what would lift it:
-//! the day delegated work is carried out somewhere of its own, this queue has
-//! nothing left to protect and goes.
-//!
-//! The waiting is held in memory rather than in the file, and that is
-//! deliberate. What survives a restart is the account of what was ordered —
-//! [`super::Ordered`] with no session on it, which reads as *ordered, never
-//! started*, the state that file already exists to show. Writing the waiting
-//! down instead would mean something raising an agent by itself after a launch,
-//! which is the one thing this module is built not to do.
+//! Holding the second back until the first was finished is the alternative, and
+//! it costs the thing delegating is for. An agent that has been asked to do
+//! something is expected to be doing it, and a conversation that has been open
+//! for an hour with nothing asked of it is a wait nobody ordered — invisible in
+//! the transcript, because the turn that is waiting has not been sent. What is
+//! bought for that hour is narrower than it looks: two agents that ran an hour
+//! apart still meet in what the first one left behind.
 
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, Runtime};
-use tokio::sync::oneshot;
 
 use crate::project::{ProjectError, configuration_file, write_configuration};
 use crate::sessions::event::{Status, now_ms};
@@ -153,12 +150,14 @@ fn message(outcomes: &[Outcome]) -> String {
 /// It is added to the prompt rather than said separately, so it is one message
 /// in the transcript of the work: a person reading it sees exactly what the
 /// agent was asked, in one place.
-pub(crate) fn briefed(text: &str) -> String {
+pub(crate) fn briefed(text: &str, parent: &str) -> String {
     format!(
-        "{text}\n\n---\n\nThis work was delegated from another conversation. Whatever you say \
-         last in this turn is what goes back to it, on its own: that conversation cannot read \
-         anything else said here. End with the answer itself, not with a note about having \
-         finished."
+        "{text}\n\n---\n\nThis work was delegated from another conversation, `{parent}`. \
+         Whatever you say last in this turn is what goes back to it, on its own: that \
+         conversation cannot read anything else said here. End with the answer itself, not with \
+         a note about having finished.\n\nIf this needs work delegated of its own, it is \
+         delegated from `{parent}` and not from here: a chain is two conversations deep, so what \
+         you delegate stands beside this one rather than under it."
     )
 }
 
@@ -375,90 +374,14 @@ pub(crate) fn forget<R: Runtime>(app: &AppHandle<R>, project: &str) {
     let _ = store.write(&path);
 }
 
-/// Which conversations have a delegated run under them, and what is queued
-/// behind it.
+/// The lock over this module's file.
 ///
-/// The lock over the file is here rather than in [`super::WorkFile`] because
-/// this is a second file with a second read-modify-write, and one lock over two
-/// files would make each of them wait for the other for no reason.
+/// Its own rather than [`super::WorkFile`]'s because this is a second file with
+/// a second read-modify-write, and one lock over two files would make each of
+/// them wait for the other for no reason.
 #[derive(Default)]
 pub struct Delegations {
     file: Mutex<()>,
-    slots: Arc<Mutex<Slots>>,
-}
-
-/// One conversation's turn to have a delegated run, and the queue for it.
-///
-/// A key that is present is a conversation with a run under it; the queue held
-/// against it is what is waiting. Absent is free, which is why taking a slot
-/// and finding nothing is the ordinary case and costs one insert.
-#[derive(Default)]
-struct Slots {
-    running: HashMap<(String, String), VecDeque<oneshot::Sender<()>>>,
-}
-
-impl Slots {
-    /// Takes the slot, or answers with what to wait on until it is free.
-    fn admit(&mut self, at: (String, String)) -> Option<oneshot::Receiver<()>> {
-        let Some(queue) = self.running.get_mut(&at) else {
-            self.running.insert(at, VecDeque::new());
-            return None;
-        };
-        let (tx, rx) = oneshot::channel();
-        queue.push_back(tx);
-        Some(rx)
-    }
-
-    /// Gives the slot to whoever is next, or gives it up.
-    fn release(&mut self, at: &(String, String)) {
-        let Some(queue) = self.running.get_mut(at) else {
-            return;
-        };
-        // A waiter whose task is gone — the application is closing, or the run
-        // it belonged to was abandoned — is skipped rather than counted: the
-        // slot has to end up with somebody who can still use it.
-        while let Some(next) = queue.pop_front() {
-            if next.send(()).is_ok() {
-                return;
-            }
-        }
-        self.running.remove(at);
-    }
-}
-
-/// A conversation's slot, held for as long as its delegated run is going.
-///
-/// Released on drop, which is what makes the release the same in every way a
-/// run can end: finished, refused before it started, or the task cancelled
-/// under it.
-pub(crate) struct Slot {
-    at: (String, String),
-    held: Arc<Mutex<Slots>>,
-}
-
-impl Drop for Slot {
-    fn drop(&mut self) {
-        if let Ok(mut slots) = self.held.lock() {
-            slots.release(&self.at);
-        }
-    }
-}
-
-/// Waits until this conversation has no other delegated run going, and takes
-/// the slot.
-pub(crate) async fn slot<R: Runtime>(app: &AppHandle<R>, project: &str, parent: &str) -> Slot {
-    let held = Arc::clone(&app.state::<Delegations>().slots);
-    let at = (project.to_owned(), parent.to_owned());
-    let waiting = held
-        .lock()
-        .map_or(None, |mut slots| slots.admit(at.clone()));
-    if let Some(waiting) = waiting {
-        // A sender dropped without sending is the slot's holder going away
-        // without releasing, which cannot happen while `Slot` releases on drop.
-        // If it somehow does, going ahead is better than waiting for ever.
-        let _ = waiting.await;
-    }
-    Slot { at, held }
 }
 
 #[cfg(test)]
@@ -602,68 +525,6 @@ mod tests {
         assert!(store.take("/other/clone", "parent-2").is_empty());
     }
 
-    /// The fourth criterion. Synchronous throughout on purpose: what is being
-    /// asserted is the bookkeeping, and a test that had to schedule two tasks
-    /// to see it would be asserting the runtime instead.
-    #[test]
-    fn one_conversation_has_one_delegated_run_and_the_next_waits() {
-        let mut slots = Slots::default();
-        let at = ("/work/repo".to_owned(), "parent-1".to_owned());
-
-        assert!(
-            slots.admit(at.clone()).is_none(),
-            "the first goes ahead without waiting"
-        );
-        let mut second = slots.admit(at.clone()).expect("the second waits");
-        let mut third = slots.admit(at.clone()).expect("and so does the third");
-        assert!(
-            second.try_recv().is_err(),
-            "and it is still waiting while the first is going"
-        );
-
-        // Another conversation is another slot: the limit is on one parent, not
-        // on the machine.
-        assert!(
-            slots
-                .admit(("/work/repo".to_owned(), "parent-2".to_owned()))
-                .is_none()
-        );
-
-        slots.release(&at);
-        assert!(
-            second.try_recv().is_ok(),
-            "the first ended, so the second goes"
-        );
-        assert!(
-            third.try_recv().is_err(),
-            "and the third is behind the second, not beside it"
-        );
-
-        slots.release(&at);
-        assert!(third.try_recv().is_ok());
-        slots.release(&at);
-        assert!(
-            slots.admit(at).is_none(),
-            "and with nobody left the slot is free again"
-        );
-    }
-
-    /// A waiter that has gone away does not take the slot with it.
-    #[test]
-    fn a_run_that_was_abandoned_does_not_hold_the_slot_shut() {
-        let mut slots = Slots::default();
-        let at = ("/work/repo".to_owned(), "parent-1".to_owned());
-        slots.admit(at.clone());
-        drop(slots.admit(at.clone()).expect("a second waits"));
-        let mut third = slots.admit(at.clone()).expect("and a third");
-
-        slots.release(&at);
-        assert!(
-            third.try_recv().is_ok(),
-            "the one that went away is skipped rather than counted"
-        );
-    }
-
     /// What a conversation is handed when the work said nothing, which is a
     /// turn that stopped on a tool call or was cut short.
     #[test]
@@ -689,8 +550,12 @@ mod tests {
     /// The agent writing the answer is told that it is writing one.
     #[test]
     fn delegated_work_is_told_what_its_last_words_are_for() {
-        let briefed = briefed("Rename the columns");
+        let briefed = briefed("Rename the columns", "sess-14");
         assert!(briefed.starts_with("Rename the columns"));
         assert!(briefed.contains("what goes back to it"), "{briefed}");
+        // The identifier, and it is the half an agent cannot work out for
+        // itself: said nowhere, a conversation that needs a second pair of
+        // hands delegates under nothing and its work stands loose.
+        assert!(briefed.contains("`sess-14`"), "{briefed}");
     }
 }

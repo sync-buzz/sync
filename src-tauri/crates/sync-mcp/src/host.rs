@@ -168,6 +168,18 @@ impl Host {
             .map(|project| project.path().to_owned())
     }
 
+    /// What a registered project at `path` is called.
+    ///
+    /// The reverse of [`Self::project_named`], and the door asks it for one
+    /// reason: an answer on its way to a device must name projects the way that
+    /// device names them. A call from a phone said `SYNC` and was answered
+    /// about a directory; handing the directory back would tell it where
+    /// somebody's work is, which is precisely what taking only keys was for.
+    #[must_use]
+    pub fn key_at(&self, path: &std::path::Path) -> Option<String> {
+        self.projects.key_at(path)
+    }
+
     /// Run one call.
     ///
     /// # Errors

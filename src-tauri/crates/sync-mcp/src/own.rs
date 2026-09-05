@@ -1269,6 +1269,38 @@ const TOPICS: &[(&str, &str, &str)] = &[
          Do not invent a folder for a file. Where a project keeps its documents is the \
          project's arrangement, written into the type by whoever attached the folder.",
     ),
+    (
+        "delegation",
+        "Before handing a piece of work to a second agent, and when you were told this work came \
+         from one.",
+        "Work can be carried out in a conversation of its own, by a second agent, while this one \
+         goes on. Whether there is a tool for it here is a fact about what this project has \
+         installed rather than about Sync: `sync_project` names what each package offers, and \
+         the topic `extension:<id>` states what its tools take.\n\n\
+         What follows holds however that work is ordered.\n\n\
+         **The answer comes back on its own, and nothing asks for it.** Whatever the second \
+         agent says last arrives here as an ordinary message, once this conversation is not in \
+         the middle of a turn. There is no tool to ask whether it has finished and that is not \
+         an omission: work that runs for a day would be asked about thousands of times for one \
+         result. So end your turn after delegating. If you were about to say you would check on \
+         it, say what you handed over and stop.\n\n\
+         **The conversation you delegate to reads nothing of this one.** It starts in this \
+         project's folder with the text you wrote and no other part of what was said here, so \
+         what it needs is in that text or nowhere.\n\n\
+         **A chain is two conversations deep.** A conversation somebody opened may delegate; \
+         what it delegated may not, and the third is refused in words rather than quietly \
+         flattened. So when you are the one that was delegated to, what you hand over stands \
+         beside you rather than under you, and waits for you to finish — two runs under one \
+         conversation happen one at a time, because they are carried out in that conversation's \
+         own working tree.\n\n\
+         **You cannot find out what your own conversation is called.** Where an identifier is \
+         wanted for the conversation work comes out of, the only right value is one you were \
+         told in your own instructions. A guess files somebody's work under somebody else's \
+         heading, and work handed over with none simply stands on its own — which is the honest \
+         answer and not a failure.\n\n\
+         What the work is *about*, and who ordered it, are read from the conversation it was \
+         delegated from. Neither is yours to state, and there is nothing to leave out.",
+    ),
 ];
 
 /// One tool, described.

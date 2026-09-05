@@ -19,5 +19,23 @@
 <dict>
 	<key>NSCameraUsageDescription</key>
 	<string>Sync reads the pairing code your computer is showing, so that this phone can reach it. The camera is used for nothing else.</string>
+	<!--
+	  Asked for because the computer is usually on the same network as the
+	  phone, and that is the short way to it: without this the connection can
+	  only go out to a relay and back, which is slower and needs the internet
+	  to reach a machine in the same room. iOS refuses local addresses outright
+	  until somebody has agreed to this, and refuses them silently.
+	-->
+	<!--
+	  Said once here rather than answered by hand on every upload. The channel
+	  is encrypted by its transport — QUIC, with the ends authenticated — and
+	  nothing in this application implements cryptography of its own, which is
+	  exactly the exemption. Left out, App Store Connect asks the question again
+	  for each build and holds the build in TestFlight until somebody answers.
+	-->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Sync reaches your computer directly when it is on the same network as this phone. Nothing is sent anywhere else.</string>
 </dict>
 </plist>

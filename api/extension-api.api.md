@@ -144,6 +144,9 @@ export const buttonVariants: (props?: ({
 } & ClassProp) | undefined) => string;
 
 // @public
+export function capabilitiesHere(): readonly SyncCapability[];
+
+// @public
 export function chooseAttachments(defaultPath: string): Promise<readonly string[]>;
 
 // @public (undocumented)
@@ -1301,9 +1304,14 @@ export type SessionStatus =
 /** A turn is running. */
 | "working"
 /**
-* A turn has been said into it and is waiting its turn to run. What a
-* conversation delegated from one that already has a delegated run under it
-* says until that one is finished.
+* A turn has been said into a conversation and has not started.
+*
+* **Nothing in this build reports it.** A delegated turn starts when it is
+* ordered, however many are already going under the same conversation:
+* they share one working tree, and whose tree it is answers who decides
+* (`src-tauri/src/work/delegated.rs`). The member is kept rather than
+* dropped because dropping something a status can be is a major, and the
+* number would go on a word instead of on anything a package can be handed.
 */
 | "queued"
 /** Stopped on a question only a person can answer. */
@@ -1416,7 +1424,7 @@ export function stopSession(key: string): Promise<void>;
 export function supportsApiRange(range: string): boolean;
 
 // @public
-export const SYNC_API_VERSION: "3.9.0";
+export const SYNC_API_VERSION: "3.10.0";
 
 // @public
 export const SYNC_CAPABILITIES: readonly ["records", "agents.acp", "markdown.plugins", "native-menu", "folders", "sheets", "net", "net.write", "vault", "background", "schedule", "work.agent", "agent.tools", "terminal"];
@@ -1580,6 +1588,9 @@ export function TypeSheet(input: {
 export interface TypeStorage {
     readonly folder?: string | null;
 }
+
+// @public
+export function unavailableHere(required: ApiRequirement): string | null;
 
 // @public
 export function UnmatchedFiles(input: {

@@ -538,6 +538,39 @@ It arrives in exactly one situation — a package built against a newer host —
 treating it as satisfied would run an extension that asked for something and did
 not get it, which fails later and somewhere else.
 
+**The build is not the machine, and four of these are the Mac's.** One static
+export is shown by two applications, and the phone registers no command behind
+`agents.acp`, `vault`, `terminal` or `native-menu`: a session is a process held
+open by the application that started it, the keychain a package writes into is
+the one where its code runs, a shell needs a folder to attach to, and a system
+menu is what a pointer's secondary button opens. Everything else on the list is
+kept there, because a handler's work — reaching a host, running on a clock,
+ordering work — is executed on the computer the phone is paired with.
+
+So `SYNC_CAPABILITIES` is what the build publishes and `capabilitiesHere()` is
+what the machine honours. A package that degrades deliberately asks the second;
+a manifest is checked against the first, because what a manifest is checked
+against is a *project* — one repository open on several machines, where a phone
+that withdrew a package the computer runs would be deciding for the computer.
+
+**Two of the four are fatal and two are not, and that is a judgement rather
+than a reading.** A package asks for `terminal` because it *is* a terminal, and
+for `vault` because the first thing it does is read the credential it works
+through; neither has a smaller version of itself to fall back to. `native-menu`
+is a gesture a phone has no way to make, and `agents.acp` is the half of a
+package that raises a process — a conversation still reads and a record still
+opens without either. Nothing in a manifest could carry that difference: every
+capability in it is stated the same way, and authors state everything they
+touch. So it is `NOTHING_RUNS_WITHOUT` in `extension-api/version.ts`, and the
+alternative was measured before it was rejected — almost every package
+published asks for `native-menu`, so refusing on all four would leave a phone
+with an empty window and no honest reason for it.
+
+`unavailableHere` answers for the two, and what it decides is only what this
+screen shows: the section is drawn in the phone's list and cannot be opened,
+the card in the marketplace is held back a tier, and every button on the
+extension's page stays as it was.
+
 **Four of them are about code with no screen, and they are four agreements
 because they are four different questions.** `background` is this package
 running its own code; `schedule` is running it unattended; `work.agent` is
@@ -877,6 +910,7 @@ a statement rather than a gate.
 | --- | --- | --- |
 | The card says *needs a newer Sync* | `engines.syncApi` excludes `SYNC_API_VERSION` | `extension-api/version.ts` |
 | The card names a capability | The manifest asks for something this build does not publish | `refuseIncompatible` |
+| A section drawn and not openable, under *these need a computer* | The manifest asks for something this **machine** does not honour and the package cannot go on without — on a phone, `vault` or `terminal` | `unavailableHere`, and `useAreas` before anything is loaded |
 | A `TypeError` naming neither the policy nor the scheme | CORS. The module was fetched cross-origin and the response carried no `Access-Control-Allow-Origin` for this window's origin | The `syncext://` handler in `src-tauri/src/extensions.rs` |
 | The section is there and unstyled | The stylesheet was not compiled from the package's own source, so utilities the shell does not happen to use produced no rule at all | `sync-ext build`, and the `styles` field |
 | An empty column | An area returned a slot its frame does not have, or did not return one it does | `extension-host/activate.ts` |

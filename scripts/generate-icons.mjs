@@ -22,13 +22,28 @@
 
 import { Buffer } from "node:buffer";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import sharp from "sharp";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const ICONS_DIR = join(ROOT, "src-tauri", "icons");
+/**
+ * The phone's icons, which Xcode reads as an asset catalogue rather than as
+ * files named in a configuration. Written here so that the glyph has one home:
+ * the catalogue was filled once by `tauri ios init` from whatever the icon was
+ * that day, and nothing has redrawn it since — which is how the phone ended up
+ * wearing a mark the product had already stopped using.
+ */
+const IOS_ICONSET = join(
+  ROOT,
+  "src-mobile",
+  "gen",
+  "apple",
+  "Assets.xcassets",
+  "AppIcon.appiconset",
+);
 const APP_DIR = join(ROOT, "src", "app");
 
 /** Glyph path and its bounding box, lifted verbatim from the source SVG. */
@@ -241,10 +256,17 @@ function trayTemplateSvg(canvas) {
 }
 
 /** Renders one icon at `size`, picking the rendition and glyph weight that size can carry. */
-function render(plate, size) {
+function render(plate, size, { opaque = false } = {}) {
   const svg = iconSvg({ plate, glyphRatio: glyphRatioFor(size), glass: size > FLAT_MAX_SIZE });
-  return sharp(Buffer.from(svg), { density: 512 })
-    .resize(size, size, { kernel: "lanczos3" })
+  const drawn = sharp(Buffer.from(svg), { density: 512 }).resize(size, size, {
+    kernel: "lanczos3",
+  });
+  // The store refuses an icon with an alpha channel, and iOS rounds the corners
+  // itself — so what is transparent outside the squircle is laid on the plate's
+  // own colour rather than kept. The two are the same white, so nothing about
+  // the drawing changes; what changes is that the file has no transparency to
+  // be refused for.
+  return (opaque ? drawn.flatten({ background: PLATE }) : drawn)
     .png({ compressionLevel: 9 })
     .toBuffer();
 }
@@ -312,6 +334,33 @@ const PNG_RENDITIONS = [
 
 const ICO_SIZES = [16, 24, 32, 48, 64, 128, 256];
 
+/**
+ * Redraws the phone's asset catalogue from the same glyph.
+ *
+ * The sizes are read from the catalogue's own `Contents.json` rather than
+ * listed here: Xcode is what decides which renditions an application needs, and
+ * a list kept beside it would go stale the first time Apple changed its mind —
+ * silently, because a missing rendition is a warning at build time and a blurry
+ * icon on somebody's home screen.
+ */
+async function writeAppleIconset() {
+  const catalogue = JSON.parse(
+    readFileSync(join(IOS_ICONSET, "Contents.json"), "utf8"),
+  );
+
+  const drawn = new Map();
+  for (const image of catalogue.images) {
+    if (!image.filename) continue;
+    const [side] = String(image.size).split("x");
+    const pixels = Math.round(Number(side) * Number(String(image.scale).replace("x", "")));
+    if (!Number.isFinite(pixels) || pixels <= 0) continue;
+    if (!drawn.has(pixels)) {
+      drawn.set(pixels, await render("full-bleed", pixels, { opaque: true }));
+    }
+    writeFileSync(join(IOS_ICONSET, image.filename), drawn.get(pixels));
+  }
+}
+
 async function main() {
   mkdirSync(ICONS_DIR, { recursive: true });
 
@@ -324,6 +373,8 @@ async function main() {
   for (const [name, size] of PNG_RENDITIONS) {
     writeFileSync(join(ICONS_DIR, name), await render("full-bleed", size));
   }
+
+  await writeAppleIconset();
 
   const frames = [];
   for (const size of ICO_SIZES) {

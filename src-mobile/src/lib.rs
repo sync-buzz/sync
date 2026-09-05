@@ -33,6 +33,24 @@ const KEEPER: &str = "sync";
 /// tests, rather than a second reader of a format written down twice.
 const PAIRING: &str = "pairing";
 
+/// Where the project this phone was last looking at is written down.
+///
+/// **Beside the pairing because the webview reloads without being asked to.**
+/// On a Mac the window is the application and a reload is somebody pressing a
+/// key; here the system does it — a phone comes back from the background, the
+/// content process is reclaimed — and everything React was holding goes with
+/// it. Which project a person had open is the one piece of that they would
+/// notice, because losing it puts them back at a list they chose from an hour
+/// ago.
+///
+/// In the same store as the pairing, and the store is the keychain. Not because
+/// a project's key is a secret — it is not — but because a phone has one place
+/// to write anything durably, and a second mechanism for one short string is a
+/// second thing to keep working across an upgrade. What it costs is a line in
+/// the keychain; what a file beside the application would cost is finding out,
+/// in a year, that the two are backed up under different rules.
+const PLACE: &str = "place";
+
 /// What this window is running on, said before the document runs.
 ///
 /// The window's code is one export shown by both applications, and nothing in
@@ -92,6 +110,26 @@ pub fn run() {
     );
     let _ = std::io::Write::write_all(&mut std::io::stderr(), greeting.as_bytes());
 
+    // Which cryptography this process uses, said before anything can ask.
+    //
+    // `rustls` takes a provider from the process rather than from the caller,
+    // and the one in this tree is built with none installed: the desktop gets
+    // one for free because something in its dependencies asks for `aws-lc-rs`,
+    // and nothing here does. The first HTTPS client built then panics instead
+    // of failing — and it is built deep inside the transport, on a thread with
+    // nothing above it to report, so what a person sees is the application
+    // disappearing at launch with the system log holding the only sentence
+    // about why.
+    //
+    // Worse, *when* it is built depends on the network: a phone that reaches
+    // its computer directly never needs a relay and never builds one. So this
+    // is not a line that can be left until it is observed to be missing — it
+    // is missing on somebody else's network, not on this desk.
+    //
+    // The result is deliberately dropped. It is an error only if a provider
+    // was already installed, which is the state this line wants.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     // The runtime is named rather than inferred: a plugin that registers no
     // command gives the compiler nothing to read it off.
     let builder = tauri::Builder::default().plugin(
@@ -124,6 +162,10 @@ pub fn run() {
             // there are, and a phone that has a computer it has not reached yet
             // must not answer that it has none — that reads as a pairing lost
             // rather than as a connection being made.
+            // The screen the window was given, in full. See `fill_the_screen`.
+            #[cfg(target_os = "ios")]
+            keep_the_screen(app.handle());
+
             if let Some(pairing) = remembered() {
                 app.state::<Channel>().hold(&pairing);
                 let handle = app.handle().clone();
@@ -143,9 +185,103 @@ pub fn run() {
             channel_pair,
             channel_pair_by_hand,
             channel_forget,
+            place_held,
+            place_hold,
         ])
         .run(tauri::generate_context!())
         .expect("the window could not be opened");
+}
+
+/// Say it once now and again every time the system lays the window out.
+///
+/// Once is not enough, and the failure is silent in both directions. At setup
+/// the view may not be in a window yet, and `fill_the_screen` answers that by
+/// doing nothing — there is no screen to be measured against. Later, UIKit
+/// lays the window out again whenever it changes size, and a frame set by hand
+/// is a frame the next layout pass is free to put back inside the safe area.
+///
+/// What that looked like is worth writing down, because it reads as a design
+/// decision rather than as a fault: a bar at the foot of a screen standing a
+/// finger's width above the bottom of the phone, over a band of nothing, with
+/// the interface looking like a page that had been cut off short.
+///
+/// Resizing the *webview* is not resizing the window, so this cannot chase its
+/// own tail — nothing here emits the event that brings it back.
+#[cfg(target_os = "ios")]
+fn keep_the_screen<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    fill_the_screen(app);
+
+    // And again on the next turn of the main loop, which is the first moment
+    // the window is certainly on the screen. Setup runs while it is being
+    // built, and a view with no window has no bounds to be given: that call is
+    // the one that quietly does nothing, and this is the one that lands.
+    let soon = app.clone();
+    let _ = app.run_on_main_thread(move || fill_the_screen(&soon));
+
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    let handle = app.clone();
+    window.on_window_event(move |event| {
+        if matches!(event, tauri::WindowEvent::Resized(_)) {
+            fill_the_screen(&handle);
+        }
+    });
+}
+
+/// Give the webview the whole screen, rather than the part inside the notch.
+///
+/// A phone's window is not a Mac's. `tao` reports an iOS window's inner size as
+/// its safe area, and `wry` builds the webview from the view it is handed — so
+/// the document is laid out inside a box that stops short of the hardware, and
+/// what is left over is a band of empty grey along the foot that no CSS can
+/// reach. `100dvh` measures the short box; `viewport-fit=cover` describes a
+/// viewport the webview does not have.
+///
+/// So it is said in UIKit, once, where the frame actually lives: the webview
+/// takes the window's bounds and keeps them through a rotation. The insets
+/// themselves are not lost — the document reads them through `env()` and keeps
+/// its own head and foot clear, which is what makes this a correction of the
+/// frame rather than a decision about the layout.
+///
+/// `contentInsetAdjustmentBehavior` goes with it: left alone, the scroll view
+/// adds the same inset a second time, and the band comes back half as tall.
+#[cfg(target_os = "ios")]
+fn fill_the_screen<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+    use objc2_core_foundation::CGRect;
+    use tauri::Manager as _;
+
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+
+    // Errors here are not worth a word to anybody: a window that could not be
+    // reached is a window that is not on the screen, and this is about how one
+    // that *is* on the screen is proportioned.
+    drop(window.with_webview(|platform| unsafe {
+        let webview: *mut AnyObject = platform.inner().cast();
+        let screen: *mut AnyObject = msg_send![webview, window];
+        if screen.is_null() {
+            return;
+        }
+        let bounds: CGRect = msg_send![screen, bounds];
+        let container: *mut AnyObject = msg_send![webview, superview];
+        let frame: CGRect = if container.is_null() {
+            bounds
+        } else {
+            msg_send![container, convertRect: bounds, fromView: screen]
+        };
+        let _: () = msg_send![webview, setFrame: frame];
+        // Flexible width and height, so a rotation does not undo this.
+        let _: () = msg_send![webview, setAutoresizingMask: 2_usize | 16_usize];
+        let scroller: *mut AnyObject = msg_send![webview, scrollView];
+        if !scroller.is_null() {
+            // Never: the document already accounts for the hardware itself.
+            let _: () = msg_send![scroller, setContentInsetAdjustmentBehavior: 2_isize];
+        }
+    }));
 }
 
 /// Whether this phone has a computer, and whether it is talking to it.
@@ -212,12 +348,57 @@ fn pair(payload: String, channel: State<'_, Channel>) -> Result<Value, String> {
 #[tauri::command(async)]
 fn channel_forget(channel: State<'_, Channel>) -> Value {
     channel.close();
-    if let Ok(vault) = Vault::system()
-        && let Ok(slot) = Slot::new(KEEPER, PAIRING)
-    {
-        drop(vault.forget(&slot));
+    if let Ok(vault) = Vault::system() {
+        // And where this phone was in it. A project key belongs to the computer
+        // that holds it, so one kept across a re-pairing would send the next
+        // launch looking for a project on a machine that may never have heard
+        // of it.
+        for named in [PAIRING, PLACE] {
+            if let Ok(slot) = Slot::new(KEEPER, named) {
+                drop(vault.forget(&slot));
+            }
+        }
     }
     channel_status(channel)
+}
+
+/// The project this phone was last looking at, if it was looking at one.
+///
+/// Answered before anything has been dialled, which is what makes it usable at
+/// launch: it is a fact about this phone rather than about the computer, and a
+/// window that had to reach a computer to find out where it was would show the
+/// list of projects every time the network was slow.
+///
+/// The window still opens the project by asking the computer about it. This is
+/// only the key — the name, what it declares and everything else is read the
+/// same way it is read when somebody taps a row, so a project renamed or
+/// removed while this phone was away is answered by the computer rather than by
+/// a stale copy here.
+#[tauri::command(async)]
+fn place_held() -> Option<String> {
+    let vault = Vault::system().ok()?;
+    let slot = Slot::new(KEEPER, PLACE).ok()?;
+    let held = vault.read(&slot).ok()?;
+    (!held.is_empty()).then_some(held)
+}
+
+/// Write down where this phone is, or that it is nowhere.
+///
+/// Best effort in both directions, and deliberately: a keychain that would not
+/// answer costs somebody one tap after a reload, and refusing to open a project
+/// over it would cost them the project.
+#[tauri::command(async)]
+fn place_hold(project: Option<String>) {
+    let Ok(vault) = Vault::system() else {
+        return;
+    };
+    let Ok(slot) = Slot::new(KEEPER, PLACE) else {
+        return;
+    };
+    match project {
+        Some(project) => drop(vault.write(&slot, &project)),
+        None => drop(vault.forget(&slot)),
+    }
 }
 
 /// The pairing this phone was given, read back from the keychain.

@@ -12,9 +12,9 @@ use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sync_memory::{
-    ContentView, Dependents, Document, DocumentEdits, FetchOutcome, FolderEntry, LaunchConfig,
-    MemoryClient, MemoryError, MemoryPresence, Operations as _, RecordType, RecordsPage,
-    ScanOutcome, SyncState, TransactionResult, TransportStatus,
+    ContentView, Dependents, Document, DocumentEdits, FetchOutcome, FolderAttachment, FolderEntry,
+    LaunchConfig, MemoryClient, MemoryError, MemoryPresence, Operations as _, RecordType,
+    RecordsPage, ScanOutcome, SyncState, TransactionResult, TransportStatus, TypeRemoval,
 };
 use tauri::{AppHandle, Manager, Runtime, State};
 
@@ -364,8 +364,7 @@ pub async fn memory_type_create<R: Runtime>(
 ) -> CommandResult<Vec<RecordType>> {
     sessions
         .with_session(&app, &project, move |client| {
-            client.create_type(&kind, &title, &description, &icon)?;
-            client.list_types()
+            client.types_after_create(&kind, &title, &description, &icon)
         })
         .await
 }
@@ -391,8 +390,7 @@ pub async fn memory_extension_types_publish<R: Runtime>(
     let types = serde_json::to_value(&types).unwrap_or(Value::Null);
     sessions
         .with_session(&app, &project, move |client| {
-            client.publish_extension_types(&types)?;
-            client.list_types()
+            client.types_after_publishing(&types)
         })
         .await
 }
@@ -445,25 +443,9 @@ pub async fn memory_type_update<R: Runtime>(
 ) -> CommandResult<Vec<RecordType>> {
     sessions
         .with_session(&app, &project, move |client| {
-            client.update_type(&kind, &title, &description, &icon)?;
-            client.list_types()
+            client.types_after_update(&kind, &title, &description, &icon)
         })
         .await
-}
-
-/// What removing a type took with it.
-///
-/// The count is the answer to the question the confirmation asked, reported
-/// back from the write rather than from the count the window showed before it:
-/// the two differ if anything was written in between, and the one that happened
-/// is the true one.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TypeRemoval {
-    /// The corpus as it now stands.
-    pub types: Vec<RecordType>,
-    /// How many records of the type were deleted with its definition.
-    pub removed: usize,
 }
 
 /// Remove a type and every record written as it.
@@ -480,26 +462,9 @@ pub async fn memory_type_delete<R: Runtime>(
 ) -> CommandResult<TypeRemoval> {
     sessions
         .with_session(&app, &project, move |client| {
-            let removed = client.delete_type(&kind)?;
-            Ok(TypeRemoval {
-                types: client.list_types()?,
-                removed,
-            })
+            client.types_after_delete(&kind)
         })
         .await
-}
-
-/// What attaching a folder produced: the corpus's types, and what the first
-/// scan made of the files already in it.
-///
-/// Both halves matter to the window. The type is what the navigator lists; the
-/// scan is what turned the documents on disk into records, and its unmatched
-/// entries are the one part of attaching that a person has to answer.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FolderAttachment {
-    pub types: Vec<RecordType>,
-    pub scan: ScanOutcome,
 }
 
 /// The type a folder becomes.
@@ -537,17 +502,13 @@ pub async fn memory_folder_attach<R: Runtime>(
 ) -> CommandResult<FolderAttachment> {
     sessions
         .with_session(&app, &project, move |client| {
-            let scan = client.attach_folder(
+            client.folder_attachment(
                 &attachment.kind,
                 &attachment.title,
                 &attachment.description,
                 &attachment.icon,
                 &attachment.folder,
-            )?;
-            Ok(FolderAttachment {
-                types: client.list_types()?,
-                scan,
-            })
+            )
         })
         .await
 }
@@ -701,12 +662,13 @@ pub async fn memory_unmatched_resolve<R: Runtime>(
 ) -> CommandResult<ScanOutcome> {
     sessions
         .with_session(&app, &project, move |client| {
-            client.resolve_unmatched(&locator, &content_hash, &kind, adopt.as_deref())?;
-            // The answer is the corpus as it now stands: adopting one file may
-            // settle another — the record it was competing with is no longer a
-            // candidate — and a window redrawing from the old report would show a
-            // question that has stopped being one.
-            client.scan()
+            // The answer is the corpus as it now stands rather than the receipt
+            // for the write: adopting one file may settle another — the record
+            // it was competing with is no longer a candidate — and a window
+            // redrawing from the old report would show a question that has
+            // stopped being one. Why the two steps live in one call is in
+            // `sync_memory::Operations`.
+            client.scan_after_resolving(&locator, &content_hash, &kind, adopt.as_deref())
         })
         .await
 }
@@ -818,8 +780,7 @@ pub async fn memory_document_update<R: Runtime>(
 ) -> CommandResult<Option<Document>> {
     sessions
         .with_session(&app, &project, move |client| {
-            client.update_document(&key, &edits)?;
-            client.document(&key)
+            client.document_after_update(&key, &edits)
         })
         .await
 }

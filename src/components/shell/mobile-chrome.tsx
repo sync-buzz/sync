@@ -45,17 +45,34 @@ export function NavBar({
   back,
   onBack,
   trailing,
+  inset = true,
 }: {
-  title: string;
+  /**
+   * What the screen is called. Absent where the screen shows the thing it
+   * would be named after, which is what the platform does rather than repeat
+   * a word that is already in front of the reader.
+   */
+  title?: string;
   /** What tapping the leading control returns to. Absent on a root screen. */
   back?: string;
   onBack?: () => void;
   trailing?: ReactNode;
+  /**
+   * Whether to keep the space the hardware claims at the top of the screen.
+   *
+   * True for a bar at the top of the screen, which is where the notch is.
+   * False for one that is not — a sheet stops short of the top, and a bar
+   * inside it that reserved the inset anyway would sit under a band of nothing
+   * as tall as an island it is nowhere near.
+   */
+  inset?: boolean;
 }) {
   return (
     <div
       className="shrink-0 border-b border-separator"
-      style={{ paddingTop: "max(0px, env(safe-area-inset-top))" }}
+      style={
+        inset ? { paddingTop: "max(0px, env(safe-area-inset-top))" } : undefined
+      }
     >
       <div className="flex h-11 items-center gap-1 px-1">
         <div className="flex min-w-0 flex-1 justify-start">
@@ -81,9 +98,11 @@ export function NavBar({
         {/* Centred and allowed to be cut rather than to push its neighbours:
             the two controls are the only way off this screen, and a long title
             must not be able to take one of them away. */}
-        <h1 className="min-w-0 shrink truncate px-1 text-[17px] leading-[22px] font-semibold">
-          {title}
-        </h1>
+        {title ? (
+          <h1 className="min-w-0 shrink truncate px-1 text-[17px] leading-[22px] font-semibold">
+            {title}
+          </h1>
+        ) : null}
 
         <div className="flex min-w-0 flex-1 items-center justify-end gap-1">
           {trailing}
@@ -118,6 +137,39 @@ export function BarButton({
     >
       {Icon ? <Icon className="size-5" /> : label}
     </button>
+  );
+}
+
+/**
+ * The band at the foot of a root screen, holding what belongs to the window.
+ *
+ * There are two claims on the foot of a phone screen and only one foot. A
+ * column's own strip of controls is already there — filtering a list, adding to
+ * it — put there by `useBandSlot` because the platform has one place for
+ * controls that act on a list. What is left over is everything that belongs to
+ * the *window*: searching the project, the state of its memory, the way to what
+ * this phone is. On a Mac all of that lives in the title bar, which costs
+ * nothing; a phone has no title bar, and the top corners it was pushed into are
+ * the two places on the screen a thumb reaches worst.
+ *
+ * **So the two never meet: this is drawn only where there is no column.** That
+ * is the root of the phone — the list of a computer's projects — and the root
+ * of a project, the list of its sections. Both are the window's own screens,
+ * neither has an area in it, and their feet are free. One screen deeper the
+ * foot is the column's, and the window goes back to speaking from the top bar.
+ * Two bands stacked would be two rows of controls with nothing to say which is
+ * whose, and the one underneath would be the package's.
+ *
+ * **It is not navigation.** A tab bar is for two to five places that are always
+ * there; sections are brought by packages, the set is open, and it is chosen by
+ * the person rather than by us. Nothing here selects a section — what it holds
+ * is a search, a state, and one place that is about this phone.
+ */
+export function WindowBar({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex h-11 items-center justify-between gap-1 px-1">
+      {children}
+    </div>
   );
 }
 
@@ -167,9 +219,20 @@ export function Screen({
         // Outside the scroller, or the space the hardware claims would be
         // reachable only by scrolling to it, and the row above it would sit
         // against the foot of the screen looking cut off.
-        <div className="shrink-0 border-t border-separator">
+        //
+        // The hardware's space is this band's own padding rather than a spacer
+        // under it, and that is the difference between a bar and a stump: the
+        // bar's surface runs to the bottom edge of the screen and the home
+        // indicator sits *on* it, which is what every bar on the system does.
+        // A spacer leaves the bar floating a finger's width up, over a strip
+        // of something else, and the screen reads as a page that was cut off.
+        // One element also means one reserve — two of them, however they came
+        // to be, are the same mistake twice as tall.
+        <div
+          className="shrink-0 border-t border-separator"
+          style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
+        >
           {standing}
-          <SafeAreaFoot />
         </div>
       ) : null}
     </div>
@@ -181,11 +244,15 @@ export function Screen({
  * with a home indicator is where the gesture lives. Nothing may sit in it, and
  * a list that ends exactly at it reads as a list that has been cut off.
  */
-function SafeAreaFoot() {
+export function SafeAreaFoot() {
   return (
     <div
       className="shrink-0"
-      style={{ height: "max(20px, env(safe-area-inset-bottom))" }}
+      // The fallback is stated, and it is not decoration: `env()` with no
+      // second argument is a value a browser may not have, and a length it
+      // cannot resolve takes the whole declaration with it — leaving a strip
+      // of no height at all, which is the one outcome this exists to prevent.
+      style={{ height: "max(20px, env(safe-area-inset-bottom, 0px))" }}
     />
   );
 }
@@ -204,6 +271,7 @@ export function Row({
   badge,
   leadsOn,
   selected,
+  disabled,
   onPress,
 }: {
   icon?: ComponentType<{ className?: string }>;
@@ -213,20 +281,40 @@ export function Row({
   badge?: number | "dot";
   leadsOn?: boolean;
   selected?: boolean;
+  /**
+   * The row is here to be read and not to be tapped.
+   *
+   * Drawn rather than dropped, because the two say different things: a row
+   * that is not here says the project does not have this, and a row that does
+   * not respond says the project has it and this machine is not where it runs.
+   * The system's own way of saying so is weight — the label goes to the
+   * secondary tier and nothing about the row moves — so a person's thumb finds
+   * the same list on both machines.
+   */
+  disabled?: boolean;
   onPress?: () => void;
 }) {
   return (
     <button
       type="button"
       onClick={onPress}
+      disabled={disabled}
       className={cn(
         "flex min-h-11 w-full items-center gap-3 px-4 py-2 text-left",
         // Selection is a surface and a weight, and nothing else — the rule the
         // window keeps, and the one that survives greyscale.
         selected ? "bg-selected font-semibold" : "active:bg-hover",
+        disabled && "text-fg-tertiary active:bg-transparent",
       )}
     >
-      {Icon ? <Icon className="size-5 shrink-0 text-fg-secondary" /> : null}
+      {Icon ? (
+        <Icon
+          className={cn(
+            "size-5 shrink-0",
+            disabled ? "text-fg-tertiary" : "text-fg-secondary",
+          )}
+        />
+      ) : null}
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[17px] leading-[22px]">
           {label}
@@ -470,6 +558,8 @@ export function Stack({
  * list ends where it does.
  */
 const DETENTS = { large: 0, medium: 0.45 } as const;
+/** Which of them a sheet arrives at, by the name its caller uses. */
+export type Detent = keyof typeof DETENTS;
 const DISMISSED = 1;
 /** How long the system takes to raise or drop a sheet. */
 const SHEET_MS = 400;
@@ -493,17 +583,27 @@ const CARRY_MS = 140;
 export function Sheet({
   open,
   title,
+  rest = "medium",
   onClose,
   children,
 }: {
   open: boolean;
   /** What the sheet is called, in its own bar. */
   title: string;
+  /**
+   * Where it arrives, and where it goes back to for the next reader.
+   *
+   * The lower rest is right for something read *about* what is underneath, and
+   * wrong for something read instead of it: a sheet that is its own subject
+   * arrives with as much of itself in sight as the platform allows. Both are
+   * still reachable by dragging — this decides the first sight, not the range.
+   */
+  rest?: Detent;
   onClose: () => void;
   children: ReactNode;
 }) {
   const element = useRef<HTMLDivElement | null>(null);
-  const [detent, setDetent] = useState<number>(DETENTS.medium);
+  const [detent, setDetent] = useState<number>(DETENTS[rest]);
   /** Where the sheet is while a finger is on it, in fractions of its height. */
   const [held, setHeld] = useState<number | null>(null);
   const gesture = useRef({ from: 0, at: 0, when: 0, speed: 0, detent: 0 });
@@ -511,9 +611,9 @@ export function Sheet({
   const at = held ?? (open ? detent : DISMISSED);
 
   const close = () => {
-    // The next raise starts where the system starts one: at the lower rest,
-    // not wherever this reader happened to leave it.
-    setDetent(DETENTS.medium);
+    // The next raise starts where this sheet starts, not wherever this reader
+    // happened to leave it.
+    setDetent(DETENTS[rest]);
     onClose();
   };
 
@@ -577,10 +677,18 @@ export function Sheet({
         ref={element}
         inert={!open}
         className={cn(
-          "absolute inset-x-0 top-14 bottom-0 flex flex-col overflow-clip rounded-t-lg bg-panel shadow-(--shadow-content) ease-shell motion-reduce:transition-none",
+          "absolute inset-x-0 bottom-0 flex flex-col overflow-clip rounded-t-lg bg-panel shadow-(--shadow-content) ease-shell motion-reduce:transition-none",
           moving ? null : "transition-transform",
         )}
         style={{
+          // How far it stops short of the top, and it is a floor rather than a
+          // measurement: a fixed inset that cleared the status bar on one
+          // phone puts this sheet's own bar under the island on another, and
+          // one that cleared the island would leave a hand's width of nothing
+          // on a phone that has neither. The ten points past the hardware are
+          // what leaves a strip of the screen underneath in sight, which is
+          // what says the sheet is over something rather than replacing it.
+          top: "max(3.5rem, calc(env(safe-area-inset-top) + 10px))",
           transitionDuration: moving ? undefined : `${SHEET_MS}ms`,
           transform: `translateY(${at * 100}%)`,
         }}
@@ -598,7 +706,11 @@ export function Sheet({
           <div className="flex h-5 items-center justify-center">
             <div className="h-1 w-9 rounded-full bg-separator-strong" />
           </div>
-          <NavBar title={title} trailing={<BarButton label="Done" onPress={close} />} />
+          <NavBar
+            title={title}
+            inset={false}
+            trailing={<BarButton label="Done" onPress={close} />}
+          />
         </div>
 
         {/* The column itself, and it keeps its own scrolling for the reason

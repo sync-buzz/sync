@@ -32,6 +32,8 @@
 
 import { satisfies, valid, validRange } from "semver";
 
+import { device } from "@/lib/device";
+
 /**
  * The version of the surface this build publishes.
  *
@@ -39,6 +41,27 @@ import { satisfies, valid, validRange } from "semver";
  * promised", which would be true of the code and false of the intent: the whole
  * point of the number is that a manifest can state a range and be believed. The
  * cost is honest major bumps, which is the cost of meaning it.
+ *
+ * **3.10.0** is the same surface on two machines. `capabilitiesHere` is what
+ * this *machine* honours, as against what the build publishes, and
+ * `unavailableHere` says in a sentence why a package that is otherwise fine
+ * does nothing on it. Two additions, so a minor, and every package stating
+ * `^3.0` goes on installing.
+ *
+ * What forced it is that one static export is now shown by two applications.
+ * The phone raises no session, keeps no keychain of its own, opens no shell and
+ * has no system menu, and `SYNC_CAPABILITIES` goes on naming all four because
+ * it is the build's list and the build is both. A package that degrades rather
+ * than refusing asks the new function; a manifest is still checked against the
+ * old one, because what a manifest is checked against is a project, and a
+ * project is one repository open on more than one machine.
+ *
+ * It is also where `SessionStatus` stops being reported in full. A
+ * conversation's delegated runs each start when they are ordered, so a first
+ * turn that is recorded and not yet going no longer happens and `queued` is
+ * never sent. The member stays in the union: dropping it is a major by the
+ * table above, and that number would be spent on a word no package can be
+ * handed while every manifest stating `^3.0` stopped installing.
  *
  * **3.9.0** is a shell in a folder. `ExtensionHost` carries a `terminal`
  * beside `net` and `vault`, and `terminal` joins the capabilities. An addition,
@@ -589,7 +612,7 @@ import { satisfies, valid, validRange } from "semver";
  * `AreaModule`, `ActivationResult` — arrived in the same commit, which on its
  * own would have been a minor.
  */
-export const SYNC_API_VERSION = "3.9.0" as const;
+export const SYNC_API_VERSION = "3.10.0" as const;
 
 /**
  * What this build can do, as opposed to what its surface looks like.
@@ -603,6 +626,16 @@ export const SYNC_API_VERSION = "3.9.0" as const;
  * So a capability is a promise about behaviour, named, and a manifest may
  * require one. Reading whether one is present is allowed too — an extension
  * that degrades deliberately is doing something better than refusing.
+ *
+ * **The build is not the machine, and this list is the build's.** One static
+ * export is shown by two applications now, and the phone keeps four of these
+ * promises with nothing behind them. So a name here means the surface publishes
+ * it and a manifest may state it; whether the machine in front of somebody
+ * honours it is [`capabilitiesHere`], and that is the one to read before
+ * degrading. The two are kept apart rather than merged because a manifest is
+ * checked against a *project*, which is one repository open on more than one
+ * machine: a phone that refused a package its owner's computer runs would be
+ * deciding for the computer.
  */
 export const SYNC_CAPABILITIES = [
   /** The corpus: types, records, freshness, the editor and the metadata panel. */
@@ -756,6 +789,79 @@ export const SYNC_CAPABILITIES = [
 
 export type SyncCapability = (typeof SYNC_CAPABILITIES)[number];
 
+/**
+ * What a phone does not do, and would have to be given a computer to do.
+ *
+ * Not a judgement about phones: each of these is a command the phone's own
+ * application does not register, and it does not register them because there is
+ * nothing on a phone to answer them with. A session is a process held open by
+ * the application that started it; the keychain a package writes into is the one
+ * on the machine the package's own code is running on; a shell needs a folder
+ * and a terminal to attach to it; a system menu is what a pointer's secondary
+ * button opens, and a phone has no pointer.
+ *
+ * The other capabilities are here in full, and the reason is worth stating
+ * because it is not obvious from the list: what a handler does — reaching a
+ * host, running on a clock, ordering work — is executed on the computer this
+ * phone is paired with, so the phone holds those promises by holding the
+ * connection. What it cannot hold are the four that have to happen where the
+ * screen is.
+ */
+const NOT_ON_A_PHONE: readonly SyncCapability[] = [
+  "agents.acp",
+  "vault",
+  "terminal",
+  "native-menu",
+];
+
+/**
+ * The ones nothing survives losing, of whichever a machine does not keep.
+ *
+ * A capability a package asked for and did not get is not the same size of
+ * problem twice over, and the difference decides whether its section is opened
+ * or greyed out. `native-menu` is a gesture: the column still lists, the row
+ * still opens, and what is missing is a menu under a button a phone has no way
+ * to press anyway. `agents.acp` is half of several packages and the readable
+ * half is the other one — a conversation still reads, a record still opens, and
+ * what will not work is raising a process, which was never going to happen on a
+ * phone and is not why somebody opened the section.
+ *
+ * These two are different in kind. A package asks for `terminal` because it
+ * *is* a terminal, and for `vault` because the first thing it does is read the
+ * credential it works through. Neither has a smaller version of itself to fall
+ * back to: the section would mount, draw, and fail at the first thing anybody
+ * asked of it.
+ *
+ * Judged here rather than declared in the manifest because there is nothing in
+ * a manifest to read it off. Every capability in that file is stated the same
+ * way, and authors state everything they touch — which is right, and is what
+ * makes the file honest about what a person is agreeing to. What it cannot
+ * carry is which half of a package would be left.
+ */
+const NOTHING_RUNS_WITHOUT: readonly SyncCapability[] = ["vault", "terminal"];
+
+/**
+ * What the machine this window is running on can actually do.
+ *
+ * The list to read before degrading, and the one that has to be true rather
+ * than complete: [`SYNC_CAPABILITIES`] says what this surface publishes, and on
+ * a phone four of those names have nothing behind them.
+ *
+ * A function rather than a constant, and the reason is where the answer comes
+ * from: `device()` reads a global the phone's application writes in a script
+ * that runs before the document is parsed, and a constant would freeze whatever
+ * was true when this module happened to be evaluated — including during the
+ * static export, where there is no window at all and the honest answer is
+ * "a computer, for now". A window does not move from one machine to another, so
+ * the answer does not change once anything can read it; asking each time is
+ * what keeps the one moment before that from being written down.
+ */
+export function capabilitiesHere(): readonly SyncCapability[] {
+  return device() === "phone"
+    ? SYNC_CAPABILITIES.filter((name) => !NOT_ON_A_PHONE.includes(name))
+    : SYNC_CAPABILITIES;
+}
+
 /** What a package says it needs, as its manifest states it. */
 export interface ApiRequirement {
   /** A semver range over `SYNC_API_VERSION`, such as `^1.2`. */
@@ -777,6 +883,15 @@ export interface ApiRequirement {
  * arrives in exactly one situation — a package built against a newer host —
  * and treating it as satisfied would run an extension that asked for something
  * and did not get it, which fails later and somewhere else.
+ *
+ * A capability this build knows and *this machine* does not keep is not
+ * refused here, and the difference is the whole reason there are two functions.
+ * This one answers whether a package belongs in a project at all — a project is
+ * one repository open on several machines, and a phone that refused to install
+ * a package its owner's computer runs perfectly would be deciding for the
+ * computer. What the machine in front of somebody cannot do is
+ * [`unavailableHere`], and its answer greys a section out rather than
+ * withdrawing an extension from the project.
  */
 export function refuseIncompatible(required: ApiRequirement): string | null {
   if (validRange(required.syncApi) === null) {
@@ -795,6 +910,47 @@ export function refuseIncompatible(required: ApiRequirement): string | null {
   }
 
   return null;
+}
+
+/**
+ * Why an extension does nothing on *this* machine, in one sentence, or `null`.
+ *
+ * The second half of compatibility, and a different question from
+ * [`refuseIncompatible`]: that one is about a package and a surface, and this
+ * is about a package and the machine somebody is holding. A package asking for
+ * a shell is a fine package, correctly installed, in a project that runs it on
+ * a computer — and on a phone it is a section that would mount and then fail at
+ * the first thing it tried to do.
+ *
+ * So it is asked before anything of the package runs, and what it produces is a
+ * row drawn but not offered rather than a package withdrawn. The distinction is
+ * what a person sees: *this is part of your project, and not from here* is
+ * true, where a missing row would say the project had changed and a red line
+ * would say something had broken.
+ *
+ * It answers for [`NOTHING_RUNS_WITHOUT`] and not for every promise this
+ * machine fails to keep, and the difference is the whole of the judgement in
+ * this file. Most packages name a capability for one part of what they do —
+ * almost every one of them asks for `native-menu` — and greying a section out
+ * because a menu will not open would leave a phone with nothing on it and no
+ * honest reason. A package deliberately degrading asks [`capabilitiesHere`]
+ * instead, which reports every one of them.
+ */
+export function unavailableHere(required: ApiRequirement): string | null {
+  const held = capabilitiesHere() as readonly string[];
+  const fatal = NOTHING_RUNS_WITHOUT as readonly string[];
+  // Names this machine does not keep and this package cannot go on without. A
+  // name this surface has never heard of is not this function's to answer —
+  // that is a package for a newer Sync, and saying so is `refuseIncompatible`'s
+  // sentence — and one it can degrade around is not a refusal at all.
+  const missing = (required.capabilities ?? []).filter(
+    (capability) => fatal.includes(capability) && !held.includes(capability),
+  );
+  if (missing.length === 0) return null;
+
+  return device() === "phone"
+    ? `This extension needs ${missing.join(", ")}, which a phone does not have. It works where this project is open on a computer.`
+    : `This machine does not do what the extension needs: ${missing.join(", ")}.`;
 }
 
 /**

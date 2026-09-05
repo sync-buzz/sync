@@ -125,9 +125,11 @@ pub const REMOTE_IDLE: std::time::Duration = std::time::Duration::from_secs(600)
 
 /// What the engine asks the application to run, over [`ATTEND`].
 ///
-/// The one request that travels in that direction today. Named here beside the
-/// others because both ends spell it, and a name spelled twice is a name that
-/// gets renamed once.
+/// The first request that travelled in that direction, and for a long time the
+/// only one — [`SESSION_DROPPED`] is the other, and [`SESSION_EVENT`] goes that
+/// way carrying no call at all. Named here beside the rest because both ends
+/// spell every one of them, and a name spelled twice is a name that gets
+/// renamed once.
 pub const TOOL_CALL: &str = "extension.tool";
 
 /// What a caller off this machine asks so that a package's request is made
@@ -192,6 +194,171 @@ pub const SCHEDULE_OFF: &str = "schedule.off";
 /// Switch one clock on or off, on the machine that runs it.
 pub const SCHEDULE_SWITCH: &str = "schedule.switch";
 
+/// Talking to an agent, asked of the machine the agent runs on.
+///
+/// A conversation is a process the application raised and holds open. It is
+/// not an operation of a project's memory and never touches one — what it is
+/// about is a session key, a turn of text, a question waiting on an answer — so
+/// these travel the way everything else about the machine travels: carried to
+/// the application, which owns the process, the protocol and the transcript.
+///
+/// **Five of them name a project, and they name it as `project`.** On the
+/// window's own door that is a path; on a device's it is a key the door
+/// resolves through the registry before the application sees it, exactly as it
+/// resolves the key on an operation. So the application is handed a path either
+/// way and never learns which door its caller came through — which is what
+/// keeps one function answering both.
+pub const SESSION_CATALOG: &str = "session.catalog";
+/// Everything running right now, across every project this machine holds.
+pub const SESSION_LIVE: &str = "session.live";
+/// Raise an agent and open a session in it. Names its project.
+pub const SESSION_OPEN: &str = "session.open";
+/// Run one turn. Answers when the prompt is on its way, not when the turn ends.
+pub const SESSION_PROMPT: &str = "session.prompt";
+/// Continue a conversation from before this launch. Names its project.
+pub const SESSION_RESUME: &str = "session.resume";
+/// The dormant conversations of one project. Names it.
+pub const SESSION_REMEMBERED: &str = "session.remembered";
+/// Stop offering a dormant conversation. Names its project.
+pub const SESSION_FORGET_REMEMBERED: &str = "session.forget_remembered";
+/// Give a conversation a name.
+pub const SESSION_RENAME: &str = "session.rename";
+/// Interrupt the turn that is running.
+pub const SESSION_CANCEL: &str = "session.cancel";
+/// End the agent's process, keeping what it said.
+pub const SESSION_CLOSE: &str = "session.close";
+/// End it and forget the pointer to it.
+pub const SESSION_FORGET: &str = "session.forget";
+/// Say which record a conversation was kept as.
+pub const SESSION_KEPT_AS: &str = "session.kept_as";
+/// The pointer for a kept record, where this machine holds one. Names its
+/// project.
+pub const SESSION_FOR_RECORD: &str = "session.for_record";
+/// Put the agent in one of the modes it stated.
+pub const SESSION_SET_MODE: &str = "session.set_mode";
+/// Choose one of the options the agent stated for the session.
+pub const SESSION_SET_OPTION: &str = "session.set_option";
+/// Answer the question an agent stopped on.
+pub const SESSION_PERMISSION_RESPOND: &str = "session.permission_respond";
+/// Everything a session has said, read once, without watching it.
+pub const SESSION_BACKLOG: &str = "session.backlog";
+
+/// Watch a session: what it has said since a given point, then everything
+/// after.
+///
+/// The one call of this family that is not finished when it is answered. The
+/// door mints a number for the watch and puts it in the call, the application
+/// holds it against the session, and every event afterwards travels back under
+/// it as [`SESSION_EVENT`]. The application echoes the number in its answer, so
+/// the device that asked learns what its events will arrive under without the
+/// door having to reshape an answer it did not write.
+///
+/// `since` is the last sequence number the caller has already seen, or absent
+/// for a caller that has seen nothing. It is what makes a connection that
+/// dropped cost nothing: the device asks again from where it stopped and the
+/// window above it sees an uninterrupted stream rather than its transcript
+/// written twice.
+pub const SESSION_SUBSCRIBE: &str = "session.subscribe";
+/// Stop watching, by the number [`SESSION_SUBSCRIBE`] answered with. The
+/// session goes on running.
+pub const SESSION_UNSUBSCRIBE: &str = "session.unsubscribe";
+
+/// What each agent adapter is, and whether this machine has it downloaded.
+pub const AGENT_ADAPTERS: &str = "agent.adapters";
+/// Download what the agents need, at the versions the machine's build pins.
+pub const AGENT_ADAPTERS_PREPARE: &str = "agent.adapters_prepare";
+/// Delete what was downloaded.
+pub const AGENT_ADAPTERS_FORGET: &str = "agent.adapters_forget";
+
+/// One thing a watched session said, on its way to the device watching it.
+///
+/// **The only message this channel carries that nobody asked for.** It travels
+/// as a notification — no id, no answer — and it is the whole of what the
+/// reverse direction on a device's connection is allowed to be: `{subscription,
+/// event}` and nothing else. No call passes the other way. [`ATTEND`] inverts a
+/// connection so that requests may be made on it, and that remains refused on
+/// the network door for the reason it always was: answering in the
+/// application's name is the application's alone.
+///
+/// It is written twice on its way — the application says it to the engine over
+/// [`ATTEND`], and the engine says it to the device whose connection holds that
+/// subscription — and it is the same message both times, which is why it has
+/// one name.
+pub const SESSION_EVENT: &str = "session.event";
+
+/// The subscriptions whose device has gone, told to the application.
+///
+/// The application cannot see it happen: it writes events into a socket to an
+/// engine that is still there, and the connection that ended is one further on.
+/// So the engine says so, once per connection rather than once per event, and
+/// the application lets go of the watchers named.
+///
+/// Without it a phone put in a pocket leaves a session serialising its every
+/// word into a queue nobody drains, for as long as the conversation runs.
+pub const SESSION_DROPPED: &str = "session.dropped";
+
+/// Every call of that family, in one place a test can walk.
+///
+/// A slice rather than a `matches!` arm, and the reason is the test at the foot
+/// of this file: a name added to the channel and left out of
+/// [`effect`](crate::effect) is the one thing that list exists to prevent, and a
+/// set nothing can enumerate cannot be checked against it. What the engine's own
+/// door does for its operations, this does for the calls that are carried past
+/// it.
+pub const SESSIONS: &[&str] = &[
+    SESSION_CATALOG,
+    SESSION_LIVE,
+    SESSION_OPEN,
+    SESSION_PROMPT,
+    SESSION_RESUME,
+    SESSION_REMEMBERED,
+    SESSION_FORGET_REMEMBERED,
+    SESSION_RENAME,
+    SESSION_CANCEL,
+    SESSION_CLOSE,
+    SESSION_FORGET,
+    SESSION_KEPT_AS,
+    SESSION_FOR_RECORD,
+    SESSION_SET_MODE,
+    SESSION_SET_OPTION,
+    SESSION_PERMISSION_RESPOND,
+    SESSION_BACKLOG,
+    SESSION_SUBSCRIBE,
+    SESSION_UNSUBSCRIBE,
+    AGENT_ADAPTERS,
+    AGENT_ADAPTERS_PREPARE,
+    AGENT_ADAPTERS_FORGET,
+];
+
+/// Whether this call is about talking to an agent.
+///
+/// Asked by the network door, which does two things to this family that it does
+/// to nothing else: it resolves the project key some of them carry, and it puts
+/// the paths out of the answer before it goes to a device. Both are properties
+/// of the family rather than of any one call, so the family is named once.
+#[must_use]
+pub fn about_a_session(method: &str) -> bool {
+    SESSIONS.contains(&method)
+}
+
+/// Whether this call carries the project it is about, as `project`.
+///
+/// The rest of the family is addressed by a session key, which this machine
+/// minted and which says nothing about where anything is. Naming the five that
+/// are not is what lets the door resolve a key exactly once, in one place,
+/// rather than in each of them.
+#[must_use]
+pub fn names_a_project(method: &str) -> bool {
+    matches!(
+        method,
+        SESSION_OPEN
+            | SESSION_RESUME
+            | SESSION_REMEMBERED
+            | SESSION_FORGET_REMEMBERED
+            | SESSION_FOR_RECORD
+    )
+}
+
 /// Whether a door carries this call to the application rather than answering
 /// it.
 ///
@@ -201,27 +368,35 @@ pub const SCHEDULE_SWITCH: &str = "schedule.switch";
 /// answer. A name added to one and forgotten in the other is a call that
 /// arrives somewhere with nothing to run it.
 ///
-/// Everything here is about the machine rather than about a project — an
-/// artefact on its disk, a registry it fetches, a secret in its keychain — so
-/// none of them is an [`Operation`](crate) and none of them names a project.
+/// Everything here is about the machine rather than about the *contents* of a
+/// project — an artefact on its disk, a registry it fetches, a secret in its
+/// keychain, a process it raised — so none of them is an [`Operation`](crate)
+/// and none of them is answered out of a project's memory.
+///
+/// Five of them do name a project, and it is worth saying why that is not the
+/// same thing: a conversation is held *for* a repository and the agent is
+/// raised *in* it, but nothing about it is read from or written to that
+/// repository's memory. The project is where the agent works, not what the call
+/// is about, which is why these are carried rather than dispatched.
 #[must_use]
 pub fn carried(method: &str) -> bool {
-    matches!(
-        method,
-        EXTENSION_FETCH
-            | EXTENSION_LIST
-            | EXTENSION_FILE
-            | EXTENSION_INSTALL
-            | EXTENSION_FORGET
-            | EXTENSION_REPOINT
-            | REGISTRY_INDEX
-            | REGISTRY_CACHED
-            | REGISTRY_LEDGER
-            | EXTENSION_OCCASION
-            | SCHEDULE_REMEMBER
-            | SCHEDULE_OFF
-            | SCHEDULE_SWITCH
-    )
+    about_a_session(method)
+        || matches!(
+            method,
+            EXTENSION_FETCH
+                | EXTENSION_LIST
+                | EXTENSION_FILE
+                | EXTENSION_INSTALL
+                | EXTENSION_FORGET
+                | EXTENSION_REPOINT
+                | REGISTRY_INDEX
+                | REGISTRY_CACHED
+                | REGISTRY_LEDGER
+                | EXTENSION_OCCASION
+                | SCHEDULE_REMEMBER
+                | SCHEDULE_OFF
+                | SCHEDULE_SWITCH
+        )
 }
 
 /// A bidirectional line-delimited JSON channel to the engine.

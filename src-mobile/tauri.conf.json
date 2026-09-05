@@ -1,8 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Sync",
-  "version": "0.1.0",
-  "identifier": "buzz.sync",
+  "version": "0.10.5",
+  "identifier": "buzz.sync.app",
   "build": {
     "frontendDist": "../out",
     "devUrl": "http://localhost:1420",

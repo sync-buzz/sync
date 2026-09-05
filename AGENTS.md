@@ -124,6 +124,14 @@ single place.
   `src-mobile/gen/apple`, and the failure surfaces inside Xcode rather than in
   the CLI. The generated project is committed for that reason: it is the record
   of what Xcode is told.
+- **Xcode runs the build's script phase with the system's PATH, not yours.**
+  The phase calls `pnpm`, which lives under the home directory and is itself a
+  shell script that execs `node` — so a phase that inherits only `/usr/bin` and
+  `/bin` fails with `pnpm: command not found` before doing anything, and the
+  failure surfaces inside Xcode. The path is restored at the top of the phase
+  itself, in `src-mobile/gen/apple/project.yml` and in the generated
+  `project.pbxproj` both: the generated one is what Xcode runs today, the source
+  is what survives the project being generated again.
 - **That command writes the project once and then leaves it alone.** An
   existing `src-mobile/gen/apple/project.yml` is not overwritten, so anything
   under `bundle > iOS` in `src-mobile/tauri.conf.json` — a framework to link,

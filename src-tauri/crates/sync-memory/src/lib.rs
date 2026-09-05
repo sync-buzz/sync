@@ -38,10 +38,10 @@ mod protocol;
 
 pub use client::{EngineInfo, MemoryClient};
 pub use dto::{
-    ContentView, Counts, EntityInput, FetchOutcome, FolderEntry, Handshake, InstalledExtension,
-    LinkInput, Listing, MemoryPresence, ModelStatus, Overlap, ProjectSettings, RecordView,
-    RemoteCheck, ScanOutcome, SearchOutcome, SyncState, ToolDeclaration, TransactionResult,
-    TransportStatus, Version,
+    ContentView, Counts, EntityInput, FetchOutcome, FolderAttachment, FolderEntry, Handshake,
+    InstalledExtension, LinkInput, Listing, MemoryPresence, ModelStatus, Overlap, ProjectSettings,
+    RecordView, RemoteCheck, ScanOutcome, SearchOutcome, SyncState, ToolDeclaration,
+    TransactionResult, TransportStatus, TypeRemoval, Version,
 };
 pub use error::{CommandError, MemoryError, MemoryErrorKind, Result};
 pub use operations::{Effect, Operations, effect};
@@ -71,9 +71,15 @@ pub use mapping::{
 };
 pub use process::{BinarySource, EngineBinary, LaunchConfig, resolve_binary};
 pub use protocol::{
-    ATTACH, ATTEND, CHANNEL_VERSION, Connection, EXTENSION_FETCH, EXTENSION_FILE, EXTENSION_FORGET,
-    EXTENSION_INSTALL, EXTENSION_LIST, EXTENSION_OCCASION, EXTENSION_REPOINT, MAX_FRAME_BYTES,
-    METHODS, PROJECT_RESOURCE, PROJECTS, REGISTRY_CACHED, REGISTRY_INDEX, REGISTRY_LEDGER,
-    REMOTE_DEVICES, REMOTE_GREETING, REMOTE_HELLO, REMOTE_IDLE, REVISION_RESOURCE, SCHEDULE_OFF,
-    SCHEDULE_REMEMBER, SCHEDULE_SWITCH, TOOL_CALL, Transport, carried, tool_result,
+    AGENT_ADAPTERS, AGENT_ADAPTERS_FORGET, AGENT_ADAPTERS_PREPARE, ATTACH, ATTEND, CHANNEL_VERSION,
+    Connection, EXTENSION_FETCH, EXTENSION_FILE, EXTENSION_FORGET, EXTENSION_INSTALL,
+    EXTENSION_LIST, EXTENSION_OCCASION, EXTENSION_REPOINT, MAX_FRAME_BYTES, METHODS,
+    PROJECT_RESOURCE, PROJECTS, REGISTRY_CACHED, REGISTRY_INDEX, REGISTRY_LEDGER, REMOTE_DEVICES,
+    REMOTE_GREETING, REMOTE_HELLO, REMOTE_IDLE, REVISION_RESOURCE, SCHEDULE_OFF, SCHEDULE_REMEMBER,
+    SCHEDULE_SWITCH, SESSION_BACKLOG, SESSION_CANCEL, SESSION_CATALOG, SESSION_CLOSE,
+    SESSION_DROPPED, SESSION_EVENT, SESSION_FOR_RECORD, SESSION_FORGET, SESSION_FORGET_REMEMBERED,
+    SESSION_KEPT_AS, SESSION_LIVE, SESSION_OPEN, SESSION_PERMISSION_RESPOND, SESSION_PROMPT,
+    SESSION_REMEMBERED, SESSION_RENAME, SESSION_RESUME, SESSION_SET_MODE, SESSION_SET_OPTION,
+    SESSION_SUBSCRIBE, SESSION_UNSUBSCRIBE, SESSIONS, TOOL_CALL, Transport, about_a_session,
+    carried, names_a_project, tool_result,
 };
