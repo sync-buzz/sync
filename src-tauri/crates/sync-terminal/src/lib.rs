@@ -270,18 +270,21 @@ mod tests {
             .expect("open")
             .expect("written");
 
+        // Twice: a pty echoes what is typed, and `cat` prints it again. The wait
+        // counts to the same number the assertion does, because the two arrive
+        // separately — waiting for the first and asserting on the second is a
+        // test that passes on a slow machine and fails on a fast one.
         let mut said = String::new();
         for _ in 0..200 {
             let tail = terminals
                 .with(&id, OPENER, |session| session.since(0))
                 .expect("still listed");
             said = String::from_utf8_lossy(&tail.bytes).into_owned();
-            if said.contains("knock") {
+            if said.matches("knock").count() >= 2 {
                 break;
             }
             std::thread::sleep(Duration::from_millis(25));
         }
-        // Twice: a pty echoes what is typed, and `cat` prints it again.
         assert!(said.matches("knock").count() >= 2, "said {said:?}");
         terminals.close(&id, OPENER);
     }
