@@ -18,7 +18,7 @@ name = "sync-mobile"
 description = "Sync for iOS"
 # The crate's own. What the phone shows is stated in `tauri.conf.json`, and the
 # two are kept equal by hand.
-version = "0.10.5"
+version = "0.11.0"
 edition = "2024"
 rust-version = "1.91"
 publish = false
