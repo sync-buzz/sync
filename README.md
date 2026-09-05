@@ -29,12 +29,14 @@ run under, a clock that keeps going when the window is closed, and a store of
 what the project knows that says when it has gone out of date. What a project is
 *about* comes entirely from the packages installed into it.
 
-**No package is privileged.** The three Sync ships with arrived the way yours
-will: built outside this repository, declared in a manifest, installed into a
-project that asked for them. There is no `src/extensions/` directory here and CI
-fails the build if one appears, so the shell cannot name a section in a type or
-a constant even by accident. That rule is the whole design — it is what makes
-the environment yours to shape rather than ours to extend on your behalf.
+**No package is privileged, and the application ships none.** Nothing is
+bundled and nothing is unpacked at launch: every package in the catalogue
+arrived the way yours will — built outside this repository, declared in a
+manifest, fetched from a registry and installed into a project that asked for
+it. There is no `src/extensions/` directory here and CI fails the build if one
+appears, so the shell cannot name a section in a type or a constant even by
+accident. That rule is the whole design — it is what makes the environment yours
+to shape rather than ours to extend on your behalf.
 
 **What the shell guarantees, so a package does not have to:**
 
@@ -45,13 +47,25 @@ the environment yours to shape rather than ours to extend on your behalf.
   is about; the engine reconciles them against the repository's history and
   marks the claim `stale` when they move. Not a review date somebody set and
   forgot — derived, every time it is read.
-- **Agents, in both directions.** Connect Claude Code, Codex, Gemini CLI, Grok
-  or OpenCode over MCP and they work against the project. Or drive one *from*
-  the window over ACP, with its plan, its tool calls and its permission prompts
-  drawn as part of the interface.
+- **Agents, in both directions.** Seven clients are connected with one control
+  and work against the project through Sync's own server — Claude Code, Codex
+  CLI, Grok CLI, Claude Desktop, Cursor, Visual Studio Code and Zed. Or drive an
+  agent *from* the window over ACP, with its plan, its tool calls and its
+  permission prompts drawn as part of the interface: five CLIs are measured and
+  raised by name.
 - **Work outlives the window.** A package can declare handlers on a clock and
   order work that runs with nothing open, under permissions it declared and a
-  person approved, attributed to whoever asked for it.
+  person approved, attributed to whoever asked for it. A conversation can hand
+  work to another conversation and be handed back the answer.
+- **What a package needs of the machine, it asks for by name.** Fourteen
+  capabilities, each a promise about behaviour rather than a switch: the network
+  with its hosts written out and no wildcard, a corner of the system keychain, a
+  shell in a folder, a handler on a clock. A missing one is a refusal with a
+  sentence a person can act on, never a silent degradation.
+- **The window is not only at the desk.** The iPhone application shows the same
+  window arranged for a phone, and every call it makes is answered by the very
+  function the Mac's own window calls — so a conversation started at the desk is
+  continued on the phone, because there is only ever one conversation.
 
 Structured knowledge that stays honest, agents that act on it, and an
 environment you assemble rather than accept.
@@ -81,6 +95,13 @@ launch is the new version, and the menu bar item offers a restart to anybody who
 would rather not wait. Nothing about that flow is reachable from the window's
 content.
 
+**The iPhone application is built from source.** It lives in `src-mobile/` —
+its own Cargo workspace, showing the same static export the Mac shows — and this
+release page carries the macOS installer only. `pnpm tauri ios dev "iPhone 17
+Pro"` puts it on a simulator. The two carry one version deliberately: somebody
+holding both should be able to say which is older without learning two numbering
+schemes.
+
 **Upgrading from the earlier Sync?** Read [If you came here looking for the old
 Sync](#if-you-came-here-looking-for-the-old-sync) first: the two share no
 settings and no data, and one thing does break on the agent's side.
@@ -109,18 +130,61 @@ keeps every link. Delete first says what holds on to the record, in two numbers
 this one is somebody's reasoning, and taking it silently would take the
 reasoning with the conclusion.
 
-**Connect an agent with one control.** Claude Code, Codex, Gemini CLI, Grok and
-OpenCode. Sync writes exactly one server entry into that agent's own
-configuration and touches nothing else in the file; disconnecting takes exactly
-that entry back out. Or drive one *from* Sync over ACP, in the window, with its
-plan, its tool calls and its permission prompts drawn as part of the interface.
+**Connect an agent with one control.** One server on this machine answers for
+every project it holds, and connecting writes exactly one entry into that
+agent's own configuration file — an address, a header, and nothing else touched.
+Disconnecting takes exactly that entry back out. The server outlives the last
+window, so an agent asked something at midnight is not asking a closed
+application; whether it also starts at login is a switch in Settings.
+
+**A conversation can be held somewhere disposable.** An agent raised in a
+working tree edits a copy of the project nobody else is looking at, and undoing
+all of it is one gesture rather than a review of what changed under your own
+open files. The trees are listed in Settings and thrown away from there, because
+a tree outlives the conversation that made it and a copy nobody can name is a
+disk that fills up.
+
+**A conversation can delegate, and gets an answer rather than a transcript.**
+The delegated run happens in the parent's own working tree, so the second agent
+sees the first one's files. What travels back is the last thing the child said,
+and nothing else. A chain is two conversations deep; a third is refused in
+words. Nothing polls: an outcome is delivered when the conversation that asked
+for it is open and between turns, and waits when it is not — raising an agent
+two days later to hand it a paragraph would be spending somebody's money without
+asking.
+
+**A shell, when a package opens one.** The process is Sync's and the screen is
+the package's: what it opens runs whatever is typed into it, in the folder it
+was opened in, as the person who opened it, and the card says exactly that
+because nothing narrower would be honest. A terminal belongs to the project
+rather than to the section that opened it — leaving the section, hiding it or
+reloading it changes nothing, and closing the project is what ends them.
+
+**A secret is the system's.** What a package needs to reach a service is kept
+in its own corner of the macOS keychain, and it is never handed to an agent. A
+secret is not a fact about the project, so it is not in the project's memory:
+that memory travels on a Git remote, and ciphertext that has left this machine
+cannot be called back. Settings lists whose entry each one is and what it is
+called — nothing there can answer with a value — and forgetting one is a row.
+
+**A phone, if you pair one.** Settings shows a code, the phone's camera reads
+it, and after that the two ends find each other by public key and talk over one
+encrypted connection — hole punched where it can be and relayed where it cannot,
+so *remote* means remote rather than *upstairs*. A device may watch a
+conversation and is answered with a number; every word that conversation says
+afterwards arrives under it as it is written, and watching from the phone does
+not take the live view away from the window at the desk. Revoking a device is a
+row in the same list.
 
 **It talks to nothing else.** No account, no telemetry, no analytics, no crash
-reporting — absent, not off by default. The application makes two kinds of
-outward request on its own: the update check, and the extension registry when
-you open the catalogue. Both go to GitHub, both are made in Rust with the
-reachable hosts compiled into the binary, and the webview is granted no
-`connect-src` at all.
+reporting — absent, not off by default. On its own the application makes two
+kinds of outward request: the update check, and the extension registry when you
+open the catalogue. Both go to GitHub, both are made in Rust with the reachable
+hosts compiled into the binary, and the webview is granted no network origin at
+all — its `connect-src` names the local IPC and nothing else. Everything beyond
+those two is something a person switched on: a package reaches only the hosts
+its manifest wrote out, and an installation that has never been asked for remote
+access never binds a UDP socket or talks to a relay.
 
 ## How a project works
 
@@ -138,28 +202,56 @@ Opening a folder asks as little as it can:
 
 **A project's settings live in the project**, as the `project` record in the
 repository's own memory, written in the same transaction that publishes the type
-corpus. The only thing kept on this machine is the list of recently opened
-projects; losing it costs a shorter menu and nothing else.
+corpus. What is kept on this machine is what is true of the machine rather than
+of any project: the recently opened list, the server's port and token, the
+devices that may reach in, where working trees are made, the secrets a package
+was granted, and the voice.
 
 ## Everything a project can do is a package
 
 Sync is a shell. **There is no `src/extensions/` directory in this repository**,
-and CI fails the build if one appears — Records, Chat and Project memory are
-packages like any other, built elsewhere, installed through the same path a
-stranger's extension is installed through. That rule is the whole design: a
-window that could name one section in a type or a constant would treat that
-section differently from yours.
+and CI fails the build if one appears — every section of the project's window is
+a package, built elsewhere, installed through the same path a stranger's
+extension is installed through. One row of the sidebar is the window's own, and
+it is the catalogue: where a person decides which sections the project has. That rule is the whole design: a window that could name
+one section in a type or a constant would treat that section differently from
+yours.
 
-A package declares what it needs, and a build publishes what it can do. The ten
-capabilities today:
+A package declares what it needs, and a build publishes what it can do. The
+fourteen capabilities today:
 
 `records` · `agents.acp` · `markdown.plugins` · `native-menu` · `folders` ·
-`sheets` · `net` · `background` · `schedule` · `work.agent`
+`sheets` · `net` · `net.write` · `vault` · `background` · `schedule` ·
+`work.agent` · `agent.tools` · `terminal`
 
 A missing one is a refusal with a sentence a person can act on, never a silent
 degradation. `net` is the one that is a capability *and* a list: a package that
-wants the network names the exact hosts, without wildcards, and every redirect is
-checked against the same list.
+wants the network names the exact hosts, without wildcards, and every redirect
+is checked against the same list. Four of the fourteen are things that have to
+happen where the screen is — raising a session, a keychain, a shell, a system
+menu — so a phone honours ten, and a package that needs one of the other four is
+drawn in its list with the reason it cannot open there. It stays installed:
+what a manifest is checked against is a project, and a project is one repository
+open on more than one machine.
+
+The surface a package compiles against carries its own version, moving on its
+own clock rather than the application's, and a manifest states a range over it.
+It is **3.10.0** today, and `pnpm api:check` fails a build where the surface
+moved and the number did not.
+
+**What is published so far.** All of it is installed from the catalogue in the
+window, and none of it is inside the application:
+
+| | |
+| --- | --- |
+| **Records** | The project's types, and every record written as one. |
+| **Project memory** | The answers a project has already worked out, so nobody works them out twice. |
+| **Chat** | The coding agents installed on this machine, driven in this project's folder without leaving the window. |
+| **Terminals** | Shells in the project's folder, arranged in tabs and tiles. |
+| **Tasks** | The work a project has committed to, written so that finishing it can be checked. |
+| **Routines** | Standing instructions an agent carries out on a clock, whether or not anybody is there. |
+| **Issues** | The issues of a public repository on GitHub, read beside the project they are about. |
+| **Posts** | Drafts of what a project will say outside itself, and the text of everything already said. |
 
 **This is where contributions are most welcome.** You do not have to work on the
 core to add something real — an extension is a package with its own types, its
@@ -169,35 +261,45 @@ project without this repository changing:
 - The contract is published as [`@sync-buzz/extension-api`](https://www.npmjs.com/package/@sync-buzz/extension-api).
   It carries the types, the version your manifest states a range against, and a
   CLI that packs and checks an archive.
-- The three packages Sync ships with are built in
+- The packages above are built in
   [sync-buzz/sync-extensions](https://github.com/sync-buzz/sync-extensions) and
   are worth reading as worked examples.
+- [docs/writing-an-extension.md](docs/writing-an-extension.md) builds one from
+  nothing, with every file it contains.
+- [docs/extension-architecture.md](docs/extension-architecture.md) is the seam
+  drawn rather than argued: four boundaries, the manifest field by field, each
+  lifecycle as a sequence, and every refusal with the place it is heard.
 - [docs/extensions.md](docs/extensions.md) is the whole of how a package is
-  built, loaded, permitted, published and updated.
-- [docs/background.md](docs/background.md) is the half of an extension that runs
-  with no window open.
+  built, loaded, permitted, published and updated, and
+  [docs/background.md](docs/background.md) is the half of one that runs with no
+  window open.
 
-Ideas that need nothing from us: an issue tracker over your forge, a reader for
-a document format, a review surface, a dashboard over a type you invented.
+Ideas that need nothing from us: a reader for a document format, a review
+surface, a dashboard over a type you invented, a section over whatever your team
+already keeps in a folder.
 
 ## Where it stands
 
 **Working:** the shell and both windows; opening a folder as a project; types,
 records, folders and the document editor; the context panel; search; the memory
-engine, its sync, merge and rewind; the MCP interface and connecting an agent to
-it; ACP conversations with five agent CLIs; the extension format, loader,
-registry, marketplace and updates; background service modules and their clocks;
-the system speech synthesiser; self-updating releases.
+engine, its sync, merge and rewind; the server, and connecting seven clients to
+it; ACP conversations with five agent CLIs, in the project's folder or in a
+working tree that is discarded afterwards; conversations that delegate to
+conversations; terminals; the vault; tools an agent calls that a package
+answers; the extension format, loader, registry, marketplace and updates;
+background service modules, their clocks and their work orders; the system
+speech synthesiser; pairing a phone and holding a conversation from it;
+self-updating releases.
 
 **Nothing in the interface is a stub.** There are no disabled controls, no
 cards that say "soon" and no sections that open onto an explanation of what will
 one day be there. What you can see, you can use; what a project cannot do yet is
 a package nobody has written.
 
-**Known rough edges** are the ones a first release has: the extension catalogue
-is small, packages are not yet signed — the format and the verification are
-there, the key is not — and the memory engine is a young dependency on its own
-release cadence.
+**Known rough edges** are the ones a first release has: the catalogue is eight
+packages deep, packages are not yet signed — the format and the verification are
+there, the key is not — the memory engine is a young dependency on its own
+release cadence, and the phone is built from source rather than downloaded.
 
 ## If you came here looking for the old Sync
 
@@ -226,18 +328,19 @@ sits under its own identifier and is untouched, though nothing here can read it.
 connected an agent to the old Sync, that agent's configuration names a program
 inside the bundle — `Sync.app/Contents/MacOS/git-sync` — and replacing the
 bundle takes it away. From the agent's side the server simply stops starting.
-This build serves the same purpose from a different program in the same place,
-`sync-mcp`, and it will **not** quietly rewrite the entry: an entry under Sync's
-name that points somewhere else is reported to you rather than overwritten,
-because somebody else's configuration file is not ours to tidy. Open
-**Settings → Agents** after installing and connect again; it is one control per
-agent.
+This build serves the same purpose from one server on this machine, and it will
+**not** quietly rewrite the entry: an entry under Sync's name that points
+somewhere else is reported to you rather than overwritten, because somebody
+else's configuration file is not ours to tidy. Open **Settings → Agents** after
+installing and connect again; it is one control per agent.
 
 ## Building it
 
-Prerequisites: macOS 13+, Xcode Command Line Tools, Node.js 20.9+ (developed on
-23.11), pnpm 11 (`corepack enable` picks up the `packageManager` field), and
-Rust stable.
+Prerequisites: macOS 13+, Xcode Command Line Tools, Node.js 20.9+ (built on 22),
+pnpm 11 (`corepack enable` picks up the `packageManager` field), and Rust 1.91
+or newer — the floor the workspace states, because Cargo resolves one graph
+against the lowest one in it and a lower floor picks dependency versions the
+engine cannot build with.
 
 ```sh
 pnpm install       # from the lockfile
@@ -247,8 +350,13 @@ pnpm tauri build   # produce the installer
 pnpm lint          # eslint
 pnpm typecheck     # tsc --noEmit
 pnpm api:check     # the extension surface, and the number it is promised under
+pnpm prose:check   # the prose rules a machine can hold — see AGENTS.md
 pnpm build         # static export to ./out
 ```
+
+`pnpm tauri:build` is the same bundle with the system's `PATH` in front: the
+step that clears the quarantine attribute calls `xattr`, and a different one
+earlier on your path fails the build after everything has compiled.
 
 For the Rust side, from `src-tauri`:
 
@@ -258,11 +366,21 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
+The phone is a second application rather than a second target of the first, so
+it has its own workspace and its own commands, which go through
+`scripts/tauri.mjs`:
+
+```sh
+pnpm tauri ios dev "iPhone 17 Pro"   # onto a simulator
+pnpm tauri ios build                 # onto a device
+```
+
 **Build the memory sidecar before bundling.** `sync-mcp` ships inside the bundle
 as a Tauri `externalBin`; it *links* the memory engine as a library rather than
-spawning it, and serves two callers over stdio — an agent gets MCP, the window
-gets a channel of product operations that is not MCP and appears in no
-`tools/list`.
+spawning it, and serves three doors from one dispatcher — an agent gets MCP, the
+window and the clock get a channel of product operations that is not MCP and
+appears in no `tools/list`, and a paired device gets that same channel over an
+encrypted connection.
 
 ```sh
 ./scripts/prepare-sidecar.sh                        # build it from this workspace
@@ -302,9 +420,15 @@ and `eslint-plugin-react` declare support only through 9. Both are pinned in
   the panel roles, and the rules for changing them. **Read this first** before
   touching the window.
 - [docs/architecture.md](docs/architecture.md) — how Tauri, Next.js, the Rust
-  crates and the memory process fit together
+  crates and the memory process fit together, and the three doors into the
+  channel
 - [docs/extensions.md](docs/extensions.md) — what a package is, how the window
   decides it may run one, where packages come from, and how one is updated
+- [docs/extension-architecture.md](docs/extension-architecture.md) — the same
+  subject drawn: the boundaries in order, the manifest field by field, and every
+  refusal with the place it is heard
+- [docs/writing-an-extension.md](docs/writing-an-extension.md) — one package
+  built from nothing, with every file it contains
 - [docs/background.md](docs/background.md) — work that runs with no window open
 - [docs/voice.md](docs/voice.md) — what the application says out loud, and who
   may ask it to
