@@ -1368,6 +1368,7 @@ export interface SourceTreeItem {
     readonly count?: number;
     readonly drag?: unknown;
     readonly drop?: unknown;
+    readonly emphasised?: boolean;
     // (undocumented)
     readonly icon?: LucideIcon;
     readonly id: string;
@@ -1401,7 +1402,7 @@ export function stopSession(key: string): Promise<void>;
 export function supportsApiRange(range: string): boolean;
 
 // @public
-export const SYNC_API_VERSION: "3.7.0";
+export const SYNC_API_VERSION: "3.8.0";
 
 // @public
 export const SYNC_CAPABILITIES: readonly ["records", "agents.acp", "markdown.plugins", "native-menu", "folders", "sheets", "net", "net.write", "vault", "background", "schedule", "work.agent", "agent.tools"];

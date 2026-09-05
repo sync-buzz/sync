@@ -69,6 +69,23 @@ export interface SourceTreeItem {
    */
   readonly muted?: boolean;
   /**
+   * Drawn in the warning tier, for a row that is waiting on the person reading
+   * the column.
+   *
+   * One bit, and it says *this one wants you*. What it is waiting for belongs
+   * to whatever the row is about and goes in [`tooltip`](#tooltip): a column
+   * this narrow has room for a colour, not for a sentence.
+   *
+   * It is a state rather than a quantity, which is why it is not a value of
+   * [`count`](#count). A number meaning "how many" at some values and "answer
+   * me" at others is a column that has to be read twice.
+   *
+   * Beside [`muted`](#muted) it wins. A row cannot both be quieter than its
+   * neighbours and be the one thing on screen worth answering, and of the two
+   * only this one is about the person rather than about the row.
+   */
+  readonly emphasised?: boolean;
+  /**
    * What the secondary button opens. Built when asked for, so the commands act
    * on the row as it stands then rather than as it stood when it was drawn.
    */
@@ -394,19 +411,27 @@ function TreeRow({
         <Icon
           aria-hidden="true"
           className={
-            item.muted
-              ? "size-3.5 shrink-0 text-fg-tertiary opacity-60"
-              : "size-3.5 shrink-0 text-fg-tertiary"
+            item.emphasised
+              ? "size-3.5 shrink-0 text-warning"
+              : item.muted
+                ? "size-3.5 shrink-0 text-fg-tertiary opacity-60"
+                : "size-3.5 shrink-0 text-fg-tertiary"
           }
         />
       ) : null}
 
-      <span className={item.muted ? "truncate text-fg-tertiary" : "truncate"}>
+      <span className={item.muted && !item.emphasised ? "truncate text-fg-tertiary" : "truncate"}>
         {item.label}
       </span>
 
       {item.count === undefined ? null : (
-        <span className="ml-auto shrink-0 pl-2 font-mono text-xs text-fg-tertiary tabular-nums">
+        <span
+          className={
+            item.emphasised
+              ? "ml-auto shrink-0 pl-2 font-mono text-xs font-medium text-warning tabular-nums"
+              : "ml-auto shrink-0 pl-2 font-mono text-xs text-fg-tertiary tabular-nums"
+          }
+        >
           {item.count}
         </span>
       )}

@@ -40,6 +40,20 @@ import { satisfies, valid, validRange } from "semver";
  * point of the number is that a manifest can state a range and be believed. The
  * cost is honest major bumps, which is the cost of meaning it.
  *
+ * **3.8.0** gives `SourceTreeItem` an `emphasised`, so a row of a tree can say
+ * that it is waiting on the person reading the column. An addition, so a minor
+ * by the table above, and every package stating `^3.0` goes on installing.
+ *
+ * It closes an asymmetry rather than answering a request. The two source lists
+ * this surface publishes are twins by intent — same row height, same selection,
+ * one tab stop — and the flat one has carried a mark for what a row is about
+ * since 2.2.0 while the nested one carried nothing but a count. A column whose
+ * rows are things that act and finish has states in it, and a count cannot hold
+ * one: a number meaning "how many" at some values and "answer me" at others is
+ * a column read twice. So it is a bit, drawn in the warning tier by the window
+ * rather than by the caller, and what the row is waiting for goes in the
+ * tooltip that member already has.
+ *
  * **3.7.0** is what one conversation came out of, and what came of it.
  * `startSession` takes a `parent` — another conversation, by the agent's own id
  * for it — and `work.order` takes one beside it. A `SessionRow` carries both
@@ -554,7 +568,7 @@ import { satisfies, valid, validRange } from "semver";
  * `AreaModule`, `ActivationResult` — arrived in the same commit, which on its
  * own would have been a minor.
  */
-export const SYNC_API_VERSION = "3.7.0" as const;
+export const SYNC_API_VERSION = "3.8.0" as const;
 
 /**
  * What this build can do, as opposed to what its surface looks like.
