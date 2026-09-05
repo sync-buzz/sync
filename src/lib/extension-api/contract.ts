@@ -224,6 +224,109 @@ export interface ExtensionVault {
   forget(name: string): Promise<void>;
 }
 
+/** How large a terminal's screen is, in cells. */
+export interface TerminalSize {
+  readonly rows: number;
+  readonly cols: number;
+}
+
+/** What to open, and where. */
+export interface TerminalOpening {
+  /** The project the terminal belongs to, and what closing it closes. */
+  readonly project: string;
+  /** The folder the shell starts in. Refused when it is not one. */
+  readonly cwd: string;
+  readonly size: TerminalSize;
+}
+
+/** One terminal a project has open. */
+export interface TerminalRow {
+  readonly id: string;
+  readonly owner: string;
+  /** How the process finished, or absent while it is still running. */
+  readonly exit?: { readonly code: number; readonly signal: string | null };
+}
+
+/**
+ * What a watcher is told, as it happens.
+ *
+ * Output arrives base64-encoded rather than as text, and that is not an
+ * encoding choice made for tidiness: a chunk can end in the middle of a
+ * character, and decoding it as text would replace the tail with a
+ * substitution mark the next chunk cannot repair. Decode it to bytes and hand
+ * those to whatever draws the screen.
+ */
+export type TerminalEvent =
+  | {
+      readonly kind: "output";
+      readonly from: number;
+      readonly to: number;
+      /**
+       * Bytes were dropped between what was asked for and what came back.
+       *
+       * Said rather than smoothed over. What to draw after a gap is the
+       * caller's decision — most screens are better off cleared than left
+       * showing half of something.
+       */
+      readonly gapped: boolean;
+      readonly base64: string;
+    }
+  | { readonly kind: "ended"; readonly code: number; readonly signal: string | null }
+  | { readonly kind: "gone" };
+
+/**
+ * A shell, in a folder, with a screen somewhere else.
+ *
+ * The two halves fail differently and are kept apart for that reason: the
+ * process is held by the application and survives anything the window does to
+ * itself, and the screen is drawn, hidden, resized and thrown away without the
+ * process noticing. Nothing here draws.
+ *
+ * Handed over already attributed, as `net` and `vault` are: opening one is
+ * checked against the manifest on this machine, so the call has to carry which
+ * package is making it rather than state it.
+ *
+ * **A terminal belongs to the project, not to the section that opened it.** An
+ * area can be left, hidden or reloaded, and none of those is a reason for a
+ * build to stop; closing the project is what ends them.
+ */
+export interface ExtensionTerminal {
+  /** Raise one, and answer with the name it will be known by. */
+  open(opening: TerminalOpening): Promise<string>;
+  /** What was typed, on its way to the process. */
+  write(terminal: string, data: string): Promise<void>;
+  /**
+   * Tell the far end the screen changed size.
+   *
+   * Not decoration: this is what raises the signal a full-screen program
+   * redraws itself on, so a screen that resizes without saying so stays wrapped
+   * to a width that is gone.
+   */
+  resize(terminal: string, size: TerminalSize): Promise<void>;
+  /**
+   * Watch one from an offset: everything since, then everything after.
+   *
+   * `0` is from the beginning of what is still kept. What a screen that has
+   * been drawing already passes is the `to` of the last output it took, so
+   * re-attaching after a reload costs one message rather than a repeat.
+   *
+   * **One screen at a time.** Watching a terminal retires whoever was watching
+   * it, which is what a terminal is everywhere else and what stops a section
+   * that re-attaches from leaving its previous watcher behind.
+   */
+  watch(
+    terminal: string,
+    from: number,
+    onEvent: (event: TerminalEvent) => void,
+  ): Promise<void>;
+  /** What a project has open. */
+  list(project: string): Promise<readonly TerminalRow[]>;
+  /** End one. */
+  close(terminal: string): Promise<void>;
+  /** End everything a project has open. */
+  closeProject(project: string): Promise<void>;
+}
+
 /**
  * What an extension's module is handed when it starts.
  *
@@ -249,11 +352,17 @@ export interface ExtensionVault {
  * `vault` is the same shape again and the reason is sharper: an id in the
  * argument list would be one package spelling another's namespace, which is the
  * whole of what a namespace is for.
+ *
+ * `terminal` is the third, and the widest of them: what it opens runs whatever
+ * a person types in the folder they opened it in. It is attributed for the same
+ * reason as the other two — the capability is read off the manifest on this
+ * machine when a terminal is opened, and a package cannot state its own.
  */
 export interface ExtensionHost {
   readonly id: string;
   readonly net: ExtensionNet;
   readonly vault: ExtensionVault;
+  readonly terminal: ExtensionTerminal;
 }
 
 /**

@@ -1,0 +1,34 @@
+[package]
+name = "sync-terminal"
+description = "Sync's terminals: a pty, the process on the far end of it, and the tail of what it has said"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.91"
+publish = false
+
+[dependencies]
+# The pty itself, taken rather than written. Opening one is three system calls
+# on a good day and a different three on Windows, and the part that is actually
+# hard — making the child the session leader so that Ctrl-C reaches it rather
+# than us — is the part a hand-rolled version gets wrong quietly. This crate is
+# wezterm's, extracted by its authors for exactly this reason.
+portable-pty = "0.9"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+# `sync` for the watch channel that says there is more to read, and nothing
+# else. There is no async in this crate: a pty's reader blocks, so the reading
+# is done on a thread of its own.
+tokio = { version = "1", features = ["sync"] }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["rt", "macros", "time"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+expect_used = "warn"

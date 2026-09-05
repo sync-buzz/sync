@@ -40,6 +40,27 @@ import { satisfies, valid, validRange } from "semver";
  * point of the number is that a manifest can state a range and be believed. The
  * cost is honest major bumps, which is the cost of meaning it.
  *
+ * **3.9.0** is a shell in a folder. `ExtensionHost` carries a `terminal`
+ * beside `net` and `vault`, and `terminal` joins the capabilities. An addition,
+ * so a minor, and every package stating `^3.0` goes on installing.
+ *
+ * It is the third thing handed over already attributed, and the widest: what it
+ * opens runs whatever a person types. Attribution is what the other two are
+ * for as well, but here it is the whole of the agreement — a package cannot
+ * state its own permission, so opening one is checked against the manifest on
+ * this machine and the id is closed over by the host.
+ *
+ * The screen is not here and will not be. What the window is handed is bytes
+ * with an offset on them; drawing them is the package's, and the process
+ * outlives every screen that ever drew it.
+ *
+ * `SourceListItem` gains a `menu` under the same number, and it is the other
+ * half of what 3.8.0 started: the two source lists are twins by intent, and a
+ * secondary click that opened commands on a nested row and did nothing on a
+ * flat one taught nobody where a command lives. The same thunk the tree takes,
+ * for the same reason — a menu built at render acts on the row as it stood
+ * rather than as it stands.
+ *
  * **3.8.0** gives `SourceTreeItem` an `emphasised`, so a row of a tree can say
  * that it is waiting on the person reading the column. An addition, so a minor
  * by the table above, and every package stating `^3.0` goes on installing.
@@ -568,7 +589,7 @@ import { satisfies, valid, validRange } from "semver";
  * `AreaModule`, `ActivationResult` — arrived in the same commit, which on its
  * own would have been a minor.
  */
-export const SYNC_API_VERSION = "3.8.0" as const;
+export const SYNC_API_VERSION = "3.9.0" as const;
 
 /**
  * What this build can do, as opposed to what its surface looks like.
@@ -715,6 +736,22 @@ export const SYNC_CAPABILITIES = [
    * without asking for this is answerable before anything of it runs.
    */
   "agent.tools",
+  /**
+   * A shell, in a folder, with a screen the package draws.
+   *
+   * The widest agreement on this list, and named plainly for that reason:
+   * what it opens runs whatever is typed into it, in the folder it was opened
+   * in, as the person who opened it. Nothing narrower would be honest — a
+   * terminal that could only run some commands is not a terminal.
+   *
+   * Checked when a terminal is opened rather than when the manifest is read,
+   * unlike `background` and `schedule`: whether a package ever opens one is
+   * inside its built JavaScript. Once, per terminal — a manifest read per
+   * keystroke is a file read behind every character typed. What holds
+   * afterwards is that a terminal is refused to anybody but the package that
+   * raised it, which is as strong and costs a string comparison.
+   */
+  "terminal",
 ] as const;
 
 export type SyncCapability = (typeof SYNC_CAPABILITIES)[number];

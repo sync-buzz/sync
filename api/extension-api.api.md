@@ -433,12 +433,25 @@ export interface ExtensionHost {
     // (undocumented)
     readonly net: ExtensionNet;
     // (undocumented)
+    readonly terminal: ExtensionTerminal;
+    // (undocumented)
     readonly vault: ExtensionVault;
 }
 
 // @public
 export interface ExtensionNet {
     fetch(request: NetRequest): Promise<NetResponse>;
+}
+
+// @public
+export interface ExtensionTerminal {
+    close(terminal: string): Promise<void>;
+    closeProject(project: string): Promise<void>;
+    list(project: string): Promise<readonly TerminalRow[]>;
+    open(opening: TerminalOpening): Promise<string>;
+    resize(terminal: string, size: TerminalSize): Promise<void>;
+    watch(terminal: string, from: number, onEvent: (event: TerminalEvent) => void): Promise<void>;
+    write(terminal: string, data: string): Promise<void>;
 }
 
 // @public
@@ -1347,6 +1360,7 @@ export interface SourceListItem {
     readonly id: string;
     // (undocumented)
     readonly label: string;
+    readonly menu?: () => readonly NativeMenuEntry[];
     readonly note?: string;
 }
 
@@ -1402,10 +1416,10 @@ export function stopSession(key: string): Promise<void>;
 export function supportsApiRange(range: string): boolean;
 
 // @public
-export const SYNC_API_VERSION: "3.8.0";
+export const SYNC_API_VERSION: "3.9.0";
 
 // @public
-export const SYNC_CAPABILITIES: readonly ["records", "agents.acp", "markdown.plugins", "native-menu", "folders", "sheets", "net", "net.write", "vault", "background", "schedule", "work.agent", "agent.tools"];
+export const SYNC_CAPABILITIES: readonly ["records", "agents.acp", "markdown.plugins", "native-menu", "folders", "sheets", "net", "net.write", "vault", "background", "schedule", "work.agent", "agent.tools", "terminal"];
 
 // @public (undocumented)
 export type SyncCapability = (typeof SYNC_CAPABILITIES)[number];
@@ -1430,6 +1444,49 @@ export interface TableCommands {
 
 // @public (undocumented)
 export const TableCommandsProvider: Provider<(commands: TableCommands | null) => void>;
+
+// @public
+export type TerminalEvent = {
+    readonly kind: "output";
+    readonly from: number;
+    readonly to: number;
+    readonly gapped: boolean;
+    readonly base64: string;
+} | {
+    readonly kind: "ended";
+    readonly code: number;
+    readonly signal: string | null;
+} | {
+    readonly kind: "gone";
+};
+
+// @public
+export interface TerminalOpening {
+    readonly cwd: string;
+    readonly project: string;
+    // (undocumented)
+    readonly size: TerminalSize;
+}
+
+// @public
+export interface TerminalRow {
+    readonly exit?: {
+        readonly code: number;
+        readonly signal: string | null;
+    };
+    // (undocumented)
+    readonly id: string;
+    // (undocumented)
+    readonly owner: string;
+}
+
+// @public
+export interface TerminalSize {
+    // (undocumented)
+    readonly cols: number;
+    // (undocumented)
+    readonly rows: number;
+}
 
 // @public
 export interface ToolDeclaration {

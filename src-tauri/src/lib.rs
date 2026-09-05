@@ -29,6 +29,7 @@ pub mod schedule;
 pub mod server;
 pub mod sessions;
 pub mod settings;
+pub mod terminal;
 pub mod tray;
 pub mod updates;
 pub mod vault;
@@ -72,6 +73,11 @@ pub fn run() {
         // Agent sessions outlive the screen that opened one, so they are held
         // by the application rather than by a window or by an extension.
         .manage(sessions::live::Sessions::default())
+        // Terminals outlive the section that opened one, for the same reason:
+        // an area can be left, hidden or reloaded, and none of those is a
+        // reason for a build to stop. What ends them is closing the project.
+        .manage(sync_terminal::Terminals::new())
+        .manage(terminal::Watchers::default())
         // The server comes up with the application, before any window does.
         // Nothing about it waits for a person: an agent may be running against
         // a project of theirs while every window is closed, and "is Sync
@@ -232,6 +238,13 @@ pub fn run() {
             vault::extension_secret_read,
             vault::extension_secret_write,
             vault::extension_secret_forget,
+            terminal::terminal_open,
+            terminal::terminal_write,
+            terminal::terminal_resize,
+            terminal::terminal_watch,
+            terminal::terminal_list,
+            terminal::terminal_close,
+            terminal::terminal_close_project,
             voice::voice_status,
             voice::voice_choose,
             voice::voice_speak,

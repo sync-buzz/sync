@@ -199,7 +199,7 @@ the thing* — a platform without a bundled ACP sidecar exposes the same
 So a build publishes named capabilities and a manifest may require them:
 `records`, `agents.acp`, `markdown.plugins`, `native-menu`, `folders`, `sheets`,
 `net`, `net.write`, `vault`, `background`, `schedule`, `work.agent`,
-`agent.tools`. A missing capability is a refusal
+`agent.tools`, `terminal`. A missing capability is a refusal
 with a sentence a person can act on, and it is also what lets an extension
 degrade deliberately — asking for a capability is a choice, and reading whether
 one is present is allowed.
@@ -448,6 +448,44 @@ that reaches one has been published rather than mislaid.
 One note for the author rather than a rule: every extension in a window shares
 one origin, so what holds two packages apart here is the door each was handed,
 not a wall the webview puts between them.
+
+### `terminal` is the widest one, and is named for what it is
+
+A shell, in a folder, with a screen the package draws. What it opens runs
+whatever is typed into it, in the folder it was opened in, as the person who
+opened it — and nothing narrower would be honest, because a terminal that could
+only run some commands is not a terminal. So the card says that in those words
+rather than in a phrase about processes, and a person deciding is deciding the
+thing they are actually deciding.
+
+**The process is the application's and the screen is the package's**, and the
+two fail differently. A screen is drawn, hidden, resized, reloaded and thrown
+away; a build that stopped for any of those would be a build that stops when
+somebody looks at something else. So what a package is handed is bytes with an
+offset on them, and what holds the pty is Rust.
+
+**A terminal belongs to the project rather than to the section that opened it.**
+Closing the project closes them, and nothing else does.
+
+**The capability is read when a terminal is opened, and the package's name
+travels with every call after it.** Reading the capability means resolving the
+package on disk and parsing its manifest, and doing that per keystroke is a file
+read behind every character somebody types — so what stands in for it afterwards
+is that a terminal is refused to anybody but the package that raised it. It is
+as strong, for the price of comparing two strings: a terminal exists only
+because somebody with the capability opened it.
+
+It has to be that way round rather than trusting the name. A terminal's name is
+a counter, so a package that asked for nothing could otherwise guess one and
+write into a shell somebody else opened, and writing into a shell is running a
+command in it. Asked after a terminal it did not raise, the host answers as
+though there were none: two answers would be one answer plus a way to find out
+what else is open.
+
+**One screen at a time.** Watching a terminal retires whoever was watching it.
+That is what a terminal is everywhere else on this system, and it is what stops
+a section that re-attaches after a reload from leaving its previous watcher
+behind — awake on every byte, encoding it for a channel nobody reads.
 
 ## 5. What a package is
 

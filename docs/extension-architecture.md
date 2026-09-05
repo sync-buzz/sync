@@ -531,6 +531,7 @@ the thing* — a platform with no bundled ACP sidecar publishes the same
 | `schedule` | It runs while nobody is there | manifest | required by `schedule[]` |
 | `work.agent` | It may raise an agent, which **spends money while they sleep** | **call** | scanned by `sync-ext check` |
 | `agent.tools` | An agent is told it is there, and may act through it | manifest | required by `tools[]` |
+| `terminal` | A shell, in a folder, with a screen the package draws | **call** | one screen at a time |
 
 **A capability this build has never heard of is refused rather than ignored.**
 It arrives in exactly one situation — a package built against a newer host — and

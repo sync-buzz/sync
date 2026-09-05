@@ -15,6 +15,7 @@ import {
 } from "@dnd-kit/core";
 import type { LucideIcon } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { showNativeContextMenu, type NativeMenuEntry } from "@/lib/native-menu";
 import {
   Tooltip,
   TooltipContent,
@@ -86,6 +87,19 @@ export interface SourceListItem {
    * abbreviated instead — see [`BADGE_CEILING`].
    */
   readonly badge?: { readonly kind: "count"; readonly value: number } | { readonly kind: "dot" };
+  /**
+   * What the secondary button offers over this row, or nothing where the row
+   * answers to no commands.
+   *
+   * A thunk rather than a list, and built when the menu is asked for: by then
+   * the row may stand for something that has changed since it was drawn, and a
+   * menu made at render would act on what was on screen rather than on what is
+   * there now. The same shape [`SourceTree`] gives its own rows, because a
+   * secondary click on a row means one thing in this window whichever of the
+   * two controls drew it — and a gesture that works in one column and dies in
+   * the next teaches nobody where a command lives.
+   */
+  readonly menu?: () => readonly NativeMenuEntry[];
 }
 
 /**
@@ -185,6 +199,20 @@ function SourceListRow({
       }
       tabIndex={tabIndex}
       onClick={onSelect}
+      onContextMenu={(event) => {
+        const entries = item.menu?.();
+        if (!entries) {
+          return;
+        }
+        // Selected only if a native menu is actually going to answer: in a
+        // browser during development the system's own menu is left alone
+        // rather than suppressed for nothing. The same order [`SourceTree`]
+        // keeps — a menu opens over the row it is about, so the row has to be
+        // the selected one before it does.
+        if (showNativeContextMenu(event, entries)) {
+          onSelect();
+        }
+      }}
       className={cn(
         "relative flex h-(--control-height-lg) w-full items-center gap-2.5 rounded-(--radius-control) text-left text-base text-fg-secondary transition-colors duration-(--motion-duration-fast) ease-shell hover:bg-hover hover:text-fg data-[active=true]:bg-selected data-[active=true]:font-medium data-[active=true]:text-fg data-[dragging=true]:opacity-50",
         rail ? "justify-center px-0" : "px-2",

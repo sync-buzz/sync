@@ -85,6 +85,18 @@ pub(crate) const THE_TRANSPORT_S: [&str; 4] =
 /// which is only ever visible in built JavaScript.
 pub const AGENT_TOOLS_CAPABILITY: &str = "agent.tools";
 
+/// A shell, in a folder, with a screen the package draws.
+///
+/// The widest of these, and named plainly for it: what it opens runs whatever
+/// is typed into it, in the folder it was opened in, as the person who opened
+/// it. Nothing narrower would be honest, because a terminal that could only run
+/// some commands is not a terminal.
+///
+/// Checked when a terminal is opened rather than when the manifest is read,
+/// like `work.agent` and unlike `schedule`: whether a package ever opens one is
+/// inside its built JavaScript, and there is nothing in the file to answer for.
+pub const TERMINAL_CAPABILITY: &str = "terminal";
+
 /// The manifest format this build reads.
 ///
 /// Bumped when the *shape* changes incompatibly, which is a different question

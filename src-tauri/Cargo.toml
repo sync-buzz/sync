@@ -4,7 +4,7 @@ members = ["crates/*"]
 # it. Neither belongs in the window's build, and an ordinary `cargo check` here
 # is the window's build — so the sidecar is a member that is not a default one,
 # reached with `-p sync-mcp` when it is the thing being worked on.
-default-members = [".", "crates/sync-memory", "crates/sync-extensions", "crates/sync-handlers", "crates/sync-vault", "crates/sync-voice", "crates/acp-client", "crates/agent-bridge"]
+default-members = [".", "crates/sync-memory", "crates/sync-terminal", "crates/sync-extensions", "crates/sync-handlers", "crates/sync-vault", "crates/sync-voice", "crates/acp-client", "crates/agent-bridge"]
 
 [package]
 name = "sync"
@@ -75,6 +75,10 @@ sync-handlers = { path = "crates/sync-handlers" }
 # is decided in `src/vault.rs` and how it is done is decided in the crate.
 sync-vault = { path = "crates/sync-vault" }
 sync-memory = { path = "crates/sync-memory" }
+# The pty, and the process on the far end of it. Tauri-free like its
+# neighbours: it holds terminals under an owner it is handed, and who may ask
+# for one — and which project the owner is — is decided in `src/terminal.rs`.
+sync-terminal = { path = "crates/sync-terminal" }
 # What the machine says out loud. Tauri-free like its neighbours: it takes a
 # sentence and says it, and who may ask for one is decided in `voice.rs`, where
 # the installation's chosen voice is known.

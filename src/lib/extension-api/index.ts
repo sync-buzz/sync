@@ -316,11 +316,16 @@ export type {
   AreaProviderProps,
   ExtensionHost,
   ExtensionNet,
+  ExtensionTerminal,
   ExtensionVault,
   NetMethod,
   NetPart,
   NetRequest,
   NetResponse,
+  TerminalEvent,
+  TerminalOpening,
+  TerminalRow,
+  TerminalSize,
 } from "@/lib/extension-api/contract";
 
 // ---------------------------------------------------------------------------
