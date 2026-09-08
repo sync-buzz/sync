@@ -10,7 +10,11 @@ import {
 import { createPortal } from "react-dom";
 
 import { AppHeader } from "@/components/shell/app-header";
-import { EXTENSIONS_AREA } from "@/components/shell/areas";
+import { ACTIVITY_AREA, EXTENSIONS_AREA } from "@/components/shell/areas";
+import {
+  ACTIVITY_AREA_MODULE,
+  ActivityProvider,
+} from "@/components/shell/activity-area";
 import { EXTENSIONS_AREA_MODULE } from "@/components/shell/extensions-area";
 import { MobileWindow } from "@/components/shell/mobile-window";
 import { openers } from "@/components/shell/opening";
@@ -31,6 +35,7 @@ import { useDevice } from "@/lib/device";
 import type { AreaModule } from "@/lib/extension-host/activate";
 import { useAreas, type MountedArea } from "@/lib/extension-host/areas";
 import { useSectionOrder } from "@/lib/project/use-section-order";
+import { useWatchedKinds } from "@/lib/project/use-project-view";
 import { BadgeScope } from "@/lib/extension-api/badge";
 import {
   mergeBadges,
@@ -42,6 +47,7 @@ import {
   usePackagesState,
 } from "@/lib/extension-host/packages";
 import { updatesFor, useCachedIndex } from "@/lib/extension-host/updates";
+import { useActivity } from "@/lib/memory/use-activity";
 import { useSyncState } from "@/lib/memory/use-sync-state";
 import type { OpenProject } from "@/lib/project/types";
 import { ColumnProvider } from "@/lib/shell-bands";
@@ -85,12 +91,20 @@ import { cn } from "@/lib/utils";
 export function ProjectWindow({
   project,
   setup,
+  shown,
   onProjectChanged,
   onOpenSettings,
   onLeave,
 }: {
   project: OpenProject;
   setup: ProjectSetup;
+  /**
+   * What a banner clicked outside every window asked this one to show, where
+   * it asked for anything this window can show. It arrives with the project
+   * already open — opening it is the window above's half — so all that is left
+   * is the same two steps the palette takes with a search result.
+   */
+  shown?: AreaIntent | null;
   /** Installing or removing an extension changes what the project is. */
   onProjectChanged: (project: OpenProject) => void;
   /**
@@ -134,9 +148,20 @@ export function ProjectWindow({
   // column — the first row is what a person means by "first".
   const { sections, arrange } = useSectionOrder(project.path, brought);
   const mounted = useMemo(
-    () => new Map([...sections, CATALOGUE].map((area) => [area.key, area])),
+    () =>
+      new Map(
+        [ACTIVITY, ...sections, CATALOGUE].map((area) => [area.key, area]),
+      ),
     [sections],
   );
+
+  // What has changed since this person last looked, and which kinds they want
+  // told about. Read here rather than inside the area: the figure on the
+  // sidebar has to be true for somebody who has never opened that screen, which
+  // is the same reason a declared badge is answered without its section
+  // running.
+  const watched = useWatchedKinds(project.path);
+  const activity = useActivity(project.path, watched.hidden);
 
   // Which section somebody chose, and `null` until somebody has.
   //
@@ -243,6 +268,44 @@ export function ProjectWindow({
   const opener = useMemo(
     () => openers(packages.all, sections, composition.installed),
     [composition.installed, packages.all, sections],
+  );
+
+  // A banner is clicked in another application, so what it asked for is applied
+  // during the render that has it rather than in an effect after: an effect
+  // would draw the section somebody left an hour ago for one frame, under the
+  // person who has just come back to look at something else. The same reading
+  // the visited list above gets, and for the same reason.
+  //
+  // Once per ask, which the identity of the object decides — clicking two
+  // banners about the same record is somebody asking for it twice, and the
+  // second ask has to move the window as much as the first.
+  const [answered, setAnswered] = useState<AreaIntent | null>(null);
+  if (shown != null && shown !== answered) {
+    setAnswered(shown);
+    const opening = opener(shown.show === "record" ? shown.kind : "");
+    // Nothing is said where no section opens it. The window has already been
+    // put in front of the person with the project open, which is the whole of
+    // what a banner promised; a sentence about a missing extension belongs
+    // where somebody asked for the record, not over what they came back to.
+    if (opening.outcome === "area") show(opening.areaKey, shown);
+  }
+
+  // Taking somebody to a record from a screen that shows every kind at once —
+  // the same two steps the palette takes, and deliberately the same lookup: the
+  // kind decides the section, and a screen that decided for itself would be a
+  // second answer to a question `opening.ts` already answers.
+  const activityShell = useMemo(
+    () => ({
+      activity,
+      watched,
+      opening: opener,
+      open: (key: string, kind: string) => {
+        const opening = opener(kind);
+        if (opening.outcome !== "area") return;
+        show(opening.areaKey, { show: "record", key, kind });
+      },
+    }),
+    [activity, opener, show, watched],
   );
 
   // What each section has that is worth a look, from the two sources there are.
@@ -374,6 +437,7 @@ export function ProjectWindow({
               sections={sections}
               badges={badges}
               updates={updates}
+              unseen={activity.isLoading ? null : activity.entries.length}
               activeAreaKey={activeKey}
               rail={stages.primarySidebar === "rail"}
               onSelectArea={selectArea}
@@ -434,11 +498,13 @@ export function ProjectWindow({
       {isPhone ? (
         <MobileWindow
           project={project}
+          activity={ACTIVITY}
           sections={sections}
           unavailable={elsewhere}
           catalogue={CATALOGUE}
           badges={badges}
           updates={updates}
+          unseen={activity.isLoading ? null : activity.entries.length}
           active={activeKey === null ? null : (mounted.get(activeKey) ?? null)}
           attachNavigator={slotRefs.Navigator}
           attachWorkspace={slotRefs.Workspace}
@@ -534,9 +600,13 @@ export function ProjectWindow({
         {/* Above every area, because a link may point at a kind belonging to a
             section this one has never heard of. */}
         <RecordLinks project={project} opener={opener} onShow={show}>
-          {/* The window's own chrome, outside every area and never rebuilt. */}
-          {columns}
-          {areaLayers}
+          {/* Above the areas as well, because the row in the sidebar carries
+              the figure and the sidebar is drawn outside every one of them. */}
+          <ActivityProvider value={activityShell}>
+            {/* The window's own chrome, outside every area and never rebuilt. */}
+            {columns}
+            {areaLayers}
+          </ActivityProvider>
         </RecordLinks>
       </CompositionProvider>
     </PackagesProvider>
@@ -551,6 +621,30 @@ export function ProjectWindow({
  * and names no extension — it is where a person decides which extensions there
  * are, which is why it is here and not in a package.
  */
+/**
+ * Activity, as a section of the window.
+ *
+ * The shell's own, like the catalogue, and mounted through the same path
+ * everything else is mounted through: a second route for the window's own
+ * screens is how the first route stops being tested.
+ *
+ * It carries no badge of its own. What its row says is counted from the journal
+ * and handed to the column directly — a badge here is a question asked of the
+ * corpus, and what has changed since somebody looked is not in the corpus at
+ * all.
+ */
+const ACTIVITY: MountedArea = {
+  key: ACTIVITY_AREA.id,
+  extensionId: ACTIVITY_AREA.id,
+  label: ACTIVITY_AREA.label,
+  description: ACTIVITY_AREA.description,
+  frame: ACTIVITY_AREA.frame,
+  icon: ACTIVITY_AREA.icon,
+  development: false,
+  badge: null,
+  module: ACTIVITY_AREA_MODULE,
+};
+
 const CATALOGUE: MountedArea = {
   key: EXTENSIONS_AREA.id,
   extensionId: EXTENSIONS_AREA.id,

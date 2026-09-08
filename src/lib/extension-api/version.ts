@@ -42,6 +42,45 @@ import { device } from "@/lib/device";
  * point of the number is that a manifest can state a range and be believed. The
  * cost is honest major bumps, which is the cost of meaning it.
  *
+ * **3.12.0** is a row that stays where it is put. `SourceListItem` gains
+ * `fixed`, one optional member, so a minor and every package stating `^3.0`
+ * goes on installing.
+ *
+ * It came from the shell's own column, where the window's rows and the
+ * project's now sit in one list and only the second kind can be dragged — the
+ * division macOS draws in every source list it has. A package's own navigator
+ * has the same shape whenever it lists something standing beside something
+ * arranged, and the alternative it replaces is the one the shell tried first: a
+ * second list for the fixed row. That divides the column's height between two
+ * scrollers and leaves a hole where the shorter one gave up, which is a layout
+ * fault an author would have had to discover on their own.
+ *
+ * **3.11.0** is a conversation that no longer costs what it is long. Three
+ * additions, so a minor, and every package stating `^3.0` goes on installing.
+ *
+ * `VirtualList` is a list whose rows are built as they come near the screen and
+ * thrown away as they leave it. Every other list on this surface is drawn
+ * whole, which is right for anything a person could count; this is for what a
+ * machine appends to, and it is a component rather than a hook because the
+ * machinery underneath reaches for `react-dom`. A package that bundled that
+ * would put a second copy of the renderer in the document — the one thing a
+ * package may not do — so there is exactly one side of this line the library
+ * can live on.
+ *
+ * `AgentSession` gains `loadEarlier`, and `Transcript` gains `earlier`, because
+ * a conversation is no longer handed over whole. A subscription replays the end
+ * of one and says where that end began; `earlier` is that place, and
+ * `loadEarlier` moves it back a page. `precede` is the fold's other direction,
+ * for a package writing its own reading over the same events: `foldTranscript`
+ * appends, and a page that belongs *before* what is held has to be joined
+ * rather than folded — including the block the page boundary fell through,
+ * which was one message and would otherwise come back as two.
+ *
+ * `withEarlier` is beside `withDropped` and answers a question that number
+ * could not. What was dropped is gone; what is earlier is one request away. A
+ * reading that said "no longer kept" over a conversation it could still ask for
+ * would be lying to the one person able to check.
+ *
  * **3.10.0** is the same surface on two machines. `capabilitiesHere` is what
  * this *machine* honours, as against what the build publishes, and
  * `unavailableHere` says in a sentence why a package that is otherwise fine
@@ -612,7 +651,7 @@ import { device } from "@/lib/device";
  * `AreaModule`, `ActivationResult` — arrived in the same commit, which on its
  * own would have been a minor.
  */
-export const SYNC_API_VERSION = "3.10.0" as const;
+export const SYNC_API_VERSION = "3.12.0" as const;
 
 /**
  * What this build can do, as opposed to what its surface looks like.

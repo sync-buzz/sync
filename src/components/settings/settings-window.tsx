@@ -12,6 +12,7 @@ import {
 } from "@/components/settings/sections";
 import { TypographySection } from "@/components/settings/typography-section";
 import { VaultSection } from "@/components/settings/vault-section";
+import { NotificationsSection } from "@/components/settings/notifications-section";
 import { VoiceSection } from "@/components/settings/voice-section";
 import { WorktreesSection } from "@/components/settings/worktrees-section";
 import { SourceList } from "@/components/shell/source-list";
@@ -78,6 +79,8 @@ export function SettingsWindow() {
             <VaultSection />
           ) : sectionId === "voice" ? (
             <VoiceSection />
+          ) : sectionId === "notifications" ? (
+            <NotificationsSection />
           ) : (
             <>
               <AgentsSection />

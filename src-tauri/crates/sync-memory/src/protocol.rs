@@ -243,6 +243,19 @@ pub const SESSION_PERMISSION_RESPOND: &str = "session.permission_respond";
 /// Everything a session has said, read once, without watching it.
 pub const SESSION_BACKLOG: &str = "session.backlog";
 
+/// A page of what a session said before a point, for a screen scrolling back.
+///
+/// The other half of [`SESSION_SUBSCRIBE`] replaying only the end of a
+/// conversation: `before` is the earliest sequence number the caller holds, and
+/// the answer is what comes before it together with where to ask next.
+///
+/// Read once rather than delivered on the watch, and the two are not
+/// interchangeable: a page belongs *before* what a screen already holds, and
+/// the events travelling under a subscription only ever append. A page pushed
+/// down that road would arrive at the end of a transcript it belongs at the
+/// front of.
+pub const SESSION_HISTORY: &str = "session.history";
+
 /// Watch a session: what it has said since a given point, then everything
 /// after.
 ///
@@ -286,6 +299,42 @@ pub const AGENT_ADAPTERS_FORGET: &str = "agent.adapters_forget";
 /// one name.
 pub const SESSION_EVENT: &str = "session.event";
 
+/// What this installation shows of a project, read back.
+///
+/// A person's own reading of a project rather than the project itself: which
+/// kinds they hid, what order the sections are in, how far through the changes
+/// they have got. None of it is in the project's memory and none of it should
+/// be — in there it would be one colleague's reading marking the whole team's.
+///
+/// It is carried because the *installation* is the computer, whichever screen
+/// somebody is looking at it through. A phone that kept its own copy would make
+/// one person two readers of one project: a change glanced at over lunch would
+/// still be waiting at the desk, and marking it read at the desk would leave it
+/// unread in a pocket.
+pub const PROJECT_VIEW: &str = "project.view";
+/// Write down part of it. The answer is the whole view as it now stands, so a
+/// caller that wrote one half can see the half it did not touch.
+pub const PROJECT_VIEW_SAVE: &str = "project.view_save";
+
+/// The engine saying that a project's memory is no longer what it was.
+///
+/// A notification — no id, no answer — travelling out on [`ATTEND`] beside
+/// [`SESSION_EVENT`], and it carries `{path}` and nothing else. **Not the
+/// revision:** a number written here was already old by the time it was read,
+/// because the memory can move twice while one line is in flight, so whoever
+/// hears this re-reads the revision through the connection every other answer
+/// comes from. A reader that took the value would show a project as it was at
+/// a moment nobody can name.
+///
+/// It goes on this connection rather than on the attached one the window asks
+/// its questions on, and the difference is who is reading. An attached
+/// connection is read only while a call is in flight, so a notice arriving
+/// between two calls would sit in a socket buffer until somebody happened to
+/// ask something — and a second reader put on that socket to fix it would race
+/// the first for the answers. This connection is read by a thread that does
+/// nothing else, from start-up, with no call ever outstanding on it.
+pub const REVISION_MOVED: &str = "project.revision_moved";
+
 /// The subscriptions whose device has gone, told to the application.
 ///
 /// The application cannot see it happen: it writes events into a socket to an
@@ -323,6 +372,7 @@ pub const SESSIONS: &[&str] = &[
     SESSION_SET_OPTION,
     SESSION_PERMISSION_RESPOND,
     SESSION_BACKLOG,
+    SESSION_HISTORY,
     SESSION_SUBSCRIBE,
     SESSION_UNSUBSCRIBE,
     AGENT_ADAPTERS,
@@ -343,10 +393,15 @@ pub fn about_a_session(method: &str) -> bool {
 
 /// Whether this call carries the project it is about, as `project`.
 ///
-/// The rest of the family is addressed by a session key, which this machine
-/// minted and which says nothing about where anything is. Naming the five that
+/// Most of the session family is addressed by a session key, which this machine
+/// minted and which says nothing about where anything is. Naming the calls that
 /// are not is what lets the door resolve a key exactly once, in one place,
 /// rather than in each of them.
+///
+/// The two about what an installation shows are here for the same mechanical
+/// reason and not because they are conversations: they name a project and are
+/// answered by the application, so the key a device holds has to become the
+/// path that application files things under.
 #[must_use]
 pub fn names_a_project(method: &str) -> bool {
     matches!(
@@ -356,6 +411,8 @@ pub fn names_a_project(method: &str) -> bool {
             | SESSION_REMEMBERED
             | SESSION_FORGET_REMEMBERED
             | SESSION_FOR_RECORD
+            | PROJECT_VIEW
+            | PROJECT_VIEW_SAVE
     )
 }
 
@@ -396,6 +453,8 @@ pub fn carried(method: &str) -> bool {
                 | SCHEDULE_REMEMBER
                 | SCHEDULE_OFF
                 | SCHEDULE_SWITCH
+                | PROJECT_VIEW
+                | PROJECT_VIEW_SAVE
         )
 }
 

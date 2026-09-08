@@ -98,19 +98,3 @@ export function paired(seconds: number): string {
   });
 }
 
-/**
- * A time, as somebody reading a list wants it rather than as a date.
- *
- * *Just now* and *3 days ago* are what the column is for — whether a device is
- * still in use, and how long a stranger's copy of a key has been quiet. An
- * exact timestamp answers neither without arithmetic.
- */
-export function when(seconds: number | null): string {
-  if (seconds === null) return "Never";
-  const ago = Math.max(0, Math.floor(Date.now() / 1000) - seconds);
-  if (ago < 60) return "Just now";
-  if (ago < 3600) return `${Math.floor(ago / 60)} min ago`;
-  if (ago < 86_400) return `${Math.floor(ago / 3600)} h ago`;
-  const days = Math.floor(ago / 86_400);
-  return days === 1 ? "Yesterday" : `${days} days ago`;
-}

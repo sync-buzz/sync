@@ -21,8 +21,8 @@
 use serde_json::{Value, json};
 
 use crate::dto::{
-    ContentView, EntityInput, FetchOutcome, FolderAttachment, FolderEntry, Handshake, Listing,
-    MemoryPresence, ModelStatus, ProjectSettings, RecordView, ScanOutcome, SearchOutcome,
+    ContentView, EntityInput, FetchOutcome, FolderAttachment, FolderEntry, Handshake, Journal,
+    Listing, MemoryPresence, ModelStatus, ProjectSettings, RecordView, ScanOutcome, SearchOutcome,
     SyncState, TransactionResult, TransportStatus, TypeRemoval,
 };
 use crate::error::{MemoryError, Result};
@@ -75,6 +75,7 @@ pub fn effect(method: &str) -> Option<Effect> {
         | "records.backlinks"
         | "records.dependents"
         | "records.get"
+        | "records.journal"
         | "records.list"
         | "records.load"
         | "records.search"
@@ -96,7 +97,12 @@ pub fn effect(method: &str) -> Option<Effect> {
         | crate::SESSION_REMEMBERED
         | crate::SESSION_FOR_RECORD
         | crate::SESSION_BACKLOG
-        | crate::AGENT_ADAPTERS => Effect::Reads,
+        | crate::SESSION_HISTORY
+        | crate::AGENT_ADAPTERS
+        // What somebody has hidden, ordered and read. A connection that came
+        // back asks it again for free, and it is the answer a screen is
+        // redrawn from.
+        | crate::PROJECT_VIEW => Effect::Reads,
         "documents.create"
         | "documents.create_file"
         | "documents.move"
@@ -143,6 +149,11 @@ pub fn effect(method: &str) -> Option<Effect> {
         | crate::EXTENSION_OCCASION
         | crate::SCHEDULE_REMEMBER
         | crate::SCHEDULE_SWITCH
+        // Replaying it would be safe — the same view written twice is the same
+        // view — but it is a write, and a list that called one write a read
+        // because this one happens to be idempotent is a list that has stopped
+        // meaning anything.
+        | crate::PROJECT_VIEW_SAVE
         // Talking to an agent, where replaying a call that may already have
         // arrived is the failure this list exists to prevent: a prompt sent
         // twice is a turn run twice, and an answer to a permission question
@@ -236,6 +247,26 @@ pub trait Operations {
     /// Returns the engine failure.
     fn list_records(&mut self, query: &Value) -> Result<Listing> {
         let answer = self.request("records.list", &query.clone())?;
+        parse(answer)
+    }
+
+    /// What happened between two revisions, newest first.
+    ///
+    /// `from` is the revision the caller has already seen and is not itself
+    /// reported. `to` is left to the engine, which serves the one it stands at
+    /// — asking for the current revision first and then asking about it is two
+    /// questions with room for a write between them.
+    ///
+    /// # Errors
+    ///
+    /// Returns the engine failure, including the refusal when `from` is not an
+    /// ancestor of what memory stands at now — which is what a rewritten
+    /// history looks like from here.
+    fn journal(&mut self, from: &str, limit: usize) -> Result<Journal> {
+        let answer = self.request(
+            "records.journal",
+            &json!({"from_revision": from, "limit": limit}),
+        )?;
         parse(answer)
     }
 
@@ -1421,6 +1452,8 @@ mod tests {
             crate::SCHEDULE_REMEMBER,
             crate::SCHEDULE_OFF,
             crate::SCHEDULE_SWITCH,
+            crate::PROJECT_VIEW,
+            crate::PROJECT_VIEW_SAVE,
         ] {
             assert!(
                 crate::carried(method),

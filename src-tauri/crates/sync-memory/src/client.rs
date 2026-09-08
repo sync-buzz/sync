@@ -166,10 +166,21 @@ impl MemoryClient {
         &self.revision
     }
 
-    /// Whether the engine reported a revision change that has not been re-read.
+    /// Whether the engine reported a revision change on *this* connection that
+    /// has not been re-read.
     ///
-    /// The notification is a hint, not a value: callers invalidate their caches
-    /// and re-read, they do not take a revision from a notification payload.
+    /// Always false in this build, and the reason is worth having here rather
+    /// than found by somebody wiring a screen to it. A connection is read only
+    /// inside the loop waiting for a call's answer, so a notice arriving
+    /// between two calls would sit unread until somebody happened to ask
+    /// something — which is no use to a window that wants to hear about a
+    /// record the moment it is written. The notice goes to the application on
+    /// the connection it attended with instead, where a thread reads and
+    /// nothing is ever outstanding: see [`crate::REVISION_MOVED`].
+    ///
+    /// What remains true, and is why this is still here: a notification is a
+    /// hint and never a value. A caller invalidates and re-reads; it does not
+    /// take a revision out of a payload.
     #[must_use]
     pub fn revision_is_stale(&mut self) -> bool {
         self.drain_updates();
@@ -273,10 +284,12 @@ impl MemoryClient {
 
     /// Notice anything the sidecar said between answers.
     ///
-    /// Nothing yet: the host channel answers, it does not announce. When it
-    /// grows notifications — the daemon already knows which calls moved the
-    /// revision — this is where the window learns of them, and
-    /// `revision_is_stale` starts telling the truth again.
+    /// Nothing arrives: on this connection the engine answers and does not
+    /// announce, and what it has to announce goes elsewhere for a reason that
+    /// is a property of this connection rather than of the message — see
+    /// [`Self::revision_is_stale`]. The drain stays because the framing beneath
+    /// it collects notifications whether or not anybody sends one, and a queue
+    /// nobody empties is a queue that grows for the life of the session.
     fn drain_updates(&mut self) {
         let _ = self.connection.take_updates();
     }

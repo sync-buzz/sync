@@ -86,6 +86,13 @@ sync-voice = { path = "crates/sync-voice" }
 tauri = { version = "2.11.3", features = ["macos-private-api", "tray-icon", "image-png"] }
 tauri-plugin-autostart = "2"
 tauri-plugin-dialog = "2.7.2"
+# The banner, and it is the whole of what this window can say from behind
+# another application. Raised in Rust and never through the webview — a
+# notification asked for by a window would exist only while a window does,
+# which is exactly when nobody needs one — so like the updater's, none of this
+# plugin's commands appear in a capability. What is said, and when, is
+# `src/attention.rs`.
+tauri-plugin-notification = "2.4.0"
 tauri-plugin-opener = "2.5"
 # Updating happens behind the window and never through it: the plugin's
 # commands are in no capability, so the whole flow is `src/updates.rs`.
@@ -104,10 +111,13 @@ which = "8"
 
 # The Dock icon's menu. macOS asks the application delegate for it and Tao's
 # delegate does not answer, so `src/dock.rs` adds the method to it — which is
-# the Objective-C runtime and these two crates' typed bindings to it. Both are
+# the Objective-C runtime and these crates' typed bindings to it. They are
 # already in the tree under Tauri; they are named here because this crate calls
 # them directly.
 [target.'cfg(target_os = "macos")'.dependencies]
+# The callback halves of the notification interface below: asking for
+# permission and hearing that somebody clicked are both blocks.
+block2 = "0.6"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = [
   "std",
@@ -120,4 +130,23 @@ objc2-app-kit = { version = "0.3", features = [
   "NSView",
   "NSWindow",
 ] }
-objc2-foundation = { version = "0.3", features = ["std", "NSString"] }
+objc2-foundation = { version = "0.3", features = [
+  "std",
+  "NSDictionary",
+  "NSObject",
+  "NSString",
+] }
+# The banner somebody can click, which is a different thing from the banner the
+# plugin above shows: `UNUserNotificationCenter` is the only interface on this
+# system that carries a payload out with a notification and hands it back when
+# somebody acts on it. What is carried, and where a click lands, is
+# `src/attention/banner.rs`.
+objc2-user-notifications = { version = "0.3", features = [
+  "std",
+  "block2",
+  "UNNotification",
+  "UNNotificationContent",
+  "UNNotificationRequest",
+  "UNNotificationResponse",
+  "UNUserNotificationCenter",
+] }

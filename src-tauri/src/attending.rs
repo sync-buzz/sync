@@ -11,6 +11,15 @@
 //! the only such message, and it carries no call — see
 //! [`sync_memory::SESSION_EVENT`].
 //!
+//! One travels *in* the same way: the engine saying that a project's memory has
+//! moved — [`sync_memory::REVISION_MOVED`], answered by not answering. It comes
+//! here rather than down the connection the window asks its questions on
+//! because this one is read by a thread that does nothing else and has no
+//! answer outstanding on it, while an attached connection is read only while a
+//! call is in flight. A notice on that one would wait in a socket buffer for
+//! somebody to ask something, and a second reader put there to take it would
+//! race the first for its answers.
+//!
 //! **A tool's body runs here because everything it reaches is here.** The
 //! keychain, the host list off the manifest a person installed, the artefact on
 //! this machine, `work.order` — none of it exists in `sync-mcp`, and a second
@@ -43,7 +52,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use sync_memory::{ATTEND, EXTENSION_FETCH, SESSION_DROPPED, TOOL_CALL, carried};
+use sync_memory::{ATTEND, EXTENSION_FETCH, REVISION_MOVED, SESSION_DROPPED, TOOL_CALL, carried};
 use tauri::{AppHandle, Manager as _, Runtime};
 
 use crate::project::ProjectError;
@@ -126,6 +135,20 @@ fn answer<R: Runtime>(app: &AppHandle<R>, stream: UnixStream) -> std::io::Result
         let id = request.get("id").cloned().unwrap_or(Value::Null);
         let params = request.get("params").cloned().unwrap_or_else(|| json!({}));
 
+        // Answered by not answering. Nothing was asked — the engine is saying
+        // that a project's memory is no longer what it was — and the whole of
+        // what this side does with it is hand it to whoever is watching that
+        // project, which is a write into a channel and takes no thread.
+        //
+        // Handled before the refusal below because it carries no id: a reply to
+        // it would be a message the engine has nothing to match against.
+        if method == REVISION_MOVED {
+            if let Some(path) = params.get("path").and_then(Value::as_str) {
+                app.state::<crate::memory::MemoryWatchers>()
+                    .moved(std::path::Path::new(path));
+            }
+            continue;
+        }
         if method != SESSION_DROPPED && method != TOOL_CALL && !carried(method) {
             say(
                 &writing,
@@ -159,6 +182,10 @@ fn answer<R: Runtime>(app: &AppHandle<R>, stream: UnixStream) -> std::io::Result
                     run(&app, &params)
                 } else if method == SESSION_DROPPED {
                     nobody_is_watching(&app, &params)
+                } else if sync_memory::PROJECT_VIEW == method
+                    || sync_memory::PROJECT_VIEW_SAVE == method
+                {
+                    what_is_shown(&app, &method, &params)
                 } else {
                     about_a_package(&app, &method, &params)
                 };
@@ -345,6 +372,46 @@ fn encoded<T: serde::Serialize>(answer: T) -> Result<Value, String> {
     serde_json::to_value(answer).map_err(|error| format!("the answer could not be sent: {error}"))
 }
 
+/// What this installation shows of a project, and a change to it.
+///
+/// Apart from [`about_a_package`] rather than a pair of arms inside it, and the
+/// separation is the point: that function is about packages — what is
+/// installed, what a registry says, when a handler runs — and this is about one
+/// person's reading of a project. Neither knows anything about the other, and a
+/// match arm placed in the nearest function that would compile is how two
+/// subjects end up in one.
+///
+/// The project arrives as a path. A device names it by key and the door has
+/// already resolved it — see [`sync_memory::names_a_project`] — so by here it is
+/// the same string a window on this machine would have sent.
+fn what_is_shown<R: Runtime>(
+    app: &AppHandle<R>,
+    method: &str,
+    params: &Value,
+) -> Result<Value, String> {
+    use sync_memory::{PROJECT_VIEW, PROJECT_VIEW_SAVE};
+
+    match method {
+        PROJECT_VIEW => encoded(crate::project::project_view_load(
+            app.clone(),
+            named(params, "project")?.to_owned(),
+        )),
+        PROJECT_VIEW_SAVE => encoded(
+            crate::project::project_view_save(
+                app.clone(),
+                named(params, "project")?.to_owned(),
+                read(params, "view")?,
+            )
+            .map_err(|refusal| refusal.message)?,
+        ),
+        // Unreachable through the call above, which names both. Said rather
+        // than left as a panic: this file is the one that turns a name into
+        // work, and a name it does not know is a defect between two halves of
+        // one product rather than a reason to end the process serving somebody.
+        _ => Err(format!("Sync does not answer `{method}`")),
+    }
+}
+
 /// Make one package's request, from this machine.
 ///
 /// The two lines that matter are the two [`crate::extensions::extension_fetch`]
@@ -485,7 +552,7 @@ fn about_a_conversation<R: Runtime>(
     use sync_memory::{
         AGENT_ADAPTERS, AGENT_ADAPTERS_FORGET, AGENT_ADAPTERS_PREPARE, SESSION_BACKLOG,
         SESSION_CANCEL, SESSION_CATALOG, SESSION_CLOSE, SESSION_FOR_RECORD, SESSION_FORGET,
-        SESSION_FORGET_REMEMBERED, SESSION_KEPT_AS, SESSION_LIVE, SESSION_OPEN,
+        SESSION_FORGET_REMEMBERED, SESSION_HISTORY, SESSION_KEPT_AS, SESSION_LIVE, SESSION_OPEN,
         SESSION_PERMISSION_RESPOND, SESSION_PROMPT, SESSION_REMEMBERED, SESSION_RENAME,
         SESSION_RESUME, SESSION_SET_MODE, SESSION_SET_OPTION, SESSION_SUBSCRIBE,
         SESSION_UNSUBSCRIBE,
@@ -592,23 +659,42 @@ fn about_a_conversation<R: Runtime>(
             maybe("optionId"),
         )?),
         SESSION_BACKLOG => told(crate::sessions::session_backlog(sessions, text("key")?)?),
+        SESSION_HISTORY => told(crate::sessions::session_history(
+            sessions,
+            text("key")?,
+            number("before")?,
+        )?),
         SESSION_SUBSCRIBE => {
             let watcher: Arc<dyn crate::sessions::live::Watcher> = Arc::new(Elsewhere {
                 subscription: number("subscription")?,
                 writing: Arc::clone(writing),
             });
-            let dropped = crate::sessions::session_watched(
+            let began = crate::sessions::session_watched(
                 &sessions,
                 &text("key")?,
                 number("subscription")?,
                 params.get("since").and_then(Value::as_u64),
                 &watcher,
             )?;
-            // The number goes back with the answer, and it is the door's rather
-            // than this side's: the device that asked has to know what its
-            // events will arrive under, and the alternative was a door
-            // reshaping an answer it did not write.
-            Ok(json!({"subscription": number("subscription")?, "dropped": dropped}))
+            // The answer is the one a window is given, serialised rather than
+            // spelled out again here: a door restating the members would be a
+            // second speller of a shape, and the two would disagree the first
+            // time one of them gained a member — silently, because a reader
+            // asking for a member that is not there is handed nothing rather
+            // than an error.
+            let mut answer = told(began)?;
+            let Some(members) = answer.as_object_mut() else {
+                return Err(ProjectError::new(
+                    "session_malformed",
+                    "a watch answered with something that is not a record".to_owned(),
+                ));
+            };
+            // The number goes in beside them, and it is the door's rather than
+            // this side's: the device that asked has to know what its events
+            // will arrive under, and the alternative was a door reshaping an
+            // answer it did not write.
+            members.insert("subscription".to_owned(), json!(number("subscription")?));
+            Ok(answer)
         }
         SESSION_UNSUBSCRIBE => {
             sessions.stop_watching(number("subscription")?);

@@ -193,7 +193,7 @@ function Nothing({ failure }: { failure: string | null }) {
       </p>
       <p className="max-w-[38ch] text-sm text-fg-secondary">
         {failure ??
-          "Open a folder as a project on the computer, and it will be here."}
+          "Add a project on the computer, and it will be here."}
       </p>
     </div>
   );

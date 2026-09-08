@@ -14,6 +14,7 @@ import {
 } from "@/components/shell/extension-packages";
 import {
   PanelBody,
+  FooterAction,
   PanelFooter,
   PanelHeader,
   PanelSurface,
@@ -21,11 +22,6 @@ import {
 import { Button } from "@/components/ui/button";
 import type { Manifest } from "@/lib/extension-host/client";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { useCompositionContext } from "@/lib/composition";
 import type {
   ListedExtension,
@@ -161,46 +157,6 @@ export function ExtensionNavigator({
         />
       </PanelFooter>
     </PanelSurface>
-  );
-}
-
-/**
- * One command in the bottom bar, in the weight that band is drawn at.
- *
- * Tertiary until it is pointed at, like every other control in a bottom bar and
- * like the pinned row in the sidebar beside it: the bar is furniture, and a
- * control at full weight in it reads as the loudest thing in a column whose
- * subject is the list above. The name is a tooltip rather than a `title`,
- * because `title` is the system's tooltip and arrives late enough that people
- * stop waiting for it.
- */
-function FooterAction({
-  icon: Icon,
-  label,
-  disabled,
-  onSelect,
-}: {
-  icon: LucideIcon;
-  label: string;
-  disabled: boolean;
-  onSelect: () => void;
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label={label}
-          disabled={disabled}
-          onClick={onSelect}
-          className="text-fg-tertiary hover:text-fg"
-        >
-          <Icon />
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
-    </Tooltip>
   );
 }
 

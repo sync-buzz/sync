@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sync_memory::{
     ContentView, Dependents, Document, DocumentEdits, FetchOutcome, FolderAttachment, FolderEntry,
-    LaunchConfig, MemoryClient, MemoryError, MemoryPresence, Operations as _, RecordType,
+    Journal, LaunchConfig, MemoryClient, MemoryError, MemoryPresence, Operations as _, RecordType,
     RecordsPage, ScanOutcome, SyncState, TransactionResult, TransportStatus, TypeRemoval,
 };
 use tauri::{AppHandle, Manager, Runtime, State};
@@ -328,6 +328,144 @@ pub async fn memory_status<R: Runtime>(
             })
         })
         .await
+}
+
+/// What a reader is told when a project's memory stops being what it was.
+///
+/// It names the project and **not the revision**, and the omission is the whole
+/// design of it. A number put here was already old when it was written — the
+/// engine can move twice while one notice is on its way — so a screen that took
+/// it would be showing a project as of a moment nobody can name. The notice
+/// says *something changed*; what it changed to is read back through the same
+/// commands every other answer comes from.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryMoved {
+    pub project: String,
+}
+
+/// Everybody in this window who is watching a project's memory.
+///
+/// **No thread of its own, and that is the point.** The one thread involved is
+/// the machine-wide channel from the engine that this application has held open
+/// since start-up — see [`crate::attending`] — which is read by nothing else
+/// and has no answer outstanding on it. A reader here costs a row in a map; a
+/// window closing costs its removal. The alternative that was rejected is a
+/// background reader on each project's own connection: that socket is read
+/// inside the loop waiting for a call's answer, so a second reader on it would
+/// take answers belonging to the first, once in a while, in a way nobody can
+/// reproduce.
+///
+/// A list per project rather than one watcher, because several readers of one
+/// project are the ordinary case — a screen, a badge, an indicator — and two
+/// windows onto one project share a single connection and so would otherwise
+/// share a single subscription, with whichever opened last silencing the other.
+#[derive(Default)]
+pub struct MemoryWatchers {
+    watching: Mutex<HashMap<PathBuf, Vec<Watching>>>,
+    /// Never handed out twice, including after a watch ends. A number reused
+    /// would let one screen's unsubscribe silence whatever took its place.
+    next: std::sync::atomic::AtomicU64,
+}
+
+/// One reader, and the number it lets go by.
+struct Watching {
+    id: u64,
+    notice: tauri::ipc::Channel<MemoryMoved>,
+}
+
+impl MemoryWatchers {
+    /// Add a reader of `project`, and answer with the number it stops by.
+    fn watch(&self, project: &Path, notice: tauri::ipc::Channel<MemoryMoved>) -> u64 {
+        let id = self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+        if let Ok(mut watching) = self.watching.lock() {
+            watching
+                .entry(project.to_path_buf())
+                .or_default()
+                .push(Watching { id, notice });
+        }
+        id
+    }
+
+    /// Stop telling the reader that holds `watch`.
+    ///
+    /// A number nobody holds is not a failure: a screen that unmounts twice, or
+    /// one whose window has already gone, is the ordinary way this is reached.
+    fn forget(&self, project: &Path, watch: u64) {
+        let Ok(mut watching) = self.watching.lock() else {
+            return;
+        };
+        let Some(readers) = watching.get_mut(project) else {
+            return;
+        };
+        readers.retain(|reader| reader.id != watch);
+        if readers.is_empty() {
+            watching.remove(project);
+        }
+    }
+
+    /// Tell everybody watching `project` that its memory is not what it was.
+    ///
+    /// The channels are taken under the lock and written to outside it. Writing
+    /// under it would hold every other reader of every other project behind one
+    /// webview, and a reader that reached back into this registry from its own
+    /// handler would deadlock on it.
+    ///
+    /// A channel that will not take the notice belongs to a window that has
+    /// gone, and is dropped here. Unsubscribing is the tidy way out and the one
+    /// the window takes; this is what catches a window that never got to.
+    pub(crate) fn moved(&self, project: &Path) {
+        let Ok(watching) = self.watching.lock() else {
+            return;
+        };
+        let Some(readers) = watching.get(project) else {
+            return;
+        };
+        let telling: Vec<(u64, tauri::ipc::Channel<MemoryMoved>)> = readers
+            .iter()
+            .map(|reader| (reader.id, reader.notice.clone()))
+            .collect();
+        drop(watching);
+        let moved = MemoryMoved {
+            project: project.to_string_lossy().into_owned(),
+        };
+        let gone: Vec<u64> = telling
+            .into_iter()
+            .filter(|(_, notice)| notice.send(moved.clone()).is_err())
+            .map(|(id, _)| id)
+            .collect();
+        for id in gone {
+            self.forget(project, id);
+        }
+    }
+}
+
+/// Hear about this project's memory changing, for as long as this is held.
+///
+/// The number that comes back is what [`memory_unwatch`] is given. Several
+/// readers of one project are expected and each gets its own: the screen that
+/// lists what has changed, the indicator that counts what is unpublished, and
+/// anything else that would otherwise only be right until the moment somebody
+/// wrote something.
+///
+/// # Errors
+///
+/// None. Watching a project this window has never opened is not a failure — the
+/// notice simply never comes, which is the truth about a project nothing is
+/// writing to.
+#[tauri::command]
+pub fn memory_watch(
+    watchers: State<'_, MemoryWatchers>,
+    project: String,
+    notice: tauri::ipc::Channel<MemoryMoved>,
+) -> u64 {
+    watchers.watch(Path::new(&project), notice)
+}
+
+/// Stop hearing about it. Everything else watching that project goes on.
+#[tauri::command]
+pub fn memory_unwatch(watchers: State<'_, MemoryWatchers>, project: String, watch: u64) {
+    watchers.forget(Path::new(&project), watch);
 }
 
 /// The types the project holds, in the order the navigator lists them.
@@ -869,6 +1007,24 @@ pub async fn memory_document_dependents<R: Runtime>(
         .await
 }
 
+/// What happened between a revision and where memory stands now.
+///
+/// The window asks with the revision it last showed somebody, and the engine
+/// answers about the one it is serving — so this is *what has happened since
+/// you looked*, and nothing here has to hold a second idea of where memory is.
+#[tauri::command]
+pub async fn memory_journal<R: Runtime>(
+    app: AppHandle<R>,
+    sessions: State<'_, MemorySessions>,
+    project: String,
+    since: String,
+    limit: usize,
+) -> CommandResult<Journal> {
+    sessions
+        .with_session(&app, &project, move |client| client.journal(&since, limit))
+        .await
+}
+
 /// List records with filters, sorting and paging.
 #[tauri::command]
 pub async fn memory_list<R: Runtime>(
@@ -1093,4 +1249,140 @@ pub async fn memory_reconcile<R: Runtime>(
     sessions
         .with_session(&app, &project, move |client| client.reconcile(full_rebuild))
         .await
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used)]
+
+    use std::sync::Arc;
+
+    use tauri::ipc::Channel;
+
+    use super::*;
+
+    /// A channel that counts, and its count.
+    ///
+    /// `refused` makes it behave as a channel whose window has gone: `send`
+    /// fails, which is the only signal this side gets that a reader is no
+    /// longer there.
+    fn counting(refused: bool) -> (Channel<MemoryMoved>, Arc<Mutex<usize>>) {
+        let heard = Arc::new(Mutex::new(0_usize));
+        let counting = Arc::clone(&heard);
+        let channel = Channel::new(move |_| {
+            if refused {
+                return Err(tauri::Error::WebviewNotFound);
+            }
+            *counting.lock().expect("the count") += 1;
+            Ok(())
+        });
+        (channel, heard)
+    }
+
+    fn count(held: &Arc<Mutex<usize>>) -> usize {
+        *held.lock().expect("the count")
+    }
+
+    /// Two windows onto one project are two readers of one connection, so a
+    /// registry holding one watcher per project would let whichever opened
+    /// second silence the first.
+    #[test]
+    fn every_reader_of_one_project_hears_it() {
+        let watchers = MemoryWatchers::default();
+        let (first, heard_first) = counting(false);
+        let (second, heard_second) = counting(false);
+        watchers.watch(Path::new("/w/a"), first);
+        watchers.watch(Path::new("/w/a"), second);
+
+        watchers.moved(Path::new("/w/a"));
+
+        assert_eq!(count(&heard_first), 1);
+        assert_eq!(count(&heard_second), 1);
+    }
+
+    /// One reader stopping is one reader stopping. The screen that unmounts
+    /// must not take the indicator beside it with it.
+    #[test]
+    fn a_reader_that_stopped_hears_nothing_and_the_rest_go_on() {
+        let watchers = MemoryWatchers::default();
+        let (going, heard_going) = counting(false);
+        let (staying, heard_staying) = counting(false);
+        let watch = watchers.watch(Path::new("/w/a"), going);
+        watchers.watch(Path::new("/w/a"), staying);
+
+        watchers.forget(Path::new("/w/a"), watch);
+        watchers.moved(Path::new("/w/a"));
+
+        assert_eq!(
+            count(&heard_going),
+            0,
+            "a reader that unsubscribed was told"
+        );
+        assert_eq!(count(&heard_staying), 1);
+        // Said once. Unsubscribing twice is what a screen that unmounts after
+        // its window has already gone does, and it is not a failure.
+        watchers.forget(Path::new("/w/a"), watch);
+    }
+
+    /// A window that closed without unsubscribing is dropped the first time a
+    /// notice cannot reach it. Nothing here is a thread, so what is left behind
+    /// is a row in a map — but a row that is never removed is still a row that
+    /// is written to for ever.
+    #[test]
+    fn a_reader_whose_window_has_gone_is_let_go_of() {
+        let watchers = MemoryWatchers::default();
+        let (gone, heard_gone) = counting(true);
+        watchers.watch(Path::new("/w/a"), gone);
+
+        watchers.moved(Path::new("/w/a"));
+        assert_eq!(count(&heard_gone), 0);
+
+        assert!(
+            watchers
+                .watching
+                .lock()
+                .expect("the registry")
+                .get(Path::new("/w/a"))
+                .is_none(),
+            "the reader was written to and kept anyway"
+        );
+    }
+
+    /// A window with four projects open holds a reader for each, and a write in
+    /// one of them is not a redraw of the other three.
+    #[test]
+    fn a_move_in_one_project_is_not_heard_in_another() {
+        let watchers = MemoryWatchers::default();
+        let (here, heard_here) = counting(false);
+        let (elsewhere, heard_elsewhere) = counting(false);
+        watchers.watch(Path::new("/w/a"), here);
+        watchers.watch(Path::new("/w/b"), elsewhere);
+
+        watchers.moved(Path::new("/w/a"));
+
+        assert_eq!(count(&heard_here), 1);
+        assert_eq!(count(&heard_elsewhere), 0);
+    }
+
+    /// A project nobody is watching is a project nobody is told about, which is
+    /// the state of every project while no window is open on it.
+    #[test]
+    fn a_project_nobody_watches_is_not_an_error() {
+        MemoryWatchers::default().moved(Path::new("/w/nobody-is-looking"));
+    }
+
+    /// A number is never handed out again, including after its watch ended.
+    /// Reused, one screen's unsubscribe would silence whatever took its place.
+    #[test]
+    fn a_watch_number_is_never_given_out_twice() {
+        let watchers = MemoryWatchers::default();
+        let mut seen = Vec::new();
+        for _ in 0..8 {
+            let (channel, _held) = counting(false);
+            let watch = watchers.watch(Path::new("/w/a"), channel);
+            assert!(!seen.contains(&watch), "{watch} was minted twice");
+            seen.push(watch);
+            watchers.forget(Path::new("/w/a"), watch);
+        }
+    }
 }

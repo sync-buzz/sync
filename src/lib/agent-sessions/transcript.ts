@@ -167,6 +167,17 @@ export interface Transcript {
   readonly question: OpenQuestion | null;
   /** How many events fell off the front of the session's history. */
   readonly dropped: number;
+  /**
+   * The sequence number this reading begins at, when it begins part way through
+   * what the session still holds. `null` when it reaches the start.
+   *
+   * The distinction {@link Transcript.dropped} cannot make. A conversation is
+   * opened at its end, so most readings begin in the middle of one — and that
+   * is nothing to tell anybody about, because scrolling back fetches the rest.
+   * What was *dropped* is gone for good, and only a reading that has reached
+   * the start of what is held can honestly say so.
+   */
+  readonly earlier: number | null;
   /** The last figures the agent reported, or `null` if it reports none. */
   readonly usage: Usage | null;
   /** The mode the agent says it is in, for the agents that have modes. */
@@ -181,6 +192,7 @@ export const EMPTY_TRANSCRIPT: Transcript = {
   detail: null,
   question: null,
   dropped: 0,
+  earlier: null,
   usage: null,
   mode: null,
   stopReason: null,
@@ -296,6 +308,9 @@ export function foldTranscript(transcript: Transcript, event: SessionEvent): Tra
     detail: draft.detail,
     question: draft.question,
     dropped: draft.dropped,
+    // Not the draft's, because the fold has no opinion about it: where a
+    // reading begins is decided by what was asked for, not by an event in it.
+    earlier: transcript.earlier,
     usage: draft.usage,
     mode: draft.mode,
     stopReason: draft.stopReason,
@@ -325,6 +340,74 @@ export function usageLines(usage: Usage | null): readonly { label: string; value
 /** Records how much of a session's history was already gone when we subscribed. */
 export function withDropped(transcript: Transcript, dropped: number): Transcript {
   return dropped === transcript.dropped ? transcript : { ...transcript, dropped };
+}
+
+/** The same, for where the reading begins. */
+export function withEarlier(transcript: Transcript, earlier: number | null): Transcript {
+  return earlier === transcript.earlier ? transcript : { ...transcript, earlier };
+}
+
+/**
+ * Puts a page of earlier blocks in front of a reading.
+ *
+ * A conversation is opened at its end and read backwards from there, so this is
+ * the direction the fold cannot go: `foldTranscript` appends, and a page that
+ * belongs *before* what is held has to be folded on its own and joined.
+ *
+ * Everything except the blocks is the reading's own. A page is history — the
+ * status, the mode, the open question and the figures in it are all older
+ * answers to questions this reading has already answered, and taking them from
+ * a page would move a live conversation back to how it was an hour ago.
+ *
+ * **The seam is the whole of the difficulty.** Two pages fold apart, so a
+ * message that was streaming as the page boundary fell through it comes back as
+ * two blocks where one live fold would have made one — visibly, as a paragraph
+ * cut in half at a place that means nothing. So the join asks the same question
+ * the fold asks: same voice, and less than {@link PAUSE_MS} between them. When
+ * the answer is yes the two are one block, which is what they always were.
+ */
+export function precede(
+  transcript: Transcript,
+  entries: readonly Entry[],
+  earlier: number | null,
+): Transcript {
+  if (entries.length === 0) return withEarlier(transcript, earlier);
+  const sewn = seam(entries[entries.length - 1], transcript.entries[0]);
+  return {
+    ...transcript,
+    entries:
+      sewn === null
+        ? [...entries, ...transcript.entries]
+        : [...entries.slice(0, -1), sewn, ...transcript.entries.slice(1)],
+    earlier,
+  };
+}
+
+/**
+ * The one block a page and the reading after it share, or `null` where the two
+ * blocks either side of the seam are genuinely two.
+ */
+function seam(last: Entry, first: Entry | undefined): Entry | null {
+  if (first === undefined) return null;
+  // Only the two voices that stream can span a boundary at all. Everything else
+  // is a whole event — a tool call, a plan, something somebody typed — and two
+  // of those are two whatever the gap between them.
+  if (last.voice !== "agent" && last.voice !== "thought") return null;
+  if (first.voice !== "agent" && first.voice !== "thought") return null;
+  if (first.voice !== last.voice) return null;
+  if (first.at - last.lastAt > PAUSE_MS) return null;
+  // Under the block that is already on the screen, never under the one arriving
+  // from the page. A long list holds a reader's place by the identity of its
+  // first row — see `virtual-list.tsx` — so a join that renamed that row would
+  // leave the list unable to find where the reader was standing, and it would
+  // start its numbering again: the jump the whole of this paging exists to
+  // avoid, on the one path a page boundary almost always takes.
+  return {
+    ...last,
+    id: first.id,
+    text: `${last.text}${first.text}`,
+    lastAt: first.lastAt,
+  };
 }
 
 function applyUpdate(draft: Draft, event: Extract<SessionEvent, { kind: "update" }>): void {

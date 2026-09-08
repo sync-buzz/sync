@@ -114,6 +114,46 @@ pub struct Projects {
     /// Where to look again. `None` for a list that came from nowhere a file
     /// can be re-read from — the single-project door, and the empty one.
     source: Option<Source>,
+    /// Handed to every [`Project`] this holds, so that one being written to is
+    /// said in one place however the writer got in.
+    moves: Arc<Moves>,
+}
+
+/// Where this process says that a project's memory has moved.
+///
+/// Set after the projects are opened rather than taken as an argument to every
+/// constructor, for the reason [`crate::application::Application::attend`] is
+/// the same shape: the channel this is written on does not exist yet when the
+/// projects are opened, and a `sync-mcp` somebody started in a terminal never
+/// gains one at all. Shared by every [`Project`] rather than copied into each,
+/// so a project opened before the channel arrived is heard from after it does
+/// — the alternative is the projects open at start-up being the only ones
+/// nobody ever hears about.
+#[derive(Default)]
+pub struct Moves {
+    said: Mutex<Option<Told>>,
+}
+
+/// What is done about a project's memory having moved.
+///
+/// A closure rather than a named channel, so that this file states *that* a
+/// move is reported and stays ignorant of how — which is what keeps the
+/// vocabulary of the wire out of the type that holds every project open.
+type Told = Box<dyn Fn(&Path) + Send + Sync>;
+
+impl Moves {
+    /// Say that the memory of the project at `path` is not what it was.
+    ///
+    /// Silent where nobody is listening, and silent through a poisoned lock:
+    /// what a caller would do with either is nothing, and the call that has
+    /// just succeeded is not made wrong by a notice that could not go out.
+    fn say(&self, path: &Path) {
+        if let Ok(said) = self.said.lock()
+            && let Some(said) = said.as_ref()
+        {
+            said(path);
+        }
+    }
 }
 
 impl Projects {
@@ -130,9 +170,22 @@ impl Projects {
         registered: Vec<Registered>,
         embeddings: Option<&Arc<dyn EmbeddingProvider>>,
     ) -> Self {
+        let moves = Arc::<Moves>::default();
         Self {
-            entries: RwLock::new(opened(registered, embeddings)),
+            entries: RwLock::new(opened(registered, embeddings, &moves)),
             source: None,
+            moves,
+        }
+    }
+
+    /// Say where a project's memory moving is to be reported.
+    ///
+    /// Called once, after the channel that carries it exists — which is why
+    /// this is a method rather than an argument. Nothing is reported before it,
+    /// and nothing is reported at all by a process nobody attended.
+    pub fn report_moves_to(&self, said: impl Fn(&Path) + Send + Sync + 'static) {
+        if let Ok(mut held) = self.moves.said.lock() {
+            *held = Some(Box::new(said));
         }
     }
 
@@ -158,13 +211,15 @@ impl Projects {
         let stamp = Stamp::of(&path);
         let text = std::fs::read_to_string(&path)?;
         let listed: Vec<Registered> = serde_json::from_str(&text)?;
+        let moves = Arc::<Moves>::default();
         Ok(Self {
-            entries: RwLock::new(opened(listed, embeddings.as_ref())),
+            entries: RwLock::new(opened(listed, embeddings.as_ref(), &moves)),
             source: Some(Source {
                 path,
                 embeddings,
                 read: Mutex::new(stamp),
             }),
+            moves,
         })
     }
 
@@ -232,10 +287,9 @@ impl Projects {
             // is *the same repository* the registry has just named, and
             // reopening it would throw away whatever it had loaded and leave
             // two sessions over one repository while both handles lived.
-            entries
-                .open
-                .entry(project.path.clone())
-                .or_insert_with(|| Arc::new(Project::over(project.path.clone(), embeddings)));
+            entries.open.entry(project.path.clone()).or_insert_with(|| {
+                Arc::new(Project::over(project.path.clone(), embeddings, &self.moves))
+            });
             entries.naming.insert(project.path.clone(), project);
         }
         // A project the machine has forgotten stops being answered for, and its
@@ -278,6 +332,7 @@ impl Projects {
         // than `ensure_initialised`: an agent connecting to a repository has
         // decided nothing about whether it keeps memory, so this reads and does
         // not create.
+        let moves = Arc::<Moves>::default();
         let Ok(Some(settings)) = domain
             .ensure_revision()
             .and_then(|()| domain.project_settings())
@@ -285,6 +340,7 @@ impl Projects {
             return Self {
                 entries: RwLock::new(Held::default()),
                 source: None,
+                moves,
             };
         };
         // The memory is handed over as it stands rather than reopened: it has
@@ -305,10 +361,12 @@ impl Projects {
                     Arc::new(Project {
                         path: project,
                         domain: Mutex::new(domain),
+                        moves: Arc::clone(&moves),
                     }),
                 )]),
             }),
             source: None,
+            moves,
         }
     }
 
@@ -357,10 +415,9 @@ impl Projects {
         // must get the winner's handle rather than open a second memory over
         // the same repository.
         Arc::clone(
-            entries
-                .open
-                .entry(path.to_owned())
-                .or_insert_with(|| Arc::new(Project::over(path.to_owned(), embeddings))),
+            entries.open.entry(path.to_owned()).or_insert_with(|| {
+                Arc::new(Project::over(path.to_owned(), embeddings, &self.moves))
+            }),
         )
     }
 
@@ -426,13 +483,29 @@ impl Projects {
     }
 }
 
+/// Whether a call moved the memory, given where it stood either side of it.
+///
+/// A function rather than the expression written inline, because the asymmetry
+/// in it is the whole rule and it is worth being able to state the three cases
+/// separately. `None` before is a project nobody had read yet: the read that
+/// gives it a revision is somebody opening it, not something happening to it,
+/// and counted as a move it would tell every window watching that repository to
+/// read it again every time another one was opened.
+fn moved(before: Option<&str>, after: Option<&str>) -> bool {
+    before.is_some_and(|before| after != Some(before))
+}
+
 /// Open every project in `listed`, keyed the way [`Projects`] keys them.
-fn opened(listed: Vec<Registered>, embeddings: Option<&Arc<dyn EmbeddingProvider>>) -> Held {
+fn opened(
+    listed: Vec<Registered>,
+    embeddings: Option<&Arc<dyn EmbeddingProvider>>,
+    moves: &Arc<Moves>,
+) -> Held {
     let mut held = Held::default();
     for project in listed {
         held.open.insert(
             project.path.clone(),
-            Arc::new(Project::over(project.path.clone(), embeddings)),
+            Arc::new(Project::over(project.path.clone(), embeddings, moves)),
         );
         held.naming.insert(project.path.clone(), project);
     }
@@ -452,6 +525,9 @@ pub struct Project {
     /// memory serialises its own calls anyway — pretending otherwise here would
     /// only move the contention.
     domain: Mutex<Domain>,
+    /// Where a call that moved this memory is reported. Shared with every other
+    /// project in this process — see [`Moves`].
+    moves: Arc<Moves>,
 }
 
 impl Project {
@@ -460,10 +536,15 @@ impl Project {
     /// One constructor for both doors, because there is nothing different to
     /// do: the provider is the one this process already resolved, so a project
     /// reached either way costs no second copy of the model.
-    fn over(path: PathBuf, embeddings: Option<&Arc<dyn EmbeddingProvider>>) -> Self {
+    fn over(
+        path: PathBuf,
+        embeddings: Option<&Arc<dyn EmbeddingProvider>>,
+        moves: &Arc<Moves>,
+    ) -> Self {
         Self {
             path: path.clone(),
             domain: Mutex::new(Domain::open(path, embeddings.cloned())),
+            moves: Arc::clone(moves),
         }
     }
 
@@ -497,9 +578,10 @@ impl Project {
         F: FnOnce(&mut Domain) -> T + Send + 'static,
     {
         let project = Arc::clone(self);
-        tokio::task::spawn_blocking(move || match project.domain() {
-            Ok(mut domain) => Ok(work(&mut domain)),
-            Err(reason) => Err(McpError::internal_error(reason, None)),
+        tokio::task::spawn_blocking(move || {
+            project
+                .holding(work)
+                .map_err(|reason| McpError::internal_error(reason, None))
         })
         .await
         .map_err(|error| {
@@ -507,19 +589,58 @@ impl Project {
         })?
     }
 
-    /// This project's memory, held until the guard is dropped.
+    /// Hold this project's memory for one call, and say so if the call moved
+    /// it.
     ///
-    /// The one place that decides what a poisoned lock means, so that both
-    /// doors say the same sentence about it rather than each inventing one. A
-    /// poisoned lock means a previous call panicked while holding this
-    /// project's memory: its state is no longer known, and answering from it
-    /// would be answering from wreckage.
+    /// **Every door goes through here**, and that is the whole of why it
+    /// exists. The window's operations, an agent's tools and a device's calls
+    /// are three ways into one [`Domain`], and a door deciding for itself
+    /// whether the memory had moved would be a second answer to that question,
+    /// with a third arriving the day somebody adds a door. Put here it cannot
+    /// be forgotten: a door that reaches a project's memory at all reaches it
+    /// through this.
+    ///
+    /// The revision is compared either side of the call **under the one lock
+    /// that answered it**, so nothing can land between the write and the
+    /// reading of it. Asking the engine instead would be a round trip after
+    /// every read as well as a different question — what the store holds, not
+    /// what this call did.
+    ///
+    /// A first read is not a move. [`Domain::seen_revision`] answers `None`
+    /// until a project has been read at all, and opening one is not something
+    /// happening to it: counted as a move, the first call of every session
+    /// would tell every window watching that repository to read it again.
+    ///
+    /// The notice goes out after the lock is let go, which is not tidiness —
+    /// whoever is told may reach straight back into this project, and a notice
+    /// sent under the lock would be that caller waiting on the call it was told
+    /// about.
     ///
     /// # Errors
     ///
     /// The sentence to tell whoever asked, ready to be wrapped in whichever
-    /// failure that door speaks.
-    pub fn domain(&self) -> Result<MutexGuard<'_, Domain>, String> {
+    /// failure that door speaks. It means a previous call panicked while
+    /// holding this project's memory: its state is no longer known, and
+    /// answering from it would be answering from wreckage.
+    pub fn holding<T>(&self, work: impl FnOnce(&mut Domain) -> T) -> Result<T, String> {
+        let (outcome, moved) = {
+            let mut domain = self.domain()?;
+            let before = domain.seen_revision().map(ToOwned::to_owned);
+            let outcome = work(&mut domain);
+            let moved = moved(before.as_deref(), domain.seen_revision());
+            (outcome, moved)
+        };
+        if moved {
+            self.moves.say(&self.path);
+        }
+        Ok(outcome)
+    }
+
+    /// This project's memory, held until the guard is dropped.
+    ///
+    /// The one place that decides what a poisoned lock means, so that both
+    /// doors say the same sentence about it rather than each inventing one.
+    fn domain(&self) -> Result<MutexGuard<'_, Domain>, String> {
         self.domain.lock().map_err(|_| {
             format!(
                 "the memory of `{}` is no longer usable — restart the server",
@@ -699,5 +820,76 @@ mod tests {
     fn a_registry_that_cannot_be_read_at_all_is_refused_rather_than_emptied() {
         let dir = tempfile::tempdir().expect("a directory to write in");
         assert!(Projects::registered(dir.path().join("absent.json"), None).is_err());
+    }
+
+    /// The three cases of "did this call move the memory", stated apart.
+    ///
+    /// The middle one is the one that would be got wrong: a project nobody had
+    /// read yet gains a revision on the first call that needs it, and that is
+    /// somebody opening it rather than anything happening to it. Reported as a
+    /// move, opening a project in one window would tell every other window
+    /// watching that repository to read it all again.
+    #[test]
+    fn a_first_reading_is_not_the_memory_moving() {
+        assert!(!moved(None, None), "nothing has been read");
+        assert!(!moved(None, Some("abc")), "the project was opened");
+        assert!(!moved(Some("abc"), Some("abc")), "the call read something");
+        assert!(moved(Some("abc"), Some("def")), "the call wrote something");
+    }
+
+    /// Nothing is said until somebody says where to say it, and a process
+    /// nobody attended never gains one. That is the ordinary state of a
+    /// `sync-mcp` somebody started in a terminal, and it must not be a failure.
+    #[test]
+    fn a_move_with_nobody_listening_is_silent() {
+        let moves = Moves::default();
+        moves.say(Path::new("/w/a"));
+    }
+
+    /// What is reported is the project's own path, so that a window holding
+    /// several open can tell which of them changed under it.
+    #[test]
+    fn a_move_names_the_project_it_happened_to() {
+        let projects = Projects::over(Vec::new(), None);
+        let heard = Arc::new(Mutex::new(Vec::<PathBuf>::new()));
+        let telling = Arc::clone(&heard);
+        projects.report_moves_to(move |path| {
+            telling
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(path.to_owned());
+        });
+
+        projects.moves.say(Path::new("/w/a"));
+        projects.moves.say(Path::new("/w/b"));
+
+        assert_eq!(
+            *heard.lock().unwrap_or_else(PoisonError::into_inner),
+            vec![PathBuf::from("/w/a"), PathBuf::from("/w/b")]
+        );
+    }
+
+    /// A project this process has never read is not reported when something
+    /// asks it a question — which is what the first call of every session is.
+    #[test]
+    fn opening_a_project_is_not_reported_as_a_change_to_it() {
+        let projects = Projects::over(Vec::new(), None);
+        let heard = Arc::new(Mutex::new(0_usize));
+        let telling = Arc::clone(&heard);
+        projects.report_moves_to(move |_| {
+            *telling.lock().unwrap_or_else(PoisonError::into_inner) += 1;
+        });
+
+        let held = projects.at(Path::new("/w/never-read"), None);
+        // A call that does not touch the memory at all, which is as far as a
+        // test with no repository behind it can go — and it is the case that
+        // matters: the revision was never read, so there is nothing to compare.
+        held.holding(|_| ()).expect("the memory was not poisoned");
+
+        assert_eq!(
+            *heard.lock().unwrap_or_else(PoisonError::into_inner),
+            0,
+            "a project that has never been read was reported as having changed"
+        );
     }
 }

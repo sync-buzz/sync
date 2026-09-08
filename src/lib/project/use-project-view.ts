@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { loadProjectView, saveProjectView } from "@/lib/project/client";
+import type { ProjectView, ProjectViewChange } from "@/lib/project/types";
 
 /**
  * Which of a project's types this window is showing.
@@ -31,6 +32,47 @@ export interface ProjectViewState {
 const NOTHING_HIDDEN: readonly string[] = [];
 
 export function useProjectView(projectPath: string): ProjectViewState {
+  return useExceptions(
+    projectPath,
+    (view) => view.hiddenTypes,
+    (hiddenTypes) => ({ hiddenTypes }),
+  );
+}
+
+/**
+ * Which kinds the activity does not report.
+ *
+ * The same shape as the type filter, over a second field of the same file, so
+ * the same control draws both: what a person is deciding is the same decision —
+ * *not this kind, for me, on this machine* — asked once about a list and once
+ * about a history.
+ *
+ * Held as the exceptions rather than as the selection, which is the half that
+ * matters and the reason this is a hook rather than a stored array of watched
+ * kinds. A project's kinds are invented long after this file was written, so a
+ * stored selection would silently stop reporting every kind installed since —
+ * and that failure looks exactly like nothing having happened.
+ */
+export function useWatchedKinds(projectPath: string): ProjectViewState {
+  return useExceptions(
+    projectPath,
+    (view) => view.unwatchedKinds,
+    (unwatchedKinds) => ({ unwatchedKinds }),
+  );
+}
+
+/**
+ * One list of kinds somebody excepted, read and written where those live.
+ *
+ * Both preferences are the same mechanism over two fields, and writing it twice
+ * is how the second copy comes to behave differently from the first — over
+ * something as quiet as whether a failed write is worth a message.
+ */
+function useExceptions(
+  projectPath: string,
+  read: (view: ProjectView) => readonly string[],
+  write: (kinds: readonly string[]) => ProjectViewChange,
+): ProjectViewState {
   const [stored, setStored] = useState<{
     path: string;
     hidden: readonly string[];
@@ -41,7 +83,7 @@ export function useProjectView(projectPath: string): ProjectViewState {
 
     void loadProjectView(projectPath).then(
       (view) => {
-        if (current) setStored({ path: projectPath, hidden: view.hiddenTypes });
+        if (current) setStored({ path: projectPath, hidden: read(view) });
       },
       // Outside Tauri, and on a first launch, there is nothing stored. Showing
       // every type is the honest answer to both.
@@ -53,15 +95,20 @@ export function useProjectView(projectPath: string): ProjectViewState {
     return () => {
       current = false;
     };
+    // `read` is a literal at both call sites and never changes between renders;
+    // depending on it would restart this on every one of them.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectPath]);
 
   const hidden = stored.path === projectPath ? stored.hidden : NOTHING_HIDDEN;
 
   const remember = useCallback(
-    (hiddenTypes: readonly string[]) => {
-      setStored({ path: projectPath, hidden: hiddenTypes });
-      void saveProjectView(projectPath, { hiddenTypes }).catch(() => undefined);
+    (kinds: readonly string[]) => {
+      setStored({ path: projectPath, hidden: kinds });
+      void saveProjectView(projectPath, write(kinds)).catch(() => undefined);
     },
+    // Same as above: the writer is a literal at each call site.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [projectPath],
   );
 

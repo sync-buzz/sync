@@ -7,6 +7,7 @@ import { PanelFooter } from "@/components/shell/panel";
 import { RemotePairSheet } from "@/components/settings/remote-pair";
 import { RemoteRemovalSheet } from "@/components/settings/remote-removal";
 import { Button } from "@/components/ui/button";
+import { elapsed } from "@/lib/elapsed";
 import { showNativeContextMenu } from "@/lib/native-menu";
 import { cn } from "@/lib/utils";
 import {
@@ -15,7 +16,6 @@ import {
   paired,
   pairRemoteDevice,
   revokeRemoteDevice,
-  when,
   type RemoteDevice,
   type RemoteStatus,
 } from "@/lib/settings/remote";
@@ -208,7 +208,7 @@ export function RemoteSection() {
                       </span>
                     </span>
                     <span className="w-24 shrink-0 text-right text-xs font-normal text-fg-tertiary">
-                      {when(device.lastSeen)}
+                      {elapsed(device.lastSeen)}
                     </span>
                   </button>
                 </li>

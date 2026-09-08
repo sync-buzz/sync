@@ -198,6 +198,56 @@ fn answering(path: &Path) -> bool {
 /// later would otherwise look exactly like a good start.
 const OPENING: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// Start the engine, or serve this run from the one already up.
+///
+/// **This is what launching does, and it is the only thing that adopts.** Every
+/// other way of starting the engine — the button in Settings, a port changed, a
+/// token minted, remote access switched on — is somebody asking for *this
+/// application's* engine with *these* settings, and an adopted process would
+/// answer none of them while looking exactly as though it had.
+///
+/// # Why a development build is different
+///
+/// In a packaged build the rule below holds without exception: the engine is
+/// this application's, and whatever is still holding the door has outlived the
+/// run that began it.
+///
+/// Running from source breaks the assumption underneath that. `tauri dev` is
+/// started and stopped many times an hour, and each stop takes the engine with
+/// it — so a developer's own installed Sync loses the process agents reach it
+/// through every time somebody presses `^C`, and does not get it back. The
+/// engine is the slow-moving half of this repository; the window is the half
+/// being edited. Ending the first to rebuild the second is a cost with nothing
+/// bought for it.
+///
+/// So a development build uses what is already answering and never kills it.
+/// What that costs is real and is the trap `AGENTS.md` names: the engine
+/// serving the window is then whatever was built last, which is not necessarily
+/// what is checked out. It is said out loud at startup for that reason, and the
+/// button in Settings is one click away from a fresh one.
+///
+/// # Errors
+///
+/// Reports whatever starting the process refused, when one had to be started.
+pub fn start_or_adopt<R: Runtime>(
+    app: &AppHandle<R>,
+    running: &RunningServer,
+) -> Result<(), ProjectError> {
+    let socket = host_socket(app)?;
+    if tauri::is_dev() && answering(&socket) {
+        // Nothing is spawned and nothing is leashed, which is the whole of what
+        // adoption is: `stop` has no child to kill, so ending this run leaves
+        // the engine exactly as it found it.
+        remember(running, &socket);
+        eprintln!(
+            "the memory engine already serving {} was adopted rather than started — it is whatever was built last, not necessarily what is checked out. Restart it from Settings to replace it.",
+            socket.display()
+        );
+        return Ok(());
+    }
+    start(app, running)
+}
+
 /// Start the engine, replacing whatever is serving.
 ///
 /// **One engine per machine, and it is this application's.** Sync's rule is
@@ -206,7 +256,9 @@ const OPENING: std::time::Duration = std::time::Duration::from_secs(30);
 /// began it — a development reload, a crash before the leash was noticed. It is
 /// stopped and replaced rather than adopted: adopting one would mean this
 /// window's memory depending on a process built from code nobody here is
-/// looking at, with no way to end it.
+/// looking at, with no way to end it. Launching from source is the one case
+/// that answers otherwise, and it says so where it does — see
+/// [`start_or_adopt`].
 ///
 /// # Errors
 ///

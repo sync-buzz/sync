@@ -32,6 +32,7 @@ use acp_client::{
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use serde::{Deserialize, Serialize};
+use sync_memory::Subscription;
 use tauri::ipc::Channel;
 use tokio::sync::oneshot;
 
@@ -44,6 +45,36 @@ use super::event::{PastedImage, SessionEvent, Status, now_ms};
 /// and reported on subscription — a transcript that quietly begins in the
 /// middle reads as the whole conversation.
 const HISTORY_LIMIT: usize = 4000;
+
+/// How much of a conversation a screen is given to begin with.
+///
+/// **Not the whole of it, and that is the point.** A subscription used to
+/// replay everything held, which costs the window a message per event and a
+/// reading of the whole transcript each time it opens a conversation — so the
+/// cost of arriving at a conversation grew with how long it had been going on,
+/// and the section hesitated on exactly the conversations somebody had put the
+/// most into. What a person looks at on arriving is the end of it, so the end
+/// is what is sent, and the rest is asked for by scrolling back through it.
+///
+/// Counted in events rather than in messages because that is what the history
+/// is made of; how many blocks it folds into is a reading decision the window
+/// makes, and it may be far fewer — a run of tool calls is one line. That is
+/// why what asks for a page keeps asking until the reading actually grew.
+const REPLAY_TAIL: usize = 600;
+
+/// How much of it one further request hands back. The same number, for the same
+/// reasons, and one number so a page and the tail cannot drift apart.
+pub const HISTORY_PAGE: usize = REPLAY_TAIL;
+
+/// A page of what was said before a point, for a screen scrolling back.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryPage {
+    pub events: Vec<SessionEvent>,
+    /// Where the page after this one would begin, or `None` at the start of
+    /// what is held.
+    pub earlier_than: Option<u64>,
+}
 
 /// How long a name derived from what somebody said is allowed to be.
 ///
@@ -270,6 +301,22 @@ pub trait Watcher: Send + Sync {
     fn saw(&self, event: &SessionEvent) -> bool;
 }
 
+/// Something told what happened here, to say it where a person will see it
+/// with no window of this application open.
+///
+/// A trait rather than a call into the module that raises a banner, for the
+/// reason [`Watcher`] is one: this file is about what a conversation is, and
+/// whether an interruption is warranted is a question about the machine —
+/// which window is in front, and what somebody turned off in settings. Both
+/// answers live where the application does.
+pub trait Announce: Send + Sync {
+    /// Say what happened, or decide that this was not worth saying.
+    ///
+    /// It answers nothing. A conversation does not depend on having been
+    /// announced, and there is no state here for a refusal to move.
+    fn happened(&self, session: &Session, event: &SessionEvent);
+}
+
 #[derive(Default)]
 struct State {
     status: Status,
@@ -293,6 +340,18 @@ struct State {
     /// a phone that reconnected before its last watch was noticed gone is a
     /// third.
     watchers: HashMap<u64, Arc<dyn Watcher>>,
+    /// What says, where a person will see it with no window open, that this
+    /// conversation has stopped moving.
+    ///
+    /// Set once, immediately after the session is made and in the same breath
+    /// as the registry being told about it. Here rather than beside the
+    /// session's immutable facts because the alternative was an eighth
+    /// argument to a constructor that already takes seven, and an argument list
+    /// nobody can read is the worse of the two failures.
+    ///
+    /// `None` is a session with nobody to tell, which is every session in a
+    /// test and none outside one.
+    announcer: Option<Arc<dyn Announce>>,
     open_questions: HashMap<u64, oneshot::Sender<Option<schema::PermissionOptionId>>>,
     connection: Option<Arc<AgentConnection>>,
     acp_session: Option<schema::SessionId>,
@@ -434,6 +493,14 @@ impl Session {
         })
     }
 
+    /// Name what tells a person this conversation has stopped moving.
+    ///
+    /// Called where a session is made and nowhere else, so a conversation
+    /// cannot start being announced to somewhere different halfway through.
+    pub fn announce_to(&self, announcer: Arc<dyn Announce>) {
+        self.locked().announcer = Some(announcer);
+    }
+
     pub fn status(&self) -> Status {
         self.locked().status
     }
@@ -497,16 +564,26 @@ impl Session {
         self.locked().acp_session = Some(id);
     }
 
-    /// Sends everything recorded so far to `sink`, then keeps sending.
+    /// Sends the end of what was recorded to `sink`, then keeps sending.
     ///
     /// Replaces whatever was subscribed before: one screen at a time reads a
     /// session, and a second subscription is the same screen remounting.
-    /// Returns how many events had already fallen off the front.
-    pub fn subscribe(&self, sink: Channel<SessionEvent>) -> u64 {
-        let (backlog, dropped) = {
+    ///
+    /// The end rather than the whole, for the reason [`REPLAY_TAIL`] gives.
+    /// What is answered says both what was lost and where the replay began, so
+    /// a screen can tell "there is no more" from "there is more, ask for it".
+    pub fn subscribe(&self, sink: Channel<SessionEvent>) -> Subscription {
+        let (backlog, answer) = {
             let mut state = self.locked();
             state.sink = Some(sink.clone());
-            (state.history.clone(), state.dropped)
+            let from = state.history.len().saturating_sub(REPLAY_TAIL);
+            (
+                state.history[from..].to_vec(),
+                Subscription {
+                    dropped: state.dropped,
+                    earlier_than: (from > 0).then(|| state.history[from].seq()),
+                },
+            )
         };
         for event in backlog {
             // A send failure means the window went away between subscribing and
@@ -516,7 +593,31 @@ impl Session {
                 break;
             }
         }
-        dropped
+        answer
+    }
+
+    /// What was said before a point, handed back a page at a time.
+    ///
+    /// Read once rather than sent down the subscription, because a page belongs
+    /// *before* what a screen already holds and the channel only ever appends.
+    /// A screen that asked for it on the channel would have to tell replayed
+    /// history from live events with nothing to tell them apart by.
+    ///
+    /// `before` is a sequence number this screen already has, and nothing at or
+    /// after it is included. Asking for a page before something the history no
+    /// longer holds is not a failure: the answer is empty and says there is
+    /// nothing earlier, which is exactly what happened.
+    pub fn history_before(&self, before: u64, limit: usize) -> HistoryPage {
+        let state = self.locked();
+        // The history is appended to in sequence and never reordered, so the
+        // sequence numbers are sorted and the boundary can be found rather than
+        // scanned for.
+        let end = state.history.partition_point(|event| event.seq() < before);
+        let start = end.saturating_sub(limit);
+        HistoryPage {
+            events: state.history[start..end].to_vec(),
+            earlier_than: (start > 0).then(|| state.history[start].seq()),
+        }
     }
 
     pub fn unsubscribe(&self) {
@@ -537,25 +638,54 @@ impl Session {
     /// time, into a transcript that already holds it. The device knows where it
     /// stopped and nothing else does, so it is the device that says.
     ///
-    /// Answers with how many events had already fallen off the front of the
-    /// history, exactly as a window is told: a transcript that quietly begins in
-    /// the middle reads as the whole of it whichever screen is reading.
-    pub fn watch(&self, subscription: u64, watcher: &Arc<dyn Watcher>, since: Option<u64>) -> u64 {
-        let (backlog, dropped) = {
+    /// Answered exactly as a window is answered, and for the same reason the
+    /// shape is [`Subscription`] rather than a number: the screen reading this
+    /// is the same screen, drawn by the same code, and it has the same two
+    /// things to tell a person apart — what is gone, and what is one request
+    /// away.
+    ///
+    /// **A device that has seen nothing is given the end, not the whole.** That
+    /// is [`REPLAY_TAIL`] again, and it costs a device more than it costs a
+    /// window: every replayed event is a line over somebody's network, and the
+    /// conversations worth opening from a phone are the long ones. A device
+    /// that says where it stopped is given what came after that instead — a
+    /// tail there would be a hole in a transcript it already holds the front
+    /// of.
+    pub fn watch(
+        &self,
+        subscription: u64,
+        watcher: &Arc<dyn Watcher>,
+        since: Option<u64>,
+    ) -> Subscription {
+        let (backlog, answer) = {
             let mut state = self.locked();
             state.watchers.insert(subscription, Arc::clone(watcher));
-            (state.history.clone(), state.dropped)
+            // The history is appended to in sequence and never reordered, so
+            // where to start is found rather than scanned for — and cutting the
+            // slice here is what makes the loop below a plain send.
+            let from = match since {
+                Some(seen) => state.history.partition_point(|event| event.seq() <= seen),
+                None => state.history.len().saturating_sub(REPLAY_TAIL),
+            };
+            (
+                state.history[from..].to_vec(),
+                Subscription {
+                    dropped: state.dropped,
+                    // Only for a device arriving at a conversation cold. One
+                    // that named where it stopped already holds what comes
+                    // before this, and telling it there is more to fetch would
+                    // send it back for a page it is reading.
+                    earlier_than: (since.is_none() && from > 0).then(|| state.history[from].seq()),
+                },
+            )
         };
         for event in backlog {
-            if since.is_some_and(|seen| event.seq() <= seen) {
-                continue;
-            }
             if !watcher.saw(&event) {
                 self.locked().watchers.remove(&subscription);
                 break;
             }
         }
-        dropped
+        answer
     }
 
     /// Stop showing this conversation to one watcher off this machine.
@@ -583,7 +713,7 @@ impl Session {
 
     /// Records an event and forwards it to everybody watching.
     fn emit(&self, build: impl FnOnce(u64, u64) -> SessionEvent) {
-        let (event, sink, watchers) = {
+        let (event, sink, watchers, announcer) = {
             let mut state = self.locked();
             let seq = state.next_seq;
             state.next_seq += 1;
@@ -599,7 +729,7 @@ impl Session {
                 .iter()
                 .map(|(at, watcher)| (*at, Arc::clone(watcher)))
                 .collect();
-            (event, state.sink.clone(), watchers)
+            (event, state.sink.clone(), watchers, state.announcer.clone())
         };
         if let Some(sink) = sink {
             let _ = sink.send(event.clone());
@@ -611,6 +741,12 @@ impl Session {
             if !watcher.saw(&event) {
                 self.locked().watchers.remove(&subscription);
             }
+        }
+        // Last, and outside the lock like the watchers above: raising a banner
+        // reaches the platform, and holding this conversation's state while it
+        // does would put every other caller behind the notification centre.
+        if let Some(announcer) = announcer {
+            announcer.happened(self, &event);
         }
     }
 
@@ -1349,6 +1485,79 @@ mod tests {
         );
     }
 
+    /// A device arriving at a conversation cold is given its end, not its whole.
+    ///
+    /// The same rule a window is given, and it costs a device more to break: a
+    /// replayed event is a line over somebody's network rather than a copy
+    /// within one process, and the conversations worth opening from a phone are
+    /// the long ones. A watch that replayed everything spent the most on
+    /// exactly the sessions it was most likely to be asked for.
+    ///
+    /// What is not sent is not lost, and the answer is what says so: it names
+    /// the sequence number the replay began at, which is what a screen asks the
+    /// rest back with.
+    #[test]
+    fn a_device_arriving_cold_is_given_the_end_and_told_where_it_began() {
+        let session = session();
+        let over = 20;
+        for _ in 0..(REPLAY_TAIL + over) {
+            session.emit(|seq, at_ms| SessionEvent::Status {
+                seq,
+                at_ms,
+                status: Status::Working,
+                detail: None,
+            });
+        }
+
+        let phone = Somewhere::watching();
+        let watching: Arc<dyn Watcher> = Arc::clone(&phone) as Arc<dyn Watcher>;
+        let began = session.watch(9, &watching, None);
+
+        assert_eq!(
+            phone.seen().len(),
+            REPLAY_TAIL,
+            "the whole conversation went over the network"
+        );
+        assert_eq!(
+            began.earlier_than,
+            Some(over as u64),
+            "the device was not told where what it was given begins"
+        );
+        assert_eq!(
+            began.dropped, 0,
+            "nothing had fallen off a history this short"
+        );
+    }
+
+    /// A device that says where it stopped is told nothing is earlier.
+    ///
+    /// It is holding the front of this conversation already — that is what
+    /// `since` means — so an offer to fetch more would send it back for a page
+    /// it is reading. The two answers are different questions, and this is the
+    /// one that separates them.
+    #[test]
+    fn a_device_that_says_where_it_stopped_is_not_sent_looking_backwards() {
+        let session = session();
+        for _ in 0..4 {
+            session.emit(|seq, at_ms| SessionEvent::Status {
+                seq,
+                at_ms,
+                status: Status::Working,
+                detail: None,
+            });
+        }
+
+        let phone = Somewhere::watching();
+        let watching: Arc<dyn Watcher> = Arc::clone(&phone) as Arc<dyn Watcher>;
+        let again = session.watch(9, &watching, Some(1));
+
+        assert_eq!(phone.seen(), vec![2, 3]);
+        assert_eq!(
+            again.earlier_than, None,
+            "a device holding the front of this was offered it again"
+        );
+    }
+
     /// A watcher with nothing behind it is let go of rather than written to for
     /// ever.
     ///
@@ -1628,6 +1837,49 @@ mod tests {
         let state = session.locked();
         assert_eq!(state.history.len(), HISTORY_LIMIT);
         assert_eq!(state.dropped, 10, "what fell off the front is counted");
+    }
+
+    #[test]
+    fn a_page_of_history_stops_where_the_screen_already_holds_it() {
+        let session = session();
+        for _ in 0..10 {
+            session.state_configuration(serde_json::Value::Null);
+        }
+
+        // Sequence numbers count from zero, so the sixth event is `5` and a
+        // screen holding it asks for what came before that.
+        let page = session.history_before(5, 3);
+        let seqs: Vec<u64> = page.events.iter().map(SessionEvent::seq).collect();
+        assert_eq!(
+            seqs,
+            vec![2, 3, 4],
+            "the page ends below what was asked for"
+        );
+        assert_eq!(
+            page.earlier_than,
+            Some(2),
+            "and says where the page before it would begin"
+        );
+
+        let first = session.history_before(2, 3);
+        let seqs: Vec<u64> = first.events.iter().map(SessionEvent::seq).collect();
+        assert_eq!(seqs, vec![0, 1]);
+        assert_eq!(
+            first.earlier_than, None,
+            "nothing is earlier than the start of what is held"
+        );
+    }
+
+    #[test]
+    fn a_page_before_something_no_longer_held_is_empty_rather_than_wrong() {
+        let session = session();
+        for _ in 0..(HISTORY_LIMIT + 10) {
+            session.state_configuration(serde_json::Value::Null);
+        }
+        // The first ten fell off the front, so this names an event that is gone.
+        let page = session.history_before(3, 5);
+        assert!(page.events.is_empty());
+        assert_eq!(page.earlier_than, None);
     }
 
     #[test]

@@ -130,6 +130,30 @@ impl Application {
         }
     }
 
+    /// Tell Sync something, expecting nothing back.
+    ///
+    /// A notification: no id, nothing registered as waiting, no patience to run
+    /// out. That is what makes it safe to say from a thread holding a project's
+    /// memory open — [`Self::call`] on that thread would be this process
+    /// waiting on an application whose answer may need the very memory being
+    /// held.
+    ///
+    /// Nobody attending is not a failure and is not reported. It is the
+    /// ordinary state of a `sync-mcp` somebody started themselves, and there is
+    /// nothing for a caller to do about it: what it was told is a fact about a
+    /// project, and the project is not made wrong by there being no window to
+    /// hear it.
+    pub fn announce(&self, method: &str, params: &Value) {
+        let Ok(attending) = self.attending.lock() else {
+            return;
+        };
+        let Some(writer) = attending.as_ref() else {
+            return;
+        };
+        let notice = json!({"jsonrpc": "2.0", "method": method, "params": params});
+        let _ = writer.send(notice.to_string());
+    }
+
     /// Ask Sync to do one thing, and wait for what it says.
     ///
     /// # Errors
@@ -292,6 +316,38 @@ mod tests {
             after.to_string().contains("not on the other end"),
             "{after}"
         );
+    }
+
+    /// A notice goes out with **no id**, and the id is the whole of what makes
+    /// it one. Sync answers what it is asked and refuses what it does not
+    /// answer; a message with an id on it would be answered or refused, and
+    /// either way this process would be handed a reply it has nothing to match
+    /// against.
+    #[tokio::test]
+    async fn a_notice_goes_out_as_a_notification_and_not_as_a_call() {
+        let application = Application::new();
+        let (queue, mut queued) = mpsc::unbounded_channel::<String>();
+        application.attend(queue);
+
+        application.announce(
+            sync_memory::REVISION_MOVED,
+            &json!({"path": "/w/a-project"}),
+        );
+
+        let notice: Value = serde_json::from_str(&queued.recv().await.expect("a line went out"))
+            .expect("it is JSON");
+        assert_eq!(notice["method"], sync_memory::REVISION_MOVED);
+        assert_eq!(notice["params"]["path"], "/w/a-project");
+        assert!(notice.get("id").is_none(), "{notice}");
+    }
+
+    /// Nobody attending is the ordinary state of a `sync-mcp` somebody started
+    /// themselves, and a fact about a project is not made wrong by there being
+    /// no window to hear it. Unlike a call, this cannot be refused: there is
+    /// nobody to refuse it to.
+    #[tokio::test]
+    async fn a_notice_with_nobody_attending_is_dropped_rather_than_refused() {
+        Application::new().announce(sync_memory::REVISION_MOVED, &json!({"path": "/w/a"}));
     }
 
     /// A second connection replaces the first, which is what a reconnection is.

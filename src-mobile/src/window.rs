@@ -34,6 +34,16 @@
 //!   are here; `session_image` and `session_image_save` are not. A picture is
 //!   held in the memory of the machine the agent runs on and saved to a path on
 //!   it, and a phone has neither the second nor anywhere to put the first.
+//! - **Being told that a project's memory moved.** `memory_watch` and
+//!   `memory_unwatch` are the computer's. The engine says a project changed on
+//!   the one connection Sync attends with, and that connection belongs to the
+//!   application rather than to any device — so there is nothing here to hand a
+//!   notice to. What a phone does instead is what every reader did before that
+//!   notice existed: it re-reads when somebody comes back to the window. The
+//!   window asks for the watch, is refused, and carries on, which is why the
+//!   refusal is left as the absence rather than written as a stub answering
+//!   zero: a number that means "watching" would be a screen waiting for a
+//!   notice nothing can send.
 //!
 //! Agents used to be in this list, and this is what changed: a conversation is
 //! held open by the application that started it, so what a phone gets is not a
@@ -46,8 +56,8 @@ use serde::Serialize;
 use serde_json::Value;
 use sync_memory::{
     CommandError, ContentView, Dependents, Document, DocumentEdits, EntityInput, FetchOutcome,
-    FolderAttachment, FolderEntry, MemoryPresence, Operations as _, RecordType, RecordsPage,
-    ScanOutcome, SyncState, TransportStatus, TypeRemoval,
+    FolderAttachment, FolderEntry, Journal, MemoryPresence, Operations as _, RecordType,
+    RecordsPage, ScanOutcome, Subscription, SyncState, TransportStatus, TypeRemoval,
 };
 use tauri::State;
 
@@ -92,6 +102,7 @@ macro_rules! commands {
             crate::window::memory_document_create,
             crate::window::memory_document_delete,
             crate::window::memory_document_dependents,
+            crate::window::memory_journal,
             crate::window::memory_list,
             crate::window::memory_search,
             crate::window::memory_get,
@@ -107,6 +118,8 @@ macro_rules! commands {
             crate::window::memory_reconcile,
             crate::window::project_settings_load,
             crate::window::project_settings_save,
+            crate::window::project_view_load,
+            crate::window::project_view_save,
             crate::window::extension_list,
             crate::window::extension_fetch,
             crate::window::registry_index,
@@ -139,6 +152,7 @@ macro_rules! commands {
             crate::window::session_set_option,
             crate::window::session_permission_respond,
             crate::window::session_backlog,
+            crate::window::session_history,
             crate::window::session_subscribe,
             crate::window::session_unsubscribe,
         ]
@@ -531,6 +545,22 @@ pub fn memory_document_dependents(
     Ok(channel.about(&project).dependents(&key)?)
 }
 
+/// What happened to this project's memory since a revision.
+///
+/// Asked with the revision this person last read to, so the answer is *what has
+/// happened since you looked* — and the engine answers about the revision it is
+/// serving rather than one this side names, which is what keeps a phone from
+/// holding a second opinion about where memory stands.
+#[tauri::command(async)]
+pub fn memory_journal(
+    project: String,
+    since: String,
+    limit: usize,
+    channel: State<'_, Channel>,
+) -> Answered<Journal> {
+    Ok(channel.about(&project).journal(&since, limit)?)
+}
+
 #[tauri::command(async)]
 pub fn memory_list(project: String, query: Value, channel: State<'_, Channel>) -> Answered<Value> {
     let listing = channel.about(&project).list_records(&query)?;
@@ -649,6 +679,40 @@ pub fn memory_reconcile(
 /// reason it is on the Mac: a command that fails tells the window that the
 /// call went wrong, and this one has to say that the *memory* would not
 /// answer, which is a fact about the project rather than about the call.
+/// What this installation shows of a project: hidden kinds, section order, how
+/// far through the changes somebody has read.
+///
+/// **Asked of the computer rather than kept here**, which is the one decision
+/// in these two commands. The installation is the computer, and a phone holding
+/// its own copy would make one person two readers of one project: a change
+/// glanced at from the sofa would still be waiting at the desk, and a change
+/// read at the desk would still be unread in a pocket. The pairing is what says
+/// these two screens belong to the same person, and this follows it.
+#[tauri::command(async)]
+pub fn project_view_load(project: String, channel: State<'_, Channel>) -> Answered<Value> {
+    Ok(channel.ask(
+        sync_memory::PROJECT_VIEW,
+        &serde_json::json!({"project": project}),
+    )?)
+}
+
+/// Write part of it down, and answer with the whole of it as it now stands.
+///
+/// The change is passed across unread. What a member means is settled where it
+/// is applied, and a phone with an opinion about which half of a view a write
+/// touches is a second place for that rule to be wrong.
+#[tauri::command(async)]
+pub fn project_view_save(
+    project: String,
+    view: Value,
+    channel: State<'_, Channel>,
+) -> Answered<Value> {
+    Ok(channel.ask(
+        sync_memory::PROJECT_VIEW_SAVE,
+        &serde_json::json!({"project": project, "view": view}),
+    )?)
+}
+
 #[tauri::command(async)]
 pub fn project_settings_load(project: String, channel: State<'_, Channel>) -> Value {
     probing(&*channel, &project)
@@ -1081,8 +1145,28 @@ pub fn session_subscribe(
     key: String,
     events: tauri::ipc::Channel<Value>,
     channel: State<'_, Channel>,
-) -> Answered<u64> {
+) -> Answered<Subscription> {
     Ok(channel.watch(&key, events)?)
+}
+
+/// What was said before the part a screen was given.
+///
+/// A conversation arrives at its end — see [`session_subscribe`] — so this is
+/// how the rest of it is reached, one page per time somebody scrolls to the top
+/// of what they hold. It is a question and its answer, unlike the watch above:
+/// nothing is left behind on this phone by asking it.
+///
+/// It matters more here than at the desk. Every replayed event is a line over
+/// somebody's network, and a conversation that has been running all day is the
+/// one most worth opening from a phone — so the part a person is looking at
+/// arrives on its own, and the hours before it are fetched only if they go
+/// looking.
+#[tauri::command(async)]
+pub fn session_history(key: String, before: u64, channel: State<'_, Channel>) -> Answered<Value> {
+    Ok(channel.ask(
+        sync_memory::SESSION_HISTORY,
+        &serde_json::json!({"key": key, "before": before}),
+    )?)
 }
 
 #[tauri::command(async)]

@@ -11,6 +11,7 @@ import {
   chooseOption,
   closeSession,
   forgetSession,
+  historyBefore,
   openSession,
   prompt as sendPrompt,
   respondToPermission,
@@ -26,7 +27,9 @@ import {
 import {
   EMPTY_TRANSCRIPT,
   foldTranscript,
+  precede,
   withDropped,
+  withEarlier,
   type Transcript,
 } from "./transcript";
 
@@ -65,6 +68,16 @@ export interface AgentSession {
     images?: readonly PastedContent[],
   ) => Promise<void>;
   readonly cancel: () => Promise<void>;
+  /**
+   * Reads further back, for a screen somebody has scrolled to the top of.
+   *
+   * A conversation arrives at its end — see `subscribe` — so `transcript.earlier`
+   * is where this reading begins and this is what moves it back. It answers
+   * when the reading has actually grown, so a screen may await it; asking again
+   * while one is in flight does nothing, and asking at the start of the
+   * conversation does nothing either.
+   */
+  readonly loadEarlier: () => Promise<void>;
   /** Answers the open question. `null` withdraws it. */
   readonly answer: (optionId: string | null) => Promise<void>;
   readonly choose: (configId: string, valueId: string) => Promise<void>;
@@ -102,12 +115,34 @@ const NOTHING_READ: Reading = {
   modes: NO_MODES,
 };
 
+/**
+ * How long a reading may wait for a frame that never comes.
+ *
+ * Folding an event and drawing what it folded into are separated on purpose,
+ * and the separation is the whole of why a long conversation opens at once
+ * rather than pouring in. The backlog is replayed **one event per message**,
+ * and a channel hands each of them over in a task of its own — so a screen that
+ * drew on every message drew the whole conversation once per event in it, which
+ * is quadratic in its length and is what a person feels as the section
+ * hesitating. The events are cheap; the drawing is not.
+ *
+ * A frame is the right clock for it. Everything that arrives inside one is one
+ * render, and nothing can be seen more often than that anyway. But a window
+ * that is hidden, minimised or fully occluded is given no frames at all while
+ * its agents go on working, so a timer runs beside the frame and whichever
+ * comes first draws — otherwise a conversation held in the background would
+ * arrive all at once on being looked at, which is the same failure moved.
+ */
+const DRAW_WITHIN_MS = 100;
+
 export function useAgentSession(key: string | null): AgentSession {
   const [read, setRead] = useState<Reading>(NOTHING_READ);
-  // The fold runs against the latest transcript without the effect below having
-  // to re-subscribe every time one arrives — a re-subscription would replay the
-  // whole history into a transcript that already holds it.
-  const held = useRef<Transcript>(EMPTY_TRANSCRIPT);
+  // What the events add up to, whether or not it has been drawn yet. The fold
+  // runs against this without the effect below having to re-subscribe every
+  // time one arrives — a re-subscription would replay the whole history into a
+  // transcript that already holds it — and it is the whole reading rather than
+  // the transcript alone because what a person chose is written here too.
+  const held = useRef<Reading>(NOTHING_READ);
   const transcript = read.key === key ? read.transcript : EMPTY_TRANSCRIPT;
   // Its own memo, so that a reading which belongs to another session hands back
   // the same empty array every render rather than a new one — otherwise every
@@ -122,40 +157,64 @@ export function useAgentSession(key: string | null): AgentSession {
   );
 
   useEffect(() => {
-    held.current = EMPTY_TRANSCRIPT;
+    held.current = {
+      key,
+      transcript: EMPTY_TRANSCRIPT,
+      configuration: NO_CONFIGURATION,
+      modes: NO_MODES,
+    };
     if (key === null) return;
 
     let watching = true;
+    let frame: number | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    /** Puts everything folded so far on the screen, in one render. */
+    const draw = () => {
+      if (frame !== null) cancelAnimationFrame(frame);
+      if (timer !== null) clearTimeout(timer);
+      frame = null;
+      timer = null;
+      if (watching) setRead(held.current);
+    };
+
+    /** Asks for that render, if one is not already asked for. */
+    const drawSoon = () => {
+      if (frame !== null || timer !== null) return;
+      frame = requestAnimationFrame(draw);
+      timer = setTimeout(draw, DRAW_WITHIN_MS);
+    };
+
     const events = new Channel<SessionEvent>();
     events.onmessage = (event) => {
       if (!watching) return;
-      held.current = foldTranscript(held.current, event);
-      const folded = held.current;
-      setRead((previous) => ({
+      held.current = {
         key,
-        transcript: folded,
-        configuration: nextConfiguration(
-          previous.key === key ? previous.configuration : NO_CONFIGURATION,
-          event,
-        ),
+        transcript: foldTranscript(held.current.transcript, event),
+        configuration: nextConfiguration(held.current.configuration, event),
         // Only a mode event restates the list. An agent moving itself between
         // modes says so with `current_mode_update`, which changes which one is
         // current and not what there is to choose from.
-        modes:
-          event.kind === "modes"
-            ? event.modes.availableModes
-            : previous.key === key
-              ? previous.modes
-              : NO_MODES,
-      }));
+        modes: event.kind === "modes" ? event.modes.availableModes : held.current.modes,
+      };
+      drawSoon();
     };
 
     subscribe(key, events)
-      .then((dropped) => {
-        if (!watching || dropped === 0) return;
-        held.current = withDropped(held.current, dropped);
-        const folded = held.current;
-        setRead((previous) => ({ ...previous, key, transcript: folded }));
+      .then((began) => {
+        if (!watching) return;
+        held.current = {
+          ...held.current,
+          transcript: withEarlier(
+            withDropped(held.current.transcript, began.dropped),
+            began.earlierThan,
+          ),
+        };
+        // Drawn here rather than left to the schedule above, because the
+        // backlog has been handed over by the time this settles and there may
+        // be nothing further coming: a dormant conversation emits no events of
+        // its own, and one waiting for a next event would stay blank.
+        draw();
       })
       .catch(() => {
         // The session is gone. Nothing to watch and nothing to report that the
@@ -164,6 +223,8 @@ export function useAgentSession(key: string | null): AgentSession {
 
     return () => {
       watching = false;
+      if (frame !== null) cancelAnimationFrame(frame);
+      if (timer !== null) clearTimeout(timer);
       void unsubscribe(key);
     };
   }, [key]);
@@ -195,9 +256,54 @@ export function useAgentSession(key: string | null): AgentSession {
     if (key !== null) await cancelTurn(key);
   }, [key]);
 
+  // Whether a page is already on its way. A ref rather than state because
+  // nothing is drawn differently for it: it exists to stop a list that is
+  // sitting at the top from asking for the same page on every frame.
+  const fetching = useRef(false);
+
+  const loadEarlier = useCallback(async () => {
+    if (key === null || fetching.current) return;
+    fetching.current = true;
+    try {
+      // A page is counted in events and a reading in blocks, and the two are
+      // nowhere near the same number: a run of tool updates is one line, and a
+      // whole page of them would leave the screen exactly as it was — with
+      // somebody still at the top of it, having asked for more and been given
+      // nothing. So this asks again until the reading grew, or until there is
+      // nothing earlier left to ask for.
+      const was = held.current.transcript.entries.length;
+      while (held.current.key === key) {
+        const before = held.current.transcript.earlier;
+        if (before === null) break;
+        const page = await historyBefore(key, before);
+        // The conversation was changed under this while the page was in flight.
+        // What came back belongs to a transcript nothing is reading any more.
+        if (held.current.key !== key) return;
+        const older = page.events.reduce(foldTranscript, EMPTY_TRANSCRIPT);
+        held.current = {
+          ...held.current,
+          transcript: precede(held.current.transcript, older.entries, page.earlierThan),
+        };
+        if (held.current.transcript.entries.length > was) break;
+      }
+      setRead(held.current);
+    } catch (error) {
+      // A page that could not be read leaves the reading exactly where it is,
+      // `earlier` included — so reaching the top again asks for it again. It is
+      // reported to the console rather than to the person, and never thrown:
+      // this is reached by scrolling, and somebody who scrolled to the top of a
+      // conversation did not ask a question that deserves an error over the
+      // conversation itself. Whatever earlier pages did arrive are drawn.
+      console.warn("What was said earlier could not be read.", error);
+      if (held.current.key === key) setRead(held.current);
+    } finally {
+      fetching.current = false;
+    }
+  }, [key]);
+
   const answer = useCallback(
     async (optionId: string | null) => {
-      const question = held.current.question;
+      const question = held.current.transcript.question;
       if (key === null || question === null) return;
       await respondToPermission(key, question.requestId, optionId);
     },
@@ -208,7 +314,12 @@ export function useAgentSession(key: string | null): AgentSession {
     async (configId: string, valueId: string) => {
       if (key === null) return;
       const restated = await chooseOption(key, configId, valueId);
-      setRead((previous) => ({ ...previous, key, configuration: restated }));
+      // Into the held reading first, so that the next event folded on top of it
+      // carries the choice forward. Written straight to the screen as well,
+      // because nothing else is going to arrive on account of it.
+      if (held.current.key !== key) return;
+      held.current = { ...held.current, configuration: restated };
+      setRead(held.current);
     },
     [key],
   );
@@ -221,7 +332,9 @@ export function useAgentSession(key: string | null): AgentSession {
     async (modeId: string) => {
       if (key === null) return;
       const restated = await chooseMode(key, modeId);
-      setRead((previous) => ({ ...previous, key, modes: restated.availableModes }));
+      if (held.current.key !== key) return;
+      held.current = { ...held.current, modes: restated.availableModes };
+      setRead(held.current);
     },
     [key],
   );
@@ -235,11 +348,23 @@ export function useAgentSession(key: string | null): AgentSession {
       isWorking: transcript.status === "working",
       prompt,
       cancel,
+      loadEarlier,
       answer,
       choose,
       setMode,
     }),
-    [key, transcript, configuration, modes, prompt, cancel, answer, choose, setMode],
+    [
+      key,
+      transcript,
+      configuration,
+      modes,
+      prompt,
+      cancel,
+      loadEarlier,
+      answer,
+      choose,
+      setMode,
+    ],
   );
 }
 

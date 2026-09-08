@@ -39,6 +39,7 @@ use acp_client::{AgentProfile, launch, schema};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use serde::{Deserialize, Serialize};
+use sync_memory::Subscription;
 use tauri::State;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager as _, Runtime};
@@ -47,7 +48,9 @@ use crate::project::{ProjectError, configuration_file};
 use adapters::AdapterState;
 use catalog::AgentDescriptor;
 use event::{PastedImage, SessionEvent, Status};
-use live::{About, HeldImage, Place, Session, SessionHandler, Sessions, Source};
+use live::{
+    About, HISTORY_PAGE, HeldImage, HistoryPage, Place, Session, SessionHandler, Sessions, Source,
+};
 use remembered::{Remembered, Store};
 
 /// A session as the window lists it — enough to say what is running and to
@@ -340,6 +343,7 @@ async fn open<R: Runtime>(
         about,
         parent,
     );
+    session.announce_to(crate::attention::announcer(app));
     // Both entrances pass through here — a window sending a command block and a
     // package ordering on an agent's behalf — so this is where the two are made
     // the same thing. Anything that read the debt off *how* the conversation
@@ -661,8 +665,26 @@ pub fn session_subscribe(
     sessions: State<'_, Sessions>,
     key: String,
     events: Channel<SessionEvent>,
-) -> Result<u64, ProjectError> {
+) -> Result<Subscription, ProjectError> {
     Ok(lookup(&sessions, &key)?.subscribe(events))
+}
+
+/// A page of what was said earlier, for a screen scrolling back through one.
+///
+/// The other half of a subscription replaying only the end of a conversation:
+/// `before` is the earliest sequence number that screen holds, and the answer
+/// is what comes before it, along with where to ask next.
+///
+/// # Errors
+///
+/// [`ProjectError`] when the key names no session.
+#[tauri::command(async)]
+pub fn session_history(
+    sessions: State<'_, Sessions>,
+    key: String,
+    before: u64,
+) -> Result<HistoryPage, ProjectError> {
+    Ok(lookup(&sessions, &key)?.history_before(before, HISTORY_PAGE))
 }
 
 /// Watches a session on behalf of somebody who is not on this machine.
@@ -690,7 +712,7 @@ pub fn session_watched(
     subscription: u64,
     since: Option<u64>,
     watcher: &Arc<dyn live::Watcher>,
-) -> Result<u64, ProjectError> {
+) -> Result<Subscription, ProjectError> {
     Ok(lookup(sessions, key)?.watch(subscription, watcher, since))
 }
 
@@ -888,6 +910,7 @@ pub async fn session_resume<R: Runtime>(
         // beneath it standing on nothing.
         held.parent.clone(),
     );
+    session.announce_to(crate::attention::announcer(&app));
     // The name it already had. Nothing the agent replays carries one, and a
     // conversation coming back under a different title is a different
     // conversation as far as the person reading the list is concerned.

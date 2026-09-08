@@ -47,7 +47,7 @@ use iroh::{Endpoint, EndpointId};
 use serde_json::{Value, json};
 use sync_memory::{
     CHANNEL_VERSION, Effect, MAX_FRAME_BYTES, METHODS, MemoryError, Operations, REMOTE_HELLO,
-    Transport, effect,
+    Subscription, Transport, effect,
 };
 use tokio::io::{AsyncBufReadExt, AsyncReadExt as _, BufReader};
 use tokio::runtime::Runtime;
@@ -646,7 +646,11 @@ impl Channel {
     ///
     /// The computer's own refusal — most often a conversation that ended
     /// between being listed and being watched.
-    pub fn watch(&self, key: &str, events: tauri::ipc::Channel<Value>) -> sync_memory::Result<u64> {
+    pub fn watch(
+        &self,
+        key: &str,
+        events: tauri::ipc::Channel<Value>,
+    ) -> sync_memory::Result<Subscription> {
         // Whatever was watching this conversation before is not watching it
         // now. **The case this is for is the ordinary one on a phone**: the
         // system reloads the webview by itself, the window comes back and asks
@@ -696,7 +700,11 @@ impl Channel {
     /// connection the call went out on, because that is the only place that
     /// knows where the events have to be written. So the answer is where a
     /// watch becomes something this phone can find.
-    fn watched(&self, watched: &Arc<Watched>, since: Option<u64>) -> sync_memory::Result<u64> {
+    fn watched(
+        &self,
+        watched: &Arc<Watched>,
+        since: Option<u64>,
+    ) -> sync_memory::Result<Subscription> {
         // Said before the call goes out, because what the call is *for* arrives
         // before it answers: the computer replays the conversation on
         // the way to saying under what number it will go on doing so. Without
@@ -720,7 +728,17 @@ impl Channel {
             })?;
         self.watching.hold(subscription, Arc::clone(watched));
         drop(expected);
-        Ok(answer.get("dropped").and_then(Value::as_u64).unwrap_or(0))
+        // Read as the shape rather than member by member. What the window does
+        // with this decides what it draws over the first line of a transcript —
+        // that the conversation is cut short, or that there is more to fetch —
+        // and a phone spelling the members itself is a phone that can come to
+        // disagree with the computer about which of those it is being told.
+        serde_json::from_value(answer).map_err(|refusal| {
+            MemoryError::Protocol(format!(
+                "the computer agreed to show this conversation and said where it began in a way \
+                 this phone cannot read: {refusal}"
+            ))
+        })
     }
 
     /// Ask again for everything this phone was watching, from where it stopped.

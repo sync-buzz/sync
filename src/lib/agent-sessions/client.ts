@@ -538,15 +538,56 @@ export function openSession(args: {
   });
 }
 
+/** What a screen was handed when it began watching a conversation. */
+export interface Subscription {
+  /**
+   * How many events had already fallen off the front of the session's history.
+   *
+   * Never silently zero — a transcript that begins in the middle has to say so
+   * rather than read as the whole conversation.
+   */
+  readonly dropped: number;
+  /**
+   * The sequence number the replay begins at, when it began part way through
+   * what the session holds. `null` when everything held was sent.
+   *
+   * Not the same fact as `dropped`, and the difference is what a screen shows:
+   * what was dropped is gone, what is earlier is one request away.
+   */
+  readonly earlierThan: number | null;
+}
+
 /**
- * Watches a session: everything recorded so far, then everything after.
+ * Watches a session: the end of what was recorded, then everything after.
  *
- * Resolves with how many events had already fallen off the front of the
- * session's history, which is never silently zero — a transcript that begins in
- * the middle has to say so rather than read as the whole conversation.
+ * The end rather than the whole. A conversation that has been going for hours
+ * costs a message per event to replay and a reading of all of them to draw, so
+ * what is sent is what a person is looking at — {@link historyBefore} is how
+ * the rest of it is reached.
  */
-export function subscribe(key: string, events: Channel<SessionEvent>): Promise<number> {
-  return call<number>("session_subscribe", { key, events });
+export function subscribe(
+  key: string,
+  events: Channel<SessionEvent>,
+): Promise<Subscription> {
+  return call<Subscription>("session_subscribe", { key, events });
+}
+
+/** A page of what a session said before a point. */
+export interface HistoryPage {
+  readonly events: readonly SessionEvent[];
+  /** Where the page before this one begins, or `null` at the start of it. */
+  readonly earlierThan: number | null;
+}
+
+/**
+ * What was said before an event this screen already holds.
+ *
+ * Read once rather than sent down the subscription: a page belongs *before*
+ * what is held, and a channel only ever appends. Asking for a page before
+ * something the session no longer holds answers empty, which is the truth.
+ */
+export function historyBefore(key: string, before: number): Promise<HistoryPage> {
+  return call<HistoryPage>("session_history", { key, before });
 }
 
 /**

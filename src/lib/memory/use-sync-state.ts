@@ -11,6 +11,7 @@ import {
   syncState,
 } from "@/lib/memory/client";
 import type { Overlap, SyncState, TransportState } from "@/lib/memory/types";
+import { useMemoryNotice } from "@/lib/memory/use-memory-notice";
 
 /**
  * Whether the project's memory is in step with its remote.
@@ -21,11 +22,11 @@ import type { Overlap, SyncState, TransportState } from "@/lib/memory/types";
  * One read would have made the whole answer wait for the slowest half of it,
  * and the half worth having immediately is the one about your own writing.
  *
- * There is no live signal to hang this on. The engine knows when a revision
- * moves, but nothing carries that to the window, so the count is as of the last
- * read: when the project opened, when the window was returned to, and after an
- * exchange. A record written and not yet counted is the one inaccuracy here,
- * and it resolves the next time any of those happens.
+ * The count is re-read when the project opens, when a write lands anywhere on
+ * this machine, when the window is returned to, and after an exchange. The
+ * first two are local and cost nothing outside; only the ones a person's own
+ * arrival triggers ask the remote, because a record an agent wrote says nothing
+ * about what is on the other end.
  */
 export interface SyncStatus {
   /** `null` until the first answer, which is not the same as "nothing to say". */
@@ -280,6 +281,18 @@ export function useSyncState(projectPath: string): SyncStatus {
       if (answer.remote === "waiting") fetchNow();
     }, () => undefined);
   }, [fetchNow, projectPath, refresh]);
+
+  /**
+   * A write anywhere on this machine re-counts what is unpublished, and does
+   * not touch the network.
+   *
+   * `false` rather than `true`, and the difference is what the two moments
+   * mean. Returning to the window is a person arriving, which is worth one
+   * question to the remote; a record landing is a fact about this side alone,
+   * and asking the remote for every write an agent makes would be a machine
+   * dialling out on somebody else's typing.
+   */
+  useMemoryNotice(projectPath, () => refresh(false));
 
   /**
    * Returning to the window re-asks and does not fetch, for the reason above:

@@ -18,10 +18,10 @@
 
 <img src="assets/brand/window-anatomy.png" alt="The Sync window drawn as four labelled columns — the primary sidebar holding the areas a package added, the context navigator holding what belongs to the selected area, the workspace holding the record as the text it is, and the context inspector holding what is true of it. Beneath them: what a project knows is kept in the repository's own Git objects, agents reach it over MCP or are driven from the window over ACP, and every piece of subject matter arrives as a package.">
 
-**Open a folder on your Mac and it becomes a project.** The agent you already
-use works inside it, and everything the project learns is written to that
-folder's own Git repository — where it branches, merges, travels to whoever
-clones it, and belongs to you.
+**Bring a project you already have.** The agent you already use works inside
+it, and everything the project learns is written to that project's own Git
+repository — where it branches, merges, travels to whoever clones it, and
+belongs to you.
 
 **What kind of work is up to you.** Sync is a shell. It holds what every kind of
 work needs — projects, the agents that act on them, the permissions those agents
@@ -48,15 +48,16 @@ to shape rather than ours to extend on your behalf.
   marks the claim `stale` when they move. Not a review date somebody set and
   forgot — derived, every time it is read.
 - **Agents, in both directions.** Seven clients are connected with one control
-  and work against the project through Sync's own server — Claude Code, Codex
-  CLI, Grok CLI, Claude Desktop, Cursor, Visual Studio Code and Zed. Or drive an
-  agent *from* the window over ACP, with its plan, its tool calls and its
-  permission prompts drawn as part of the interface: five CLIs are measured and
-  raised by name.
-- **Work outlives the window.** A package can declare handlers on a clock and
-  order work that runs with nothing open, under permissions it declared and a
-  person approved, attributed to whoever asked for it. A conversation can hand
-  work to another conversation and be handed back the answer.
+  and work against the project through a server on your own Mac — Claude Code,
+  Codex CLI, Grok CLI, Claude Desktop, Cursor, Visual Studio Code and Zed. Or
+  drive an agent *from* the window over ACP, with its plan, its tool calls and
+  its permission prompts drawn as part of the interface: five CLIs are measured
+  and raised by name.
+- **It goes on working with the window closed.** A package can declare handlers
+  on a clock and order work that runs with nothing open, under permissions it
+  declared and a person approved, attributed to whoever asked for it. A
+  conversation can hand work to another conversation and be handed back the
+  answer.
 - **What a package needs of the machine, it asks for by name.** Fourteen
   capabilities, each a promise about behaviour rather than a switch: the network
   with its hosts written out and no wildcard, a corner of the system keychain, a
@@ -371,9 +372,29 @@ it has its own workspace and its own commands, which go through
 `scripts/tauri.mjs`:
 
 ```sh
+rustup target add aarch64-apple-ios aarch64-apple-ios-sim
 pnpm tauri ios dev "iPhone 17 Pro"   # onto a simulator
 pnpm tauri ios build                 # onto a device
 ```
+
+It asks for more of the machine than the Mac build does: Xcode itself rather
+than the Command Line Tools, and a simulator running iOS 17 or newer, which is
+the floor `src-mobile/gen/apple/project.yml` states. Signing a build onto a
+device uses the development team named in that same file, which is this
+project's; a fork replaces it with its own. A simulator needs no team.
+
+**`tauri ios init` is not part of building it.** The Xcode project is committed
+precisely so that nobody has to run it — the command bakes the invocation it was
+started with into the project it writes, and it leaves an existing `project.yml`
+alone, so running it again is how a stale file starts being read as a setting
+the CLI ignores. AGENTS.md holds that trap and the rest of them.
+
+**The phone computes nothing.** It draws, and a Mac running Sync answers, so a
+build that launches shows the pairing screen until it is given the code Settings
+puts on the other screen. Both ends state `sync_memory::CHANNEL_VERSION` in the
+handshake and compare it for equality: a phone and a computer built from
+different checkouts refuse each other, naming which of the two is behind, rather
+than working until the first call the older one has never heard of.
 
 **Build the memory sidecar before bundling.** `sync-mcp` ships inside the bundle
 as a Tauri `externalBin`; it *links* the memory engine as a library rather than

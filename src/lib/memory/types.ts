@@ -357,6 +357,66 @@ export interface MemoryRecord {
 }
 
 /**
+ * What happened to memory between a revision and a later one.
+ *
+ * Not a diff. A diff says how two states differ; this says what was done to get
+ * from one to the other — so a record written three times is one line there and
+ * three entries here, and a record added and then deleted appears here and not
+ * there at all.
+ */
+export interface Journal {
+  readonly fromRevision: string;
+  readonly toRevision: string;
+  /** Newest first. */
+  readonly entries: readonly JournalEntry[];
+  /**
+   * The page filled before the walk reached `fromRevision`. What is missing is
+   * older than the last entry, so asking again from that entry's revision
+   * continues where this stopped.
+   */
+  readonly hasMore: boolean;
+}
+
+/** One transaction, as the engine's history kept it. */
+export interface JournalEntry {
+  readonly revision: string;
+  /** When it landed, in seconds since the epoch, UTC. */
+  readonly at_epoch_seconds: number;
+  /**
+   * The id its writer minted, as it was written.
+   *
+   * The engine imposes no shape on it and parses none. What Sync puts in front
+   * of its own writes is the only thing that says whose hand a change was —
+   * this window's, an agent's, or the engine's own housekeeping.
+   */
+  readonly transaction_id: string | null;
+  /**
+   * Whose hand it was, as Sync reads the prefix it minted: an agent, somebody
+   * at this window, the housekeeping nobody performed — publishing a type
+   * corpus, reconciling a folder — or `unknown`, which is a write path this
+   * build has never heard of and is reported rather than hidden.
+   */
+  readonly source: "agent" | "window" | "housekeeping" | "unknown" | (string & {});
+  readonly changes: readonly JournalChange[];
+}
+
+/** What one transaction did to one record. */
+export interface JournalChange {
+  readonly key: string;
+  /** Open, like every other word the engine publishes. */
+  readonly change: "added" | "modified" | "deleted" | (string & {});
+  /** The record's own type — for a deletion, the type it had. */
+  readonly kind: string;
+  /**
+   * What it was called at that point.
+   *
+   * Carried by the history rather than read back, which is the only way a
+   * removed record can be named at all: there is nothing left to read.
+   */
+  readonly title: string | null;
+}
+
+/**
  * One record, whole.
  *
  * The body is Markdown exactly as the store holds it: what renders it is the

@@ -1029,8 +1029,8 @@ rest of the application. Two rules keep it from becoming a second product:
 Its sections are the questions that are the installation's rather than any
 project's: how the window is painted, how text is set, what serves every project
 this Mac holds, which agents reach Sync, which devices reach it from somewhere
-else, where disposable work happens, what it says out loud, and the secrets it
-keeps for a package.
+else, where disposable work happens, what it says out loud, when it interrupts,
+and the secrets it keeps for a package.
 
 **Remote Access is its own section and not a part of Vault**, because the two
 are opposite questions. The vault holds what a package uses to reach *out*;
@@ -1149,6 +1149,38 @@ thing. The sheet then names what it cost, member by member, and offers to undo
 the fetch. Reporting it is the point: nothing is lost, both versions are
 commits, but a person whose colleague's sentence quietly vanished is owed the
 news.
+
+## Speaking from outside the window
+
+Sync serves agents with every window closed, so the moment an agent stops and
+waits for a person is the moment there is most likely nothing on screen to say
+so. A system banner is the only thing this application can put in front of
+somebody who is in another one, and it is spent on three events and no fourth:
+an agent waiting for permission, a turn that ended, and a session that fell
+over. Each is a conversation that has stopped moving without a person. Every
+other status is the agent doing what it was left doing.
+
+**A banner is raised only when no window of Sync is in front, and that is not a
+preference.** Interrupting somebody about a conversation they are looking at is
+not something anybody would choose; it is what this has to avoid to be worth
+having. The three switches in Settings say which events are worth an
+interruption at all — they do not say when.
+
+**The reason a failure happened is not in it.** A banner means *come and look*.
+The window is where a failure is explained, with the process's last words under
+it and the conversation it happened in, and a reason cut to fit a notification
+is one somebody has to come and read properly anyway.
+
+Nothing an extension does reaches this. A package's loudest mark is the dot on
+its section's row — `extensions.md` §12 says why, and it is the same rule read
+from the other end: what is worth a banner is what the shell knows about its own
+agents, and a section with news has a place for a person to go and look.
+
+**The phone is not this.** iOS suspends an application seconds after it goes
+into the background and the connection to the computer goes with it, so a
+notification raised on the phone by the phone reaches only somebody already
+holding it. Waking a phone in a pocket is Apple's push service and nothing else,
+which needs a server this product does not have.
 
 ## Criteria for changing the shell
 

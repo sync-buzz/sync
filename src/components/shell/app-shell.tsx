@@ -14,6 +14,7 @@ import { ProjectWindow } from "@/components/shell/project-window";
 import { WelcomeScreen } from "@/components/shell/welcome";
 import type { OpenProject } from "@/lib/project/types";
 import { usePlace } from "@/lib/project/use-place";
+import { useAddressed, useWindowHolds } from "@/lib/attention";
 import { useAppMenu } from "@/lib/app-menu";
 import { useDevice } from "@/lib/device";
 import { usePairing } from "@/lib/pairing";
@@ -94,6 +95,14 @@ export function AppShell() {
   // it — the Dock icon's menu above all, which is where a second window is
   // asked for and where every window of an application is offered back.
   useWindowTitle(project?.name ?? null);
+  // The same fact said to Rust rather than to the system, and for a different
+  // purpose: a banner is raised with no window open and clicked from another
+  // application, so something has to know which window that project belongs in
+  // before there is anybody to ask.
+  useWindowHolds(project?.path ?? null);
+  // What such a click asked for, once this window has answered the half of it
+  // that is opening the project.
+  const addressed = useAddressed(project, enter);
 
   // The computer was forgotten, so everything that was read from it goes with
   // it: the sheet that did it, and the project it was raised over. The project
@@ -130,6 +139,7 @@ export function AppShell() {
           <ProjectWindow
             project={project}
             setup={setup}
+            shown={addressed}
             onProjectChanged={enter}
             // Only where there is a list to go back to. A Mac closes a project
             // by closing its window, and a phone has neither a second window

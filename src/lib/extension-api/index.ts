@@ -72,6 +72,26 @@ export {
 export { SourceList, type SourceListItem } from "@/components/shell/source-list";
 
 /**
+ * The list for the one case the others cannot answer: a list with no bound.
+ *
+ * Every list above is drawn whole, which is right for anything a person could
+ * count. This is for what a machine appends to — where drawing all of it is
+ * what costs, and where the reader has to keep their place while rows arrive at
+ * *both* ends of it.
+ *
+ * A component rather than a hook, and for a harder reason than the ones above:
+ * the machinery underneath reaches for `react-dom`, and a package that bundled
+ * that would put a second copy of the renderer in this document. There is
+ * exactly one place that library can live without breaking the rule every
+ * package is held to, and it is this side of the line.
+ */
+export {
+  VirtualList,
+  type VirtualListHandle,
+  type VirtualListProps,
+} from "@/components/shell/virtual-list";
+
+/**
  * The source list's sibling, for a list that nests.
  *
  * The behaviour underneath it is a library; the markup is the shell's. That is
@@ -512,8 +532,10 @@ export {
   PAUSE_MS,
   foldTranscript,
   modelOption,
+  precede,
   usageLines,
   withDropped,
+  withEarlier,
   type Entry,
   type Usage,
   type OpenQuestion,

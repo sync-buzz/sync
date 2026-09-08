@@ -31,8 +31,9 @@ use sync_memory::mapping::{
     suggested_key, titled_put, type_definition, type_key, type_record,
 };
 use sync_memory::{
-    ContentView, EntityInput, FolderEntry, Listing, MemoryPresence, ModelStatus, ProjectSettings,
-    RecordView, ScanOutcome, SearchOutcome, SyncState, TransactionResult, TransportStatus,
+    ContentView, EntityInput, FolderEntry, Journal, Listing, MemoryPresence, ModelStatus,
+    ProjectSettings, RecordView, ScanOutcome, SearchOutcome, SyncState, TransactionResult,
+    TransportStatus,
 };
 use sync_memory::{MemoryError, Result};
 
@@ -155,6 +156,23 @@ impl Domain {
         self.engine.revision()
     }
 
+    /// Where this session believes the memory stands, without asking again.
+    ///
+    /// `None` before the first read, and the distinction is the whole reason
+    /// this is an `Option` rather than a string: opening a project is not the
+    /// project changing, and a caller comparing two strings would read the
+    /// first read of all as a move — telling every window to re-read the
+    /// moment somebody else opened the same repository.
+    ///
+    /// It answers about this session and not about the store, which is exactly
+    /// what its one caller wants: [`crate::projects::Project`] asks it either
+    /// side of a call to find out whether *that call* moved the memory, and a
+    /// question that went to the engine would be a round trip after every read
+    /// as well as a different question.
+    pub fn seen_revision(&self) -> Option<&str> {
+        self.initialised.then_some(self.revision.as_str())
+    }
+
     /// Re-read the revision and remember it.
     ///
     /// Public because the window asks for exactly this and nothing else when it
@@ -201,6 +219,25 @@ impl Domain {
     pub fn list_records(&mut self, query: &Value) -> Result<Listing> {
         let value = self.call("memory_list_records", query)?;
         parse(value)
+    }
+
+    /// The transactions between a revision and where memory stands now.
+    ///
+    /// `to_revision` is deliberately not passed: the engine answers about the
+    /// revision it is serving, and naming one here would mean reading the
+    /// current revision first — two questions, with room for a write between
+    /// them, to answer one.
+    ///
+    /// # Errors
+    ///
+    /// Returns the engine failure.
+    pub fn journal(&mut self, query: &Value) -> Result<Journal> {
+        let value = self.call("memory_journal", query)?;
+        let mut journal: Journal = parse(value)?;
+        for entry in &mut journal.entries {
+            entry.source = source_of(entry.transaction_id.as_deref()).to_owned();
+        }
+        Ok(journal)
     }
 
     /// Search, reporting honestly whether the answer is FTS-only.
@@ -2431,5 +2468,72 @@ mod tests {
             "which fields come back is a question about the answer, not a filter on what is              selected: sent on, it is a member of a query the engine validates"
         );
         assert_eq!(query["kind"], json!("tasks.task"), "the rest is left alone");
+    }
+}
+
+/// Whose hand a transaction was, read from the prefix its writer minted.
+///
+/// The prefixes are chosen in this file and nowhere else, which is the only
+/// reason this can be answered at all — the engine stores the id and has no
+/// opinion about its shape.
+///
+/// Three answers and an escape. `agent` is the one path an agent writes
+/// through. `housekeeping` is the writes nobody performed: publishing a type
+/// corpus when a project opens, reconciling an attached folder with the files
+/// in it. Everything else this product mints is somebody at this window, and a
+/// prefix from a build that had write paths this one does not know is
+/// `unknown` — reported rather than hidden, because a change nobody can
+/// attribute is still a change, and silently dropping it is the failure that
+/// looks exactly like nothing having happened.
+fn source_of(transaction_id: Option<&str>) -> &'static str {
+    let Some(id) = transaction_id else {
+        return "unknown";
+    };
+    let prefix = id.split('-').next().unwrap_or_default();
+    match prefix {
+        "agent" => "agent",
+        "sync" => match id.split('-').nth(1).unwrap_or_default() {
+            // Type definitions published on opening a project, and the two
+            // reconciliations that run without anybody asking for them.
+            "types" | "extension" | "scan" | "titles" => "housekeeping",
+            _ => "window",
+        },
+        "window" | "import" => "window",
+        _ => "unknown",
+    }
+}
+
+#[cfg(test)]
+mod journal_source_tests {
+    use super::source_of;
+
+    /// The prefixes this file actually mints, each landing where it belongs.
+    #[test]
+    fn a_prefix_says_whose_hand_it_was() {
+        assert_eq!(source_of(Some("agent-abc123-4")), "agent");
+        assert_eq!(source_of(Some("sync-doc-abc123-4")), "window");
+        assert_eq!(source_of(Some("sync-folder-abc123-4")), "window");
+        assert_eq!(source_of(Some("window-abc123-4")), "window");
+        assert_eq!(source_of(Some("import-abc123-4")), "window");
+        assert_eq!(source_of(Some("sync-scan-abc123-4")), "housekeeping");
+        assert_eq!(source_of(Some("sync-types-abc123-4")), "housekeeping");
+        assert_eq!(
+            source_of(Some("sync-extension-types-abc123-4")),
+            "housekeeping"
+        );
+    }
+
+    /// A write path this build has never heard of is reported, not swallowed.
+    #[test]
+    fn an_unfamiliar_prefix_is_still_a_change() {
+        assert_eq!(source_of(Some("phone-abc123-4")), "unknown");
+        assert_eq!(source_of(None), "unknown");
+    }
+
+    /// A `sync-` write this build does not know is somebody at a window: every
+    /// one of them is, and guessing housekeeping would hide it by default.
+    #[test]
+    fn an_unfamiliar_sync_prefix_is_this_window() {
+        assert_eq!(source_of(Some("sync-something-new-abc123-4")), "window");
     }
 }

@@ -460,3 +460,99 @@ fn a_client_reconnects_when_the_resident_process_is_replaced() {
         "the record written before the process died came back empty"
     );
 }
+
+/// The notice a write raises, from the door that wrote to the application.
+///
+/// **`#[ignore]`d because it needs a sidecar built from this tree**, and the
+/// binary staged in `binaries/` is whatever was last released — a copy from
+/// before the engine said this at all would fail here for a reason that has
+/// nothing to do with the code under test. Ask for it deliberately:
+/// `cargo test -p sync-memory --test resident_channel -- --ignored`.
+///
+/// What it holds is the half nothing else covers. The unit tests either side of
+/// it check that a move is noticed and that a notice reaches every reader; this
+/// checks that the notice travels — that a write on one connection reaches a
+/// *different* connection, the one Sync attends with, which is read by a thread
+/// with no call outstanding on it and is therefore the only one a notice can
+/// arrive on while nobody is asking anything.
+#[test]
+#[ignore = "needs a sync-mcp built from this tree, not the staged release"]
+fn a_write_is_announced_on_the_connection_sync_attends_with() {
+    let Some(binary) = engine_binary() else {
+        eprintln!("no sync-mcp binary; skipping");
+        return;
+    };
+    let logs = tempfile::tempdir().expect("temp logs");
+    let project = repository();
+    let held = resident(&binary, &[("ONE", project.path())]);
+
+    // The connection Sync holds from start-up, and nothing else: it asks
+    // nothing after saying what it is for, which is exactly the condition under
+    // which a notice would otherwise never be read.
+    let attending = std::os::unix::net::UnixStream::connect(&held.socket)
+        .expect("the host channel takes a second connection");
+    let heard = notices_on(attending);
+
+    let mut client = held.client(project.path(), &binary, logs.path().join("one.log"));
+    seeded(&mut client);
+    client
+        .apply(
+            "watched",
+            &[note("s-watched", "Somebody wrote this").to_put()],
+        )
+        .expect("the project takes a write");
+
+    let notice = heard
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the write was never announced to the attending connection");
+    assert_eq!(notice["method"], sync_memory::REVISION_MOVED);
+    assert_eq!(
+        notice["params"]["path"].as_str(),
+        project.path().to_str(),
+        "the notice named a project other than the one that was written to"
+    );
+    // A notification and nothing else. An id would make it a call, and the
+    // application would answer or refuse a message this process has nothing to
+    // match the reply against.
+    assert!(notice.get("id").is_none(), "{notice}");
+}
+
+/// Say `host.attend` on `stream`, then hand back every notice it carries.
+///
+/// A thread and a queue rather than a read in the test body, so that a notice
+/// that never comes is a timeout with a sentence on it rather than a suite that
+/// hangs.
+fn notices_on(
+    stream: std::os::unix::net::UnixStream,
+) -> std::sync::mpsc::Receiver<serde_json::Value> {
+    use std::io::Write as _;
+
+    let mut writing = stream
+        .try_clone()
+        .expect("the connection can be written to");
+    writeln!(
+        writing,
+        r#"{{"jsonrpc":"2.0","id":0,"method":"{}","params":{{}}}}"#,
+        sync_memory::ATTEND
+    )
+    .expect("the greeting goes out");
+    writing.flush().expect("the greeting is flushed");
+
+    let (found, heard) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stream).lines().map_while(Result::ok) {
+            let Ok(message) = serde_json::from_str::<serde_json::Value>(&line) else {
+                continue;
+            };
+            // The answer to `host.attend` itself carries no method, and is not
+            // a notice.
+            if message.get("method").is_none() {
+                continue;
+            }
+            if found.send(message).is_err() {
+                return;
+            }
+        }
+    });
+    heard
+}

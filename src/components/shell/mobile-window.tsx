@@ -55,11 +55,13 @@ import { cn } from "@/lib/utils";
  */
 export function MobileWindow({
   project,
+  activity,
   sections,
   unavailable,
   catalogue,
   badges,
   updates,
+  unseen,
   active,
   attachNavigator,
   attachWorkspace,
@@ -73,6 +75,15 @@ export function MobileWindow({
   onLeave,
 }: {
   project: OpenProject;
+  /**
+   * The window's own section, drawn first and never moved.
+   *
+   * Where the column on a Mac puts it, and above the sections for the reason it
+   * is above them there: what a project brought is a person's to arrange, and
+   * what the window owns is not. Somebody who knows this list from the desk
+   * finds it in the same place here.
+   */
+  activity: MountedArea;
   /** The sections this project's packages brought, in the order it declares. */
   sections: readonly MountedArea[];
   /**
@@ -91,6 +102,16 @@ export function MobileWindow({
   badges: Badges;
   /** How many declared extensions have a newer version published. */
   updates: number;
+  /**
+   * How many records have changed since this person last looked, or `null`
+   * while that is still being read.
+   *
+   * `null` and zero both draw nothing, exactly as on the Mac: a window that
+   * printed `0` before it had asked would tell somebody with twenty things
+   * waiting that nothing had happened, and a mark that is always there is not
+   * news.
+   */
+  unseen: number | null;
   /** The section showing, and `null` while there is not one yet. */
   active: MountedArea | null;
   /**
@@ -221,9 +242,18 @@ export function MobileWindow({
         </WindowBar>
       }
     >
-      {sections.map((area, at) => (
+      <Row
+        icon={activity.icon}
+        label={activity.label}
+        badge={unseen === null || unseen === 0 ? undefined : unseen}
+        leadsOn
+        selected={activity.key === active?.key}
+        onPress={() => open(activity)}
+      />
+
+      {sections.map((area) => (
         <div key={area.key}>
-          {at === 0 ? null : <RowSeparator />}
+          <RowSeparator />
           <Row
             icon={area.icon}
             label={area.label}

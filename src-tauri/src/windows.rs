@@ -17,6 +17,10 @@
 //! window described in two places, and the second description would be the one
 //! that goes stale.
 
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+
 use tauri::utils::config::WindowConfig;
 use tauri::{AppHandle, Manager, Runtime, WebviewWindow, WebviewWindowBuilder};
 
@@ -75,6 +79,104 @@ pub fn open<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<WebviewWindow<R>> {
 #[tauri::command]
 pub fn window_new<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
     open(&app).map(|_| ()).map_err(|error| error.to_string())
+}
+
+/// Which window has which project open.
+///
+/// The window is the only place that knows: a project is opened *into* one by a
+/// person choosing it, and everything about the choice happens in the webview.
+/// So the answer is written down when it changes, and this is where anything in
+/// Rust that has a project and needs a window reads it.
+///
+/// Keyed by label rather than by project, deliberately: a label is what a
+/// window is, and a window's project changes under it. The reverse map would
+/// have to be repaired on every close, and a stale entry in it is a click that
+/// goes to a window that is not there.
+///
+/// The value is optional, and the difference between `None` and no entry at all
+/// is the one this is for: a window that says it holds nothing is a window
+/// waiting to be given a project, and a window that has never said anything is
+/// one nothing here knows enough about to put somebody else's work into.
+#[derive(Default)]
+pub struct Holding(Mutex<HashMap<String, Option<PathBuf>>>);
+
+/// Say what this window has open, or that it has nothing open.
+///
+/// Called by the window itself whenever the project changes, which is the only
+/// moment the answer moves. A window that never says is a window nothing can
+/// address — it still works, and a banner clicked for its project opens another
+/// window instead.
+///
+/// # Errors
+///
+/// When the record of what windows hold cannot be reached, which is a lock
+/// poisoned by a panic elsewhere.
+#[tauri::command]
+pub fn window_holds<R: Runtime>(
+    window: WebviewWindow<R>,
+    state: tauri::State<'_, Holding>,
+    project: Option<PathBuf>,
+) -> Result<(), String> {
+    state
+        .0
+        .lock()
+        .map_err(|_| "what the windows hold could not be read".to_owned())?
+        .insert(window.label().to_owned(), project);
+    Ok(())
+}
+
+/// Bring the window that has this project open to the front, or find one to
+/// open it into.
+///
+/// Three answers in order, and the order is the whole of the decision:
+///
+/// 1. The window that already has this project. Nothing moves, nothing is
+///    made, and the person is back where they were.
+/// 2. A window holding nothing — one somebody left on the list of projects.
+///    Giving it the project is what that window is for.
+/// 3. A new window. **Not the frontmost one**, which is the tempting third
+///    answer and the wrong one: a person who clicked a banner asked to be shown
+///    one project, not to have another one taken off their screen.
+pub fn reveal<R: Runtime>(app: &AppHandle<R>, project: &Path) -> Option<WebviewWindow<R>> {
+    let chosen = |wanted: Option<&Path>| {
+        app.state::<Holding>().0.lock().ok().and_then(|held| {
+            held.iter()
+                .find(|(_, held)| held.as_deref() == wanted)
+                .map(|(label, _)| label.clone())
+        })
+    };
+
+    for label in [chosen(Some(project)), chosen(None)] {
+        let Some(window) = label.and_then(|label| app.get_webview_window(&label)) else {
+            continue;
+        };
+        // All three, because a window can be away in three ways: closed to the
+        // Dock, ordered out, or simply behind something.
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+        return Some(window);
+    }
+
+    match open(app) {
+        Ok(window) => Some(window),
+        Err(error) => {
+            eprintln!("a window could not be opened: {error}");
+            None
+        }
+    }
+}
+
+/// Forget what a window held, because the window is gone.
+///
+/// Not bookkeeping: a label is reused — closing `main-2` and opening another
+/// window gives `main-2` again — so an entry left behind is a new empty window
+/// claiming the project the old one had, and a banner clicked for that project
+/// would bring up a window showing the list of projects.
+pub fn closed<R: Runtime>(app: &AppHandle<R>, label: &str) {
+    if let Ok(mut held) = app.state::<Holding>().0.lock() {
+        held.remove(label);
+    }
 }
 
 /// Name a window after the project it has open.

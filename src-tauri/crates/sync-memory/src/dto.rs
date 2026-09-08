@@ -120,6 +120,136 @@ pub struct Counts {
     pub service: usize,
 }
 
+/// What a screen was handed when it began watching a conversation.
+///
+/// The one shape of the session family that lives here, and it is here because
+/// two roads answer with it: a window on this machine is handed it by the
+/// command directly, and a device is handed it over the channel. A watch
+/// answered with a bare number on one road and a pair on the other is a
+/// disagreement nothing reports — the reader asks for the member it wants,
+/// finds nothing there, and draws a conversation as though it began where the
+/// replay did.
+///
+/// The two numbers answer different questions and a screen needs both. What was
+/// **dropped** is gone: the history is capped, and a transcript that quietly
+/// began in the middle would read as the whole conversation. What is
+/// **earlier** is still held and simply has not been sent, so a screen says
+/// nothing about it and asks for it when somebody scrolls that far back.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Subscription {
+    /// How many events fell off the front of the history before this read.
+    #[serde(default)]
+    pub dropped: u64,
+    /// The sequence number the replay begins at, when it began part way through
+    /// what is held. `None` when everything held was sent.
+    #[serde(default)]
+    pub earlier_than: Option<u64>,
+}
+
+/// What happened between two revisions, one transaction at a time.
+///
+/// Not a second spelling of a diff. A diff says how two states differ; this
+/// says what was done to get from one to the other — so a record written three
+/// times is one line there and three entries here, and a record added and then
+/// deleted is in this and absent from that.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Journal {
+    pub from_revision: String,
+    pub to_revision: String,
+    #[serde(default)]
+    pub entries: Vec<JournalEntry>,
+    #[serde(default)]
+    pub has_more: bool,
+}
+
+/// One transaction, as the engine's history kept it.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct JournalEntry {
+    pub revision: String,
+    /// When it landed, in seconds since the epoch, UTC.
+    pub at_epoch_seconds: i64,
+    /// The id the writer minted, carried as it was written.
+    ///
+    /// Sync puts an occasion in front of its own — `window`, `sync-doc`, the
+    /// name a scheduled handler runs under — and an agent's writes arrive with
+    /// theirs. That prefix is the only thing that says whose hand a change was,
+    /// and it is why this is read rather than dropped.
+    #[serde(default)]
+    pub transaction_id: Option<String>,
+    /// Whose hand this was: `agent`, `window`, `housekeeping` or `unknown`.
+    ///
+    /// Filled in by Sync and never by the engine, which has no idea what the
+    /// prefixes mean — they are minted here. It is a member of this shape
+    /// rather than something the window derives, because the meaning of a
+    /// prefix belongs where the prefix is chosen: a second reading of it in
+    /// TypeScript would be the same list, kept twice, drifting the first time
+    /// somebody adds a write path.
+    #[serde(default = "unknown_source")]
+    pub source: String,
+    #[serde(default)]
+    pub changes: Vec<JournalChange>,
+}
+
+/// What a transaction whose prefix says nothing is called.
+fn unknown_source() -> String {
+    "unknown".to_owned()
+}
+
+/// What one transaction did to one record.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct JournalChange {
+    /// The record's key.
+    ///
+    /// The engine addresses a record as `{addressing, value}`, which is a shape
+    /// with one inhabitant and nothing for this side to decide about. It is
+    /// flattened here rather than in the window, so the one place that knows
+    /// the wire's shape is the one that speaks to the wire.
+    ///
+    /// **This shape is read twice on the way to a window, and that is what the
+    /// alias is for.** `sync-mcp` parses the engine's answer into this type and
+    /// serialises it again for the window, so the second read sees what the
+    /// first one wrote. Renaming the field to `id` made those two disagree: the
+    /// engine's `id` is an object, the one written back is a string, and the
+    /// second parse failed on every journal there was — leaving a screen that
+    /// said nothing had happened.
+    #[serde(alias = "id", deserialize_with = "key_of_identity")]
+    pub key: String,
+    /// `added`, `modified` or `deleted`. Open, like every other word the engine
+    /// publishes: a newer engine may report something this build has no mark
+    /// for, and refusing it here would be Sync having an opinion about the
+    /// engine's vocabulary.
+    pub change: String,
+    /// The record's own type — for a deletion, the type it had.
+    pub kind: String,
+    #[serde(default)]
+    pub title: Option<String>,
+}
+
+/// Read a record's identity as its key, in either shape it arrives in.
+///
+/// `{"addressing": "plaintext", "value": "the-key"}` is what the engine sends.
+/// A plain string is what this type serialises, and therefore what the second
+/// reader on the way to a window is handed. Accepting both is what keeps one
+/// type usable at both ends of that hop instead of two that must be kept in
+/// step.
+fn key_of_identity<'de, D>(deserializer: D) -> std::result::Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Identity {
+        Written(String),
+        Addressed { value: String },
+    }
+
+    Ok(match Identity::deserialize(deserializer)? {
+        Identity::Written(key) | Identity::Addressed { value: key } => key,
+    })
+}
+
 /// A search result, including how it was answered.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SearchOutcome {
@@ -778,5 +908,75 @@ mod tests {
         let read: InstalledExtension = serde_json::from_value(older).expect("it reads back");
 
         assert!(read.tools.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod journal_tests {
+    #![allow(clippy::expect_used)]
+
+    use super::Journal;
+
+    /// The engine's own answer, copied from a live call rather than composed
+    /// here.
+    ///
+    /// A shape invented in a test agrees with the test and with nothing else,
+    /// and this boundary has already cost this repository once: a member the
+    /// two sides spell differently arrives as a default and says nothing about
+    /// it. What this pins is every name on the wire at once.
+    const ANSWER: &str = r#"{
+      "entries": [{
+        "at_epoch_seconds": 1788799440,
+        "changes": [{
+          "change": "modified",
+          "id": {"addressing": "plaintext", "value": "task-ac20f4"},
+          "kind": "tasks.task",
+          "title": "Поставить Активность первым пунктом левой колонки со счётчиком"
+        }],
+        "revision": "998ebc6146538273f3a6294e59c2585623720ef3",
+        "transaction_id": "agent-de361d72535214595742a20b261ed4c1110d6d41-13"
+      }],
+      "fromRevision": "8aed59789fd1cd391580a92eb4cdb5cd49ff806f",
+      "hasMore": true,
+      "toRevision": "998ebc6146538273f3a6294e59c2585623720ef3"
+    }"#;
+
+    /// The hop that actually failed: `sync-mcp` reads the engine's answer and
+    /// writes this type out again, and the window reads *that*. A shape only
+    /// tested against the engine's own wording passes while the product is
+    /// broken, which is exactly what happened.
+    #[test]
+    fn what_this_type_writes_is_what_it_can_read() {
+        let from_engine: Journal = serde_json::from_str(ANSWER).expect("the engine's own answer");
+        let written = serde_json::to_string(&from_engine).expect("written for the window");
+        let read_again: Journal = serde_json::from_str(&written).expect("read by the window");
+        assert_eq!(read_again.entries[0].changes[0].key, "task-ac20f4");
+        assert_eq!(read_again.entries[0].source, from_engine.entries[0].source);
+    }
+
+    #[test]
+    fn the_engines_answer_reads_as_a_journal() {
+        let journal: Journal = serde_json::from_str(ANSWER).expect("the engine's own answer");
+        assert_eq!(journal.entries.len(), 1);
+        assert!(journal.has_more);
+
+        let entry = &journal.entries[0];
+        assert_eq!(entry.at_epoch_seconds, 1_788_799_440);
+        assert!(
+            entry
+                .transaction_id
+                .as_deref()
+                .is_some_and(|id| id.starts_with("agent-"))
+        );
+        assert_eq!(
+            entry.source, "unknown",
+            "the engine says nothing about whose hand it was; Sync fills that in"
+        );
+
+        let change = &entry.changes[0];
+        assert_eq!(change.key, "task-ac20f4", "the identity is read as a key");
+        assert_eq!(change.change, "modified");
+        assert_eq!(change.kind, "tasks.task");
+        assert!(change.title.is_some());
     }
 }

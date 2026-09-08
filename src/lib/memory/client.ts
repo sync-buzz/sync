@@ -6,7 +6,7 @@
  * and no retry policy — those belong where the session lives.
  */
 
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 
 import type {
   ContentView,
@@ -17,6 +17,7 @@ import type {
   FetchOutcome,
   FieldDeclaration,
   Freshness,
+  Journal,
   MemoryDocument,
   MemoryType,
   MemoryView,
@@ -87,6 +88,44 @@ export function openMemory(project: string): Promise<EngineSummary> {
 /** Read the states the UI renders: lock, search mode, remote, revision. */
 export function memoryStatus(project: string): Promise<MemoryStatus> {
   return call<MemoryStatus>("memory_status", { project });
+}
+
+/**
+ * What arrives when a project's memory stops being what it was.
+ *
+ * It names the project and nothing else. There is deliberately no revision on
+ * it: a number sent here was already old when it was written, so a reader that
+ * took it would draw a project as of a moment nobody can name. This says
+ * *something changed*; what it changed to is read back with the functions
+ * above, which is where the revision has always come from.
+ */
+export interface MemoryMoved {
+  readonly project: string;
+}
+
+/**
+ * Hear about this project's memory changing, without asking again and again.
+ *
+ * The notice originates with whichever door wrote — an agent's tool, another
+ * window, a device — and reaches this window down the channel the application
+ * has held open to the engine since it started. Nothing here polls, and nothing
+ * here holds a connection: the number that comes back is what {@link
+ * unwatchMemory} is given, and a reader that goes away without giving it back
+ * is dropped the first time a notice cannot be delivered to it.
+ *
+ * Several readers of one project are expected. Each gets its own number, and
+ * one stopping does not stop the others.
+ */
+export function watchMemory(
+  project: string,
+  notice: Channel<MemoryMoved>,
+): Promise<number> {
+  return call<number>("memory_watch", { project, notice });
+}
+
+/** Stop hearing about it. Whatever else watches that project goes on. */
+export function unwatchMemory(project: string, watch: number): Promise<void> {
+  return call<void>("memory_unwatch", { project, watch });
 }
 
 /**
@@ -717,6 +756,20 @@ export interface ListQuery {
 
 export function listRecords(project: string, query: ListQuery = {}): Promise<Listing> {
   return call<Listing>("memory_list", { project, query });
+}
+
+/**
+ * What happened to this project's memory since a revision somebody saw.
+ *
+ * `since` is a revision this window showed, and it is not itself reported —
+ * the engine answers about the revision it is serving now, so the answer is
+ * *what has happened since*, read at the moment it is asked. Nothing here
+ * decides what is worth showing: the entries arrive newest first and carry the
+ * transaction id their writer minted, which is the only thing that says whose
+ * hand a change was.
+ */
+export function journal(project: string, since: string, limit = 50): Promise<Journal> {
+  return call<Journal>("memory_journal", { project, since, limit });
 }
 
 /** Search parameters. Filters match `listRecords`. */

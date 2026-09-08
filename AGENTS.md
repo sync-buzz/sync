@@ -109,6 +109,12 @@ single place.
 - **The CSP applies only to a packaged build.** `tauri dev` loads over http,
   where Tauri does not apply it at all. Any CSP change is verified against
   `pnpm tauri build`, never against `pnpm tauri dev`.
+- **A banner that can be clicked needs a bundle, so `tauri dev` never has
+  one.** The notification centre reads the running process's bundle identifier,
+  and a build from source is a bare executable with none — so the banner falls
+  back to the plugin's, which shows a sentence and cannot be clicked anywhere.
+  Where a click goes is verified against `pnpm tauri build`, for the same reason
+  the CSP is.
 - **A new field on a record does not cross the boundary by itself.** The window
   and the engine agree on a shape; an unknown member is dropped without an
   error. Write it, read it back, and cover it with a test that does both.
@@ -117,6 +123,14 @@ single place.
   `cargo test -p sync-extensions --test live_registry -- --ignored`.
 - **Changing what a project record carries means rebuilding the sidecar**, or
   the window talks to an engine that has never heard of the field.
+- **`tauri dev` adopts the engine already running rather than starting one.**
+  That is deliberate — a build from source is stopped many times an hour, and
+  each stop used to take away the process agents reach this machine through —
+  but it means the engine answering the window is whatever was built last, which
+  is not necessarily what is checked out. It says so on stdout at launch. The
+  trap above is the one it makes easier to hit: after touching the sidecar,
+  replace the engine from Settings rather than assuming a relaunch did it. A
+  packaged build never adopts.
 - **The Xcode project is written by the command that generated it.** `pnpm
   tauri ios init` bakes the invocation it was started with into the project's
   pre-build script. Started any other way — `pnpm exec tauri`, `node

@@ -3,6 +3,14 @@
 import { createPortal } from "react-dom";
 import type { ReactNode } from "react";
 
+import type { LucideIcon } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useBandSlot } from "@/lib/shell-bands";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
@@ -102,6 +110,49 @@ export function PanelFooter({ children }: { children: ReactNode }) {
     >
       {children}
     </div>
+  );
+}
+
+/**
+ * One command in a bottom bar, in the weight that band is drawn at.
+ *
+ * Tertiary until it is pointed at, like the pinned row in the sidebar beside
+ * it: the bar is furniture, and a control at full weight in it reads as the
+ * loudest thing in a column whose subject is the list above. The name is a
+ * tooltip rather than a `title`, because `title` is the system's own and
+ * arrives late enough that people stop waiting for it.
+ *
+ * Here rather than in the one column that first needed it, because a second
+ * column needs it now: two drawings of one control is how a bar comes to have
+ * two weights, two sizes and two ideas of where its label goes.
+ */
+export function FooterAction({
+  icon: Icon,
+  label,
+  disabled,
+  onSelect,
+}: {
+  icon: LucideIcon;
+  label: string;
+  disabled?: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={label}
+          disabled={disabled}
+          onClick={onSelect}
+          className="text-fg-tertiary hover:text-fg"
+        >
+          <Icon />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
   );
 }
 

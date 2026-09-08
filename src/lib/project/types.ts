@@ -226,6 +226,45 @@ export interface ProjectView {
    * sections the window actually mounted is `use-section-order.ts`.
    */
   readonly sections: readonly string[];
+  /**
+   * The revision whose changes this person has already seen.
+   *
+   * Absent means nobody has looked yet, which is not *nothing has happened*:
+   * the window takes the revision it opened at as the starting point rather
+   * than reporting the whole history as news.
+   */
+  readonly seenRevision: string | null;
+  /**
+   * Kinds whose changes this person does not want reported.
+   *
+   * The exceptions, not the selection — the same shape as `hiddenTypes`, and
+   * for the same reason: kinds are invented long after this was written, and a
+   * stored selection would silently stop reporting every kind installed since.
+   */
+  readonly unwatchedKinds: readonly string[];
+  /**
+   * Changes this person put away one at a time, without moving the mark.
+   *
+   * `seenRevision` is one line drawn across the whole history, and it is the
+   * wrong instrument for *I have looked at this one*: moving it to silence a
+   * single change silences everything older than that change with it. So a
+   * change put away on its own is remembered by name, and the mark stays.
+   */
+  readonly dismissed: readonly DismissedChange[];
+}
+
+/**
+ * One change somebody put away, and the write they put away.
+ *
+ * The revision rather than a time, because what makes a record news again is
+ * being written to *again* — a different revision, whatever the clock says. Two
+ * writes in one second are two revisions and one timestamp, and a timestamp
+ * here would swallow the second of them.
+ */
+export interface DismissedChange {
+  readonly key: string;
+  /** The revision of the newest write to it when it was put away. */
+  readonly revision: string;
 }
 
 /**
@@ -239,6 +278,15 @@ export interface ProjectView {
 export interface ProjectViewChange {
   readonly hiddenTypes?: readonly string[];
   readonly sections?: readonly string[];
+  readonly seenRevision?: string;
+  readonly unwatchedKinds?: readonly string[];
+  /**
+   * An empty list is a list somebody emptied, and marking everything as seen
+   * sends one: a name left behind the mark goes on suppressing a record that
+   * has already gone quiet on its own, so the next write to it would be news
+   * nobody is told about.
+   */
+  readonly dismissed?: readonly DismissedChange[];
 }
 
 /** A project this installation has opened before. */

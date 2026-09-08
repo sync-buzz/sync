@@ -1,5 +1,6 @@
 import {
   AudioLines,
+  Bell,
   Bot,
   GitBranch,
   KeyRound,
@@ -14,7 +15,7 @@ import {
  * The sections of the settings window.
  *
  * Settings are the installation's: what is true of this machine whatever project
- * is open, and whatever project is not. Eight things are — how the window is
+ * is open, and whatever project is not. Nine things are — how the window is
  * painted, how a record's text is set, what serves every project this machine
  * holds, which agents reach Sync, which devices reach it from somewhere else,
  * where work happens when it happens somewhere disposable, what it says out
@@ -104,6 +105,12 @@ export const SETTINGS_SECTIONS = [
     label: "Voice",
     icon: AudioLines,
     headline: "What Sync says out loud, and in whose voice.",
+  },
+  {
+    id: "notifications",
+    label: "Notifications",
+    icon: Bell,
+    headline: "What Sync says when you are looking at something else.",
   },
 ] as const satisfies readonly SettingsSection[];
 

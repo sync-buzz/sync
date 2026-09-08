@@ -281,6 +281,57 @@ pub struct ProjectView {
     /// missing from the list still appears.
     #[serde(default)]
     pub sections: Vec<String>,
+    /// The revision this person has already seen the changes up to.
+    ///
+    /// Whose eyes have been on what is a fact about a person at a desk, never
+    /// about the project: written into `refs/memory/*` it would become one
+    /// colleague's reading marking the whole team's, and a change somebody else
+    /// glanced at would go quiet for everybody. So it lives here, beside the
+    /// type filter and the section order, for exactly the reason those do.
+    ///
+    /// Absent means nobody has looked yet — which is not the same as *nothing
+    /// has happened*, and is why the window starts from the revision it first
+    /// opened rather than from the beginning of the history.
+    #[serde(default)]
+    pub seen_revision: Option<String>,
+    /// Kinds whose changes this person does not want reported.
+    ///
+    /// Held as the exceptions rather than as the selection, the way
+    /// `hidden_types` is: a project's kinds are invented after this file was
+    /// written, so a stored selection would silently stop reporting every kind
+    /// installed since — the failure nobody notices, because it looks exactly
+    /// like nothing having happened.
+    #[serde(default)]
+    pub unwatched_kinds: Vec<String>,
+    /// Changes this person put away one at a time, without moving the mark.
+    ///
+    /// The reading mark above is one line drawn across the whole history, and
+    /// it is the wrong instrument for *I have looked at this one*: moving it to
+    /// silence a single change silences everything older than that change with
+    /// it. So a change put away on its own is remembered by name, and the mark
+    /// stays where it was.
+    ///
+    /// Each one carries the revision it was put away at rather than a time,
+    /// because what makes it news again is the record being written to *again*
+    /// — a different revision, whatever the clock says. Two writes in one
+    /// second are two revisions and one timestamp, and a timestamp here would
+    /// swallow the second of them.
+    ///
+    /// The list is emptied whenever the mark moves: everything it names is
+    /// behind the mark by then, and a name kept past that point would be
+    /// suppressing a change that has already gone quiet on its own.
+    #[serde(default)]
+    pub dismissed: Vec<DismissedChange>,
+}
+
+/// One change somebody put away, and the write they put away.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DismissedChange {
+    /// The record's key, as the store spells it.
+    pub key: String,
+    /// The revision of the newest write to it at the moment it was put away.
+    pub revision: String,
 }
 
 /// A change to what this installation shows of a project.
@@ -298,6 +349,12 @@ pub struct ProjectViewChange {
     pub hidden_types: Option<Vec<String>>,
     #[serde(default)]
     pub sections: Option<Vec<String>>,
+    #[serde(default)]
+    pub seen_revision: Option<String>,
+    #[serde(default)]
+    pub unwatched_kinds: Option<Vec<String>>,
+    #[serde(default)]
+    pub dismissed: Option<Vec<DismissedChange>>,
 }
 
 /// What this installation shows of a project.
@@ -341,6 +398,15 @@ fn apply(stored: &mut ProjectView, change: ProjectViewChange) {
     }
     if let Some(sections) = change.sections {
         stored.sections = sections;
+    }
+    if let Some(seen_revision) = change.seen_revision {
+        stored.seen_revision = Some(seen_revision);
+    }
+    if let Some(unwatched_kinds) = change.unwatched_kinds {
+        stored.unwatched_kinds = unwatched_kinds;
+    }
+    if let Some(dismissed) = change.dismissed {
+        stored.dismissed = dismissed;
     }
 }
 
@@ -666,7 +732,9 @@ pub(crate) fn write_configuration<T: Serialize>(
 
 #[cfg(test)]
 mod tests {
-    use super::{ProjectView, ProjectViewChange, RegisteredProject, apply, register};
+    use super::{
+        DismissedChange, ProjectView, ProjectViewChange, RegisteredProject, apply, register,
+    };
 
     fn project(path: &str, name: &str, identifier: &str) -> RegisteredProject {
         RegisteredProject {
@@ -747,6 +815,7 @@ mod tests {
         ProjectView {
             hidden_types: hidden.iter().map(|entry| (*entry).to_owned()).collect(),
             sections: sections.iter().map(|entry| (*entry).to_owned()).collect(),
+            ..ProjectView::default()
         }
     }
 
@@ -764,7 +833,7 @@ mod tests {
             &mut stored,
             ProjectViewChange {
                 hidden_types: Some(vec!["question".to_owned()]),
-                sections: None,
+                ..ProjectViewChange::default()
             },
         );
 
@@ -778,8 +847,8 @@ mod tests {
         apply(
             &mut stored,
             ProjectViewChange {
-                hidden_types: None,
                 sections: Some(vec!["chat/chat".to_owned(), "records/records".to_owned()]),
+                ..ProjectViewChange::default()
             },
         );
 
@@ -794,6 +863,153 @@ mod tests {
         );
     }
 
+    /// The activity's two answers travel the same way the other two do, and the
+    /// one that matters is the reading mark: a window that hid a kind must not
+    /// take the mark back to where it was, or every change since would be news
+    /// again.
+    #[test]
+    fn the_activity_settings_leave_each_other_alone() {
+        let mut stored = view(&["artifact"], &["records/records"]);
+
+        apply(
+            &mut stored,
+            ProjectViewChange {
+                seen_revision: Some("abc123".to_owned()),
+                ..ProjectViewChange::default()
+            },
+        );
+        assert_eq!(stored.seen_revision.as_deref(), Some("abc123"));
+
+        apply(
+            &mut stored,
+            ProjectViewChange {
+                unwatched_kinds: Some(vec!["chat.conversation".to_owned()]),
+                ..ProjectViewChange::default()
+            },
+        );
+        assert_eq!(
+            stored.seen_revision.as_deref(),
+            Some("abc123"),
+            "switching a kind off must not move the reading mark"
+        );
+        assert_eq!(stored.unwatched_kinds, vec!["chat.conversation".to_owned()]);
+
+        apply(
+            &mut stored,
+            ProjectViewChange {
+                hidden_types: Some(vec!["question".to_owned()]),
+                ..ProjectViewChange::default()
+            },
+        );
+        assert_eq!(
+            stored.seen_revision.as_deref(),
+            Some("abc123"),
+            "and neither must the filter beside it"
+        );
+        assert_eq!(stored.unwatched_kinds, vec!["chat.conversation".to_owned()]);
+    }
+
+    /// The two new members cross the boundary under the names the window sends,
+    /// which is the failure this file has already paid for once: a spelling one
+    /// side does not recognise arrives as a default and says nothing about it.
+    #[test]
+    fn the_activity_fields_are_spelled_the_same_on_both_sides() {
+        let change: ProjectViewChange = serde_json::from_value(serde_json::json!({
+            "seenRevision": "abc123",
+            "unwatchedKinds": ["chat.conversation"],
+        }))
+        .expect("the window's own payload should deserialize");
+        assert_eq!(change.seen_revision.as_deref(), Some("abc123"));
+        assert_eq!(
+            change.unwatched_kinds,
+            Some(vec!["chat.conversation".to_owned()])
+        );
+
+        let mut stored = view(&["artifact"], &["records/records"]);
+        apply(&mut stored, change);
+        let written = serde_json::to_value(&stored).expect("a stored view should serialize");
+        assert_eq!(written["seenRevision"], "abc123");
+        assert_eq!(written["unwatchedKinds"][0], "chat.conversation");
+
+        let read: ProjectView =
+            serde_json::from_value(written).expect("what was written should read back");
+        assert_eq!(read.seen_revision.as_deref(), Some("abc123"));
+    }
+
+    /// A change put away on its own crosses the boundary whole — both of its
+    /// members, under the names the window sends. One of the two arriving as a
+    /// default is a change that comes back from the dead at the next launch, or
+    /// one that never comes back at all, and neither says anything at the time.
+    #[test]
+    fn a_change_put_away_keeps_its_key_and_its_revision() {
+        let change: ProjectViewChange = serde_json::from_value(serde_json::json!({
+            "dismissed": [{ "key": "decision/naming", "revision": "def456" }],
+        }))
+        .expect("the window's own payload should deserialize");
+
+        let mut stored = view(&["artifact"], &["records/records"]);
+        apply(&mut stored, change);
+        assert_eq!(
+            stored.dismissed,
+            vec![DismissedChange {
+                key: "decision/naming".to_owned(),
+                revision: "def456".to_owned(),
+            }]
+        );
+
+        let written = serde_json::to_value(&stored).expect("a stored view should serialize");
+        assert_eq!(written["dismissed"][0]["key"], "decision/naming");
+        assert_eq!(written["dismissed"][0]["revision"], "def456");
+
+        let read: ProjectView =
+            serde_json::from_value(written).expect("what was written should read back");
+        assert_eq!(read.dismissed, stored.dismissed);
+    }
+
+    /// Marking everything as seen sends both members, and the empty list has to
+    /// arrive as an emptying rather than as silence: a name left behind the mark
+    /// goes on suppressing a record that has already gone quiet on its own, so
+    /// the next write to it would be news nobody is told about.
+    #[test]
+    fn moving_the_mark_can_empty_what_was_put_away() {
+        let mut stored = view(&["artifact"], &["records/records"]);
+        apply(
+            &mut stored,
+            ProjectViewChange {
+                dismissed: Some(vec![DismissedChange {
+                    key: "decision/naming".to_owned(),
+                    revision: "def456".to_owned(),
+                }]),
+                ..ProjectViewChange::default()
+            },
+        );
+        assert_eq!(stored.dismissed.len(), 1);
+
+        apply(
+            &mut stored,
+            ProjectViewChange {
+                seen_revision: Some("ghi789".to_owned()),
+                dismissed: Some(Vec::new()),
+                ..ProjectViewChange::default()
+            },
+        );
+        assert_eq!(stored.seen_revision.as_deref(), Some("ghi789"));
+        assert!(stored.dismissed.is_empty());
+
+        apply(
+            &mut stored,
+            ProjectViewChange {
+                hidden_types: Some(vec!["question".to_owned()]),
+                ..ProjectViewChange::default()
+            },
+        );
+        assert_eq!(
+            stored.seen_revision.as_deref(),
+            Some("ghi789"),
+            "a filter in another column must not move the reading mark"
+        );
+    }
+
     /// An empty list is a list somebody emptied — *Show All Types* is exactly
     /// that — and it has to stay distinguishable from a column saying nothing.
     #[test]
@@ -803,7 +1019,7 @@ mod tests {
             &mut stored,
             ProjectViewChange {
                 hidden_types: Some(Vec::new()),
-                sections: None,
+                ..ProjectViewChange::default()
             },
         );
         assert!(stored.hidden_types.is_empty());

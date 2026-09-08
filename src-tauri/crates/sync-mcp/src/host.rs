@@ -208,16 +208,21 @@ impl Host {
             ));
         };
         let held = self.projects.at(project, self.embeddings.as_ref());
-        let mut domain = held
-            .domain()
-            .map_err(|reason| MemoryError::domain("unusable", reason, Value::Null))?;
-        // Here rather than in each operation, and asked of the operation rather
-        // than assumed: the answer is a property of what is being called, and
-        // thirty-eight copies of one `?` is how a rule stops being one.
-        if operation.needs_memory() {
-            domain.ensure_initialised()?;
-        }
-        operation.run(&mut domain, params)
+        // Through `holding` rather than taking the memory directly, and this
+        // door has no special claim on that: it is what notices the call moving
+        // the revision, and a door that took the lock its own way would be a
+        // window somewhere reading a project as it was before this call.
+        held.holding(|domain| {
+            // Here rather than in each operation, and asked of the operation
+            // rather than assumed: the answer is a property of what is being
+            // called, and thirty-eight copies of one `?` is how a rule stops
+            // being one.
+            if operation.needs_memory() {
+                domain.ensure_initialised()?;
+            }
+            operation.run(domain, params)
+        })
+        .map_err(|reason| MemoryError::domain("unusable", reason, Value::Null))?
     }
 }
 

@@ -100,6 +100,20 @@ export interface SourceListItem {
    * the next teaches nobody where a command lives.
    */
   readonly menu?: () => readonly NativeMenuEntry[];
+  /**
+   * This row stays where it is put.
+   *
+   * The window's own rows are fixed and the project's are not, which is the
+   * division macOS draws in every source list it has: Notes moves a folder and
+   * never *Recently Deleted*, Photos moves an album and never *Library*. What
+   * somebody brought is theirs to arrange; what the application is made of
+   * stands where they will look for it.
+   *
+   * A fixed row is still an ordinary row — same height, same badge, same
+   * selection — because being unmovable is not a thing to announce. It is
+   * discovered by trying, once, and that is the whole of the feedback it needs.
+   */
+  readonly fixed?: boolean;
 }
 
 /**
@@ -407,8 +421,16 @@ export function SourceList({
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
   );
 
-  const from = items.findIndex((item) => item.id === carrying);
-  const to = items.findIndex((item) => item.id === over);
+  // Both the drag and the keyboard work in this list rather than in the whole
+  // one: what is stored is the order of the rows a person may arrange, and a
+  // fixed row appearing in it would be the window remembering a decision
+  // nobody made.
+  const movable = items
+    .filter((item) => item.fixed !== true)
+    .map((item) => item.id);
+
+  const from = movable.indexOf(carrying ?? "");
+  const to = movable.indexOf(over ?? "");
   // Nothing is drawn while a row is over itself: that drop changes nothing, and
   // a line promising a move that will not happen is the one thing this mark
   // must never do.
@@ -420,12 +442,15 @@ export function SourceList({
   }
 
   function rearrange(fromIndex: number, toIndex: number) {
-    onReorder?.(moved(items.map((item) => item.id), fromIndex, toIndex));
+    onReorder?.(moved(movable, fromIndex, toIndex));
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     const lastIndex = items.length - 1;
     const currentIndex = items.findIndex((item) => item.id === activeId);
+    // Where the selected row stands among the ones that move, and `-1` when it
+    // is one that does not.
+    const movableIndex = movable.indexOf(activeId);
 
     // The keyboard's way of doing what the pointer does. It is ⌥ and an arrow
     // rather than a mode entered with Space, because this list has already
@@ -437,12 +462,12 @@ export function SourceList({
       event.altKey &&
       (event.key === "ArrowUp" || event.key === "ArrowDown")
     ) {
-      const target = currentIndex + (event.key === "ArrowUp" ? -1 : 1);
-      if (currentIndex < 0 || target < 0 || target > lastIndex) return;
+      const target = movableIndex + (event.key === "ArrowUp" ? -1 : 1);
+      if (movableIndex < 0 || target < 0 || target > movable.length - 1) return;
       event.preventDefault();
       // The row keeps both its selection and the focus it already had: it is
       // the same element, moved, so nothing has to be given back to it.
-      rearrange(currentIndex, target);
+      rearrange(movableIndex, target);
       return;
     }
 
@@ -469,7 +494,7 @@ export function SourceList({
         className={cn("pt-2 pb-3", rail ? "px-1.5" : "px-2")}
       >
         <div className="flex flex-col gap-0.5" onKeyDown={handleKeyDown}>
-          {items.map((item, index) => {
+          {items.map((item) => {
             const isActive = item.id === activeId;
             // The list is one tab stop, as a native source list is: the
             // arrows move within it once it has focus.
@@ -479,7 +504,7 @@ export function SourceList({
               else rows.current.delete(item.id);
             };
 
-            return onReorder === undefined ? (
+            return onReorder === undefined || item.fixed === true ? (
               <SourceListRow
                 key={item.id}
                 item={item}
@@ -498,7 +523,7 @@ export function SourceList({
                 tabIndex={tabIndex}
                 onSelect={() => onSelect(item.id)}
                 rowRef={rowRef}
-                insert={insertionAt(index)}
+                insert={insertionAt(movable.indexOf(item.id))}
               />
             );
           })}
@@ -534,8 +559,8 @@ export function SourceList({
       onDragEnd={({ active, over: target }: DragEndEvent) => {
         forget();
         if (target === null) return;
-        const start = items.findIndex((item) => item.id === String(active.id));
-        const end = items.findIndex((item) => item.id === String(target.id));
+        const start = movable.indexOf(String(active.id));
+        const end = movable.indexOf(String(target.id));
         if (start < 0 || end < 0 || start === end) return;
         rearrange(start, end);
       }}

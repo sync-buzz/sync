@@ -1,6 +1,6 @@
 "use client";
 
-import { EXTENSIONS_AREA } from "@/components/shell/areas";
+import { ACTIVITY_AREA, EXTENSIONS_AREA } from "@/components/shell/areas";
 import { PanelFooter, PanelSurface } from "@/components/shell/panel";
 import { SourceList } from "@/components/shell/source-list";
 import type { MountedArea } from "@/lib/extension-host/areas";
@@ -42,6 +42,7 @@ export function PrimarySidebar({
   sections,
   badges,
   updates,
+  unseen,
   activeAreaKey,
   rail,
   onSelectArea,
@@ -80,6 +81,17 @@ export function PrimarySidebar({
    */
   updates: number;
   /**
+   * How many records have changed since this person last looked at the
+   * activity, or `null` while that is still being read.
+   *
+   * A figure rather than a dot, and the difference is the claim: unread things
+   * are countable and stay countable while nobody is looking, which is what a
+   * figure means here and everywhere else on this system. `null` draws nothing
+   * — a window that printed `0` before it had asked would tell somebody with
+   * twenty things waiting that nothing had happened.
+   */
+  unseen: number | null;
+  /**
    * The section showing, or `null` while the window is still finding out what
    * there is. Nothing is current in that moment, which is the truth of it: the
    * packages are being read and no section has been chosen over another.
@@ -103,14 +115,48 @@ export function PrimarySidebar({
 
   return (
     <PanelSurface className="bg-sidebar">
+      {/* One list, and the window's own rows simply do not move in it. Two
+          lists was the first attempt and it was wrong twice over: a source list
+          is built to fill its column, so two of them divided the height between
+          them, and even boxed to its own height the upper one kept its own
+          padding — which read as a gap between two things rather than as a
+          column of rows.
+
+          What is left is the arrangement macOS actually uses. Activity is a row
+          like any other, at the top because that is where what has happened
+          belongs, and it stays there because it is the window's rather than the
+          project's — the same claim the pinned row at the foot makes from the
+          other end. The sections between them are what the project brought, and
+          those are a person's to arrange.
+
+          More of the window's own rows will arrive. They join this list with
+          `fixed`, above the sections, and nothing else here changes: the rule is
+          about who a row belongs to, not about how many there are. */}
       <SourceList
         label="Sections"
-        items={sections.map((area) => ({
-          id: area.key,
-          label: area.label,
-          icon: area.icon,
-          badge: badges.get(area.key),
-        }))}
+        items={[
+          {
+            id: ACTIVITY_AREA.id,
+            label: ACTIVITY_AREA.label,
+            icon: ACTIVITY_AREA.icon,
+            note: ACTIVITY_AREA.description,
+            fixed: true,
+            // Nothing unseen draws nothing at all, which is the silence the
+            // title bar keeps for a project in step with its remote: a mark
+            // that is always there is not news, and a zero is not a count
+            // anybody can act on.
+            badge:
+              unseen === null || unseen === 0
+                ? undefined
+                : { kind: "count" as const, value: unseen },
+          },
+          ...sections.map((area) => ({
+            id: area.key,
+            label: area.label,
+            icon: area.icon,
+            badge: badges.get(area.key),
+          })),
+        ]}
         activeId={activeAreaKey ?? ""}
         rail={rail}
         onSelect={onSelectArea}

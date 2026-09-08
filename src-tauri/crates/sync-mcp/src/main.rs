@@ -243,6 +243,19 @@ fn serve_http(
             // One channel back, held by both doors: the socket puts Sync's
             // connection into it and the agents' server takes tool calls out.
             let application = std::sync::Arc::new(application::Application::new());
+            // Said once, for every project this process holds and every door
+            // that reaches one. It goes out on the connection Sync attended
+            // with, which is read by a thread of its own from start-up and has
+            // no answer outstanding on it — unlike an attached connection,
+            // which is read only while a call is in flight and would hold a
+            // notice in a socket buffer until somebody happened to ask
+            // something.
+            {
+                let telling = std::sync::Arc::clone(&application);
+                projects.report_moves_to(move |path| {
+                    telling.announce(sync_memory::REVISION_MOVED, &json!({"path": path}));
+                });
+            }
             let agents = server::SyncMcp::over(
                 std::sync::Arc::clone(&projects),
                 std::sync::Arc::clone(&application),

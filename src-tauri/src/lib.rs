@@ -17,6 +17,7 @@
 //!   it is added only when a shipped feature needs it.
 
 pub mod attending;
+pub mod attention;
 pub mod connect;
 #[cfg(target_os = "macos")]
 pub mod dock;
@@ -62,10 +63,15 @@ pub fn run() {
         // opening a *path* is a different command and is not granted, so a
         // record cannot ask this window to launch something on the disk.
         .plugin(tauri_plugin_opener::init())
+        // Nothing of this is granted to the webview either. The banner is
+        // raised by `attention::announcer`, which runs where a window does not
+        // have to exist.
+        .plugin(tauri_plugin_notification::init())
         // Nothing of this is granted to the webview. The plugin is here for
         // `updates::in_the_background`, which is Rust and runs once at launch.
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(memory::MemorySessions::default())
+        .manage(memory::MemoryWatchers::default())
         .manage(server::RunningServer::default())
         .manage(schedule::ScheduleFile::default())
         .manage(work::WorkFile::default())
@@ -73,6 +79,14 @@ pub fn run() {
         // Agent sessions outlive the screen that opened one, so they are held
         // by the application rather than by a window or by an extension.
         .manage(sessions::live::Sessions::default())
+        // Which window has which project open, which only the window knows:
+        // a project is opened into one by a person, and what Rust does with
+        // the answer is put the right window in front of somebody who clicked
+        // a banner about that project.
+        .manage(windows::Holding::default())
+        // Where a click on a banner is left for the window that will answer it,
+        // which is a window that may not have been made when it was clicked.
+        .manage(attention::Addressed::default())
         // Terminals outlive the section that opened one, for the same reason:
         // an area can be left, hidden or reloaded, and none of those is a
         // reason for a build to stop. What ends them is closing the project.
@@ -85,7 +99,8 @@ pub fn run() {
         .setup(|app| {
             use tauri::Manager as _;
             let handle = app.handle().clone();
-            if let Err(error) = server::start(&handle, app.state::<server::RunningServer>().inner())
+            if let Err(error) =
+                server::start_or_adopt(&handle, app.state::<server::RunningServer>().inner())
             {
                 // Reported where a person will look for it rather than fatal.
                 // A window that refused to open because a port was taken would
@@ -106,6 +121,11 @@ pub fn run() {
             // exactly the case it exists for.
             schedule::start(&handle);
             windows::follow_the_windows(&handle);
+            // Before the first banner, and before the first click on one: a
+            // banner raised before Sync was last quit launches it, and that
+            // click is delivered to whatever is listening by the time the
+            // launch is over.
+            attention::install(&handle);
             // The Dock icon's own menu, which is the only place a second window
             // can be asked for without Sync being the active application first.
             #[cfg(target_os = "macos")]
@@ -120,7 +140,9 @@ pub fn run() {
             // the server behind it is what agents talk to, and they are not
             // looking at any window.
             if matches!(event, tauri::WindowEvent::Destroyed) {
-                windows::follow_the_windows(&tauri::Manager::app_handle(window).clone());
+                let app = tauri::Manager::app_handle(window).clone();
+                windows::closed(&app, window.label());
+                windows::follow_the_windows(&app);
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -131,6 +153,7 @@ pub fn run() {
             sessions::session_live,
             sessions::session_open,
             sessions::session_subscribe,
+            sessions::session_history,
             sessions::session_backlog,
             sessions::session_remembered,
             sessions::session_resume,
@@ -193,6 +216,8 @@ pub fn run() {
             project::recent_projects_record,
             memory::memory_open,
             memory::memory_status,
+            memory::memory_watch,
+            memory::memory_unwatch,
             memory::memory_types,
             memory::memory_type_create,
             memory::memory_extension_types_publish,
@@ -216,6 +241,7 @@ pub fn run() {
             memory::memory_document_create,
             memory::memory_document_delete,
             memory::memory_document_dependents,
+            memory::memory_journal,
             memory::memory_list,
             memory::memory_search,
             memory::memory_get,
@@ -249,8 +275,12 @@ pub fn run() {
             voice::voice_choose,
             voice::voice_speak,
             voice::voice_stop,
+            attention::notifications_settings,
+            attention::notifications_addressed,
+            attention::notifications_choose,
             windows::window_new,
             windows::window_named,
+            windows::window_holds,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Sync")
@@ -292,6 +322,12 @@ pub fn run() {
             // for a Sync that is closed, and the next start finds its own port
             // taken — by itself, from the last run, with whatever code it was
             // built from then.
+            //
+            // An engine this run adopted rather than started is not a child of
+            // this process and is not ended here — `stop` has nothing to kill.
+            // That is the point of adopting one, and it is why the two are told
+            // apart at the start rather than at the end: see
+            // `server::start_or_adopt`.
             if matches!(event, tauri::RunEvent::Exit) {
                 use tauri::Manager as _;
                 let sessions = app.state::<sessions::live::Sessions>();

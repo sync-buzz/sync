@@ -133,6 +133,9 @@ operation!(RecordsGet, "records.get", |d, p| encode(
 operation!(RecordsList, "records.list", |d, p| encode(
     d.list_records(p)?
 ));
+operation!(RecordsJournal, "records.journal", |d, p| encode(
+    d.journal(p)?
+));
 operation!(RecordsSearch, "records.search", |d, p| encode(d.search(p)?));
 operation!(RecordsApply, "records.apply", |d, p| {
     // The id is allocated here, not by the caller. A transaction id names one
@@ -355,6 +358,7 @@ pub fn operations() -> Vec<Box<dyn Operation>> {
         Box::new(TypesAttachFolder),
         Box::new(RecordsGet),
         Box::new(RecordsList),
+        Box::new(RecordsJournal),
         Box::new(RecordsSearch),
         Box::new(RecordsApply),
         Box::new(RecordsSave),

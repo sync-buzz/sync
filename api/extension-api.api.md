@@ -14,6 +14,7 @@ import { LucideIcon } from 'lucide-react';
 import { Provider } from 'react';
 import * as React_2 from 'react';
 import { ReactNode } from 'react';
+import { Ref } from 'react';
 import { ScrollArea as ScrollArea_2 } from 'radix-ui';
 import { Tooltip as Tooltip_2 } from 'radix-ui';
 import { VariantProps } from 'class-variance-authority';
@@ -75,6 +76,7 @@ export interface AgentSession {
     readonly isWorking: boolean;
     // (undocumented)
     readonly key: string | null;
+    readonly loadEarlier: () => Promise<void>;
     readonly modes: readonly SessionMode[];
     readonly prompt: (text: string, attachments?: readonly string[], images?: readonly PastedContent[]) => Promise<void>;
     readonly setMode: (modeId: string) => Promise<void>;
@@ -933,6 +935,9 @@ export interface PermissionRequest {
 }
 
 // @public
+export function precede(transcript: Transcript, entries: readonly Entry[], earlier: number | null): Transcript;
+
+// @public
 export type Presence = "present" | "not_on_branch" | "removed" | (string & {});
 
 // @public
@@ -1362,6 +1367,7 @@ export interface SourceListItem {
     } | {
         readonly kind: "dot";
     };
+    readonly fixed?: boolean;
     // (undocumented)
     readonly icon: LucideIcon;
     // (undocumented)
@@ -1424,7 +1430,7 @@ export function stopSession(key: string): Promise<void>;
 export function supportsApiRange(range: string): boolean;
 
 // @public
-export const SYNC_API_VERSION: "3.10.0";
+export const SYNC_API_VERSION: "3.12.0";
 
 // @public
 export const SYNC_CAPABILITIES: readonly ["records", "agents.acp", "markdown.plugins", "native-menu", "folders", "sheets", "net", "net.write", "vault", "background", "schedule", "work.agent", "agent.tools", "terminal"];
@@ -1527,6 +1533,7 @@ export interface TransactionResult {
 export interface Transcript {
     readonly detail: string | null;
     readonly dropped: number;
+    readonly earlier: number | null;
     // (undocumented)
     readonly entries: readonly Entry[];
     readonly mode: string | null;
@@ -1676,6 +1683,31 @@ export function useOpenRecord(): ((record: {
 // @public (undocumented)
 export function useProjectView(projectPath: string): ProjectViewState;
 
+// @public (undocumented)
+export function VirtualList<T>(input: VirtualListProps<T>): JSX.Element;
+
+// @public
+export interface VirtualListHandle {
+    readonly toEnd: (animation?: "smooth" | "auto") => void;
+}
+
+// @public (undocumented)
+export interface VirtualListProps<T> {
+    readonly children: (item: T) => ReactNode;
+    // (undocumented)
+    readonly className?: string;
+    readonly follow?: boolean;
+    readonly footer?: ReactNode;
+    // (undocumented)
+    readonly handle?: Ref<VirtualListHandle>;
+    readonly header?: ReactNode;
+    readonly items: readonly T[];
+    readonly keyOf: (item: T) => string;
+    readonly label?: string;
+    readonly onAtEndChange?: (atEnd: boolean) => void;
+    readonly onStart?: () => void;
+}
+
 // @public
 export interface WindowCommands {
     createRecord: ((kind: string) => void) | null;
@@ -1686,6 +1718,9 @@ export interface WindowCommands {
 
 // @public
 export function withDropped(transcript: Transcript, dropped: number): Transcript;
+
+// @public
+export function withEarlier(transcript: Transcript, earlier: number | null): Transcript;
 
 // @public
 export interface Worktree {
