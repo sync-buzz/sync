@@ -354,6 +354,23 @@ export interface MemoryRecord {
    * child — and to nothing else.
    */
   readonly isFolder: boolean;
+  /**
+   * When the record first appeared, in seconds since the epoch, UTC — the unit
+   * the engine states a transaction's time in, and the name says which so
+   * nobody has to guess between seconds and milliseconds.
+   *
+   * Read from the engine, which derives it from its own history. Nothing here
+   * works it out: the window would have to walk every transaction ever written
+   * to fill one column, and it would be reconstructing what the store already
+   * knows.
+   *
+   * `null` from an engine that does not state it. A row with no date is a row
+   * nothing can order by, and saying so is better than putting the epoch where
+   * a date belongs — a zero draws as a real day in 1970.
+   */
+  readonly createdAtEpochSeconds: number | null;
+  /** When it last changed. See {@link MemoryRecord.createdAtEpochSeconds}. */
+  readonly updatedAtEpochSeconds: number | null;
 }
 
 /**
@@ -549,6 +566,15 @@ export interface MemoryView {
   readonly revision: string;
   readonly counts: MemoryCounts;
   readonly records: readonly MemoryRecord[];
+  /**
+   * How many records the selection holds altogether, page or no page.
+   *
+   * Not derivable from the counts beside it. A selection is a kind *and* a
+   * folder *and* a freshness, and per-kind totals answer none of those
+   * combinations — which is why the engine states this separately and the
+   * window does no arithmetic over it.
+   */
+  readonly total: number;
   /** True when the selection holds more than this page. */
   readonly hasMore: boolean;
 }

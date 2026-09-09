@@ -14,7 +14,7 @@
  * doing the writing.
  */
 
-import { invoke } from "@tauri-apps/api/core";
+import { command } from "@/lib/command";
 
 /** How a row reads. */
 export type AgentState =
@@ -61,15 +61,15 @@ export interface ConnectionReport {
 
 /** Every client Sync knows, and whether this machine is connected to it. */
 export function loadAgents(): Promise<AgentRow[]> {
-  return invoke<AgentRow[]>("agents_list", {});
+  return command<AgentRow[]>("agents_list", {});
 }
 
 /** Write Sync into one client's configuration. */
 export function connectAgent(agent: string): Promise<ConnectionReport> {
-  return invoke<ConnectionReport>("agent_connect", { agent });
+  return command<ConnectionReport>("agent_connect", { agent });
 }
 
 /** Take Sync back out of it. */
 export function disconnectAgent(agent: string): Promise<ConnectionReport> {
-  return invoke<ConnectionReport>("agent_disconnect", { agent });
+  return command<ConnectionReport>("agent_disconnect", { agent });
 }

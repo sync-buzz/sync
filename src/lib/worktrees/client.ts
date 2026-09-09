@@ -13,14 +13,14 @@
  * What is true is narrower and still worth having: the files it edited are
  * files nobody else is looking at, and undoing all of it is one gesture.
  *
- * Every function is one `invoke` into `src-tauri/src/worktree.rs`, which owns
+ * Every function is one command into `src-tauri/src/worktree.rs`, which owns
  * git and decides where trees live. In particular a path is never a way to
  * choose a location: naming an existing tree is checked against git's own list,
  * so a caller cannot raise an agent in an arbitrary directory by calling it a
  * working tree.
  */
 
-import { invoke } from "@tauri-apps/api/core";
+import { command } from "@/lib/command";
 
 /**
  * What went wrong, with the kind the command layer gave it.
@@ -128,9 +128,9 @@ export function setWorktreeLocation(path: string | null): Promise<string> {
   return call<string>("worktree_set_location", { path });
 }
 
-async function call<T>(command: string, args: Record<string, unknown> = {}): Promise<T> {
+async function call<T>(name: string, args: Record<string, unknown> = {}): Promise<T> {
   try {
-    return await invoke<T>(command, args);
+    return await command<T>(name, args);
   } catch (error) {
     if (typeof error === "object" && error !== null && "kind" in error && "message" in error) {
       const failure = error as { kind: string; message: string };

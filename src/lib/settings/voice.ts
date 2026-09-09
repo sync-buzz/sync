@@ -15,7 +15,7 @@
  * opens, and after every choice it makes.
  */
 
-import { invoke } from "@tauri-apps/api/core";
+import { command } from "@/lib/command";
 
 /** How good a voice sounds, as the platform grades it. */
 export type VoiceQuality = "standard" | "enhanced" | "premium";
@@ -68,7 +68,7 @@ export const SLOWEST = 0.5;
 export const FASTEST = 2;
 
 export function loadVoice(): Promise<VoiceStatus> {
-  return invoke<VoiceStatus>("voice_status");
+  return command<VoiceStatus>("voice_status");
 }
 
 /**
@@ -79,17 +79,17 @@ export function loadVoice(): Promise<VoiceStatus> {
  * would have to ask again to draw the list beside it.
  */
 export function chooseVoice(settings: VoiceSettings): Promise<VoiceStatus> {
-  return invoke<VoiceStatus>("voice_choose", { settings });
+  return command<VoiceStatus>("voice_choose", { settings });
 }
 
 /** Say something in the voice this machine is set to. */
 export function speak(text: string, interrupt = true): Promise<void> {
-  return invoke<void>("voice_speak", { text, interrupt });
+  return command<void>("voice_speak", { text, interrupt });
 }
 
 /** Stop what is being said and drop what is waiting. */
 export function stopSpeaking(): Promise<void> {
-  return invoke<void>("voice_stop");
+  return command<void>("voice_stop");
 }
 
 /**

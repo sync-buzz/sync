@@ -35,7 +35,7 @@ export function LaunchScreen({ isLoading }: { isLoading: boolean }) {
           where it would read as a progress bar stuck at a third.
         */}
         <div className="h-0.5 w-32 overflow-hidden rounded-full bg-selected">
-          <div className="h-full w-1/3 animate-[launch-progress_1.4s_var(--motion-ease)_infinite] rounded-full bg-fg-tertiary motion-reduce:hidden" />
+          <div className="h-full w-1/3 animate-[indeterminate-progress_1.4s_var(--motion-ease)_infinite] rounded-full bg-fg-tertiary motion-reduce:hidden" />
         </div>
 
         <p role="status" className="text-xs text-fg-tertiary">

@@ -14,7 +14,7 @@
  * that could only ask while it was open.
  */
 
-import { invoke } from "@tauri-apps/api/core";
+import { command } from "@/lib/command";
 
 /** Which of the three interruptions a person wants. */
 export interface NotificationSettings {
@@ -27,7 +27,7 @@ export interface NotificationSettings {
 }
 
 export function loadNotifications(): Promise<NotificationSettings> {
-  return invoke<NotificationSettings>("notifications_settings");
+  return command<NotificationSettings>("notifications_settings");
 }
 
 /**
@@ -40,5 +40,5 @@ export function loadNotifications(): Promise<NotificationSettings> {
 export function chooseNotifications(
   settings: NotificationSettings,
 ): Promise<NotificationSettings> {
-  return invoke<NotificationSettings>("notifications_choose", { settings });
+  return command<NotificationSettings>("notifications_choose", { settings });
 }

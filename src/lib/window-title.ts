@@ -19,7 +19,7 @@
  */
 
 import { useEffect } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { command } from "@/lib/command";
 import { windowRole } from "@/lib/settings/window";
 
 /** What a window without a project is called. */
@@ -48,7 +48,7 @@ export function useWindowTitle(project: string | null): void {
     // called, so the last project chosen is the last name applied.
     void (async () => {
       try {
-        await invoke("window_named", { title: project?.trim() || APPLICATION });
+        await command("window_named", { title: project?.trim() || APPLICATION });
       } catch (error) {
         // The window works unnamed; it is only harder to find. Reported rather
         // than escalated, and never allowed to take a render down with it.

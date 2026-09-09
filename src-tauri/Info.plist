@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  What this application asks the computer for.
+
+  The bundler writes the rest of the bundle's `Info.plist` itself and merges
+  this file into it, which is why the keys that are a person's decision live
+  here rather than in whatever it generated.
+
+  The string is not a note to a developer. macOS shows it inside the alert that
+  asks, so it is written to the person at the machine, and it names the one
+  thing this is for: something they started, reaching an application that is
+  not this one.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Asked for because a shell raised here is a shell like any other: what runs
+	  in it is what a person typed, and a command is free to drive another
+	  application the way it would from any terminal. The event leaves under
+	  this application's name, since the process holding the pty is this one —
+	  so the agreement is this application's to obtain, and a command that needs
+	  it fails until somebody has given it.
+
+	  macOS refuses outright when the key is absent: no alert is shown and
+	  nothing records that one was wanted, so the command reports only that the
+	  far side said no. Written here, the refusal becomes a question asked once.
+
+	  It does not reach a build from source, for the reason the notification
+	  centre does not: consent is filed against a bundle identifier, and a bare
+	  executable has none. That is verified against `pnpm tauri build`.
+	-->
+	<key>NSAppleEventsUsageDescription</key>
+	<string>A command you run in Sync can ask another application to do something, the same as it would in any terminal. Sync asks for nothing on its own.</string>
+</dict>
+</plist>

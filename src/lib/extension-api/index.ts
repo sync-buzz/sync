@@ -92,6 +92,19 @@ export {
 } from "@/components/shell/virtual-list";
 
 /**
+ * The end of an ordinary list, for a selection longer than one read of the
+ * store.
+ *
+ * The list above is for what has no bound and is drawn a screenful at a time.
+ * This is for the other case, which is nearly every list: all of it is drawn,
+ * and there is simply more of it in the store than one read brings back. The
+ * marker goes after the last row, and reaching it is what asks for the next
+ * page — so there is no control to find, and the reader's own gesture is the
+ * request.
+ */
+export { useListEnd } from "@/lib/list-end";
+
+/**
  * The source list's sibling, for a list that nests.
  *
  * The behaviour underneath it is a library; the markup is the shell's. That is
@@ -285,6 +298,18 @@ export { useDragHandle } from "@/components/shell/move-area";
 export { UnmatchedFiles } from "@/components/shell/unmatched-files";
 
 export { updateMemoryDocument } from "@/lib/memory/client";
+// Where a document is, handed to the system rather than printed. A record whose
+// body is a file is a file somebody also opens, renames and moves outside this
+// window, and a path shown in a row that nothing can act on is a path people
+// retype. The call names the record, never the path: the boundary that refuses
+// the webview a way to point a file manager anywhere is not moved to allow this.
+//
+// The words come with it, because three desktops call the same thing three
+// different names and only this side knows which one is drawing. `null` says
+// there is nothing here to show a file in, which is a command left out rather
+// than one shown refused.
+export { revealDocument } from "@/lib/memory/client";
+export { revealLabel, desktop, type Desktop } from "@/lib/device";
 export type { TypeDefinition } from "@/lib/memory/client";
 // What a write answers with. It is returned by half the calls above, so an
 // extension that holds the answer needs the name of what it is holding.

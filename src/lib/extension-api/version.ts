@@ -42,6 +42,79 @@ import { device } from "@/lib/device";
  * point of the number is that a manifest can state a range and be believed. The
  * cost is honest major bumps, which is the cost of meaning it.
  *
+ * **3.16.0** is a list cut by tag. `MemorySelection` gains `tags`, one optional
+ * member, so a minor and every package stating `^3.0` goes on installing.
+ *
+ * The store has always filtered by tag and the window has never been able to
+ * ask: the selection carried a kind, a freshness and a folder, and a tag was
+ * something a record showed and nothing acted on. The member is passed to the
+ * engine untouched, which is what makes this an addition rather than a
+ * mechanism — there is no matching to write here, and nothing to keep in step
+ * with the store.
+ *
+ * The engine intersects, and that is the part a package has to know rather than
+ * discover: two tags mean the records carrying both. Offered as alternatives it
+ * would narrow where a person expected it to widen, so whatever draws the
+ * control says *and*.
+ *
+ * **3.15.0** is a list read to its end. `Corpus` gains `total`, `readMore` and
+ * `isReadingMore`, `MemoryView` gains `total`, and `useListEnd` is added — five
+ * additions, so a minor and every package stating `^3.0` goes on installing.
+ *
+ * The store answers a selection two hundred records at a time, and that was
+ * where a list stopped: a package could see there was more and had nothing to
+ * do about it, so the rest of a corpus was reachable only by searching for it.
+ * The reading is the host's — where the next page starts, what a write in the
+ * middle of it does to somebody's place in the list — and what a package gets
+ * is the two ends of it: a marker to put after its last row, and a number for
+ * its header. That number is the second half of the fix and the less obvious
+ * one. A header counting the rows in front of it was counting a page, so it
+ * disagreed with the count on the row in the navigator that the list was
+ * reached from — two numbers for one selection, one of them a fact about how
+ * far the window had got.
+ *
+ * **3.14.0** is the file behind a record, handed to the system.
+ * `revealDocument`, `revealLabel` and `desktop` are added, three functions, so a
+ * minor and every package stating `^3.0` goes on installing.
+ *
+ * A record whose body is a file has always been able to say where that file is,
+ * and never to do anything with the answer — a path printed in a row, retyped
+ * by whoever wanted it. Showing it where it lives is what this system offers
+ * for anything with a file behind it, and it was missing here for a reason
+ * worth keeping: the capability refuses the webview the opener's
+ * `reveal-item-in-dir`, because a record's body is somebody else's Markdown
+ * and a link in it must not be able to point a file manager anywhere. That
+ * refusal is not lifted. The call names a **record**, and the path is assembled
+ * out of the record's locator and the root the engine named at the handshake —
+ * two things no package and no body ever wrote. A package still has no way to
+ * name a path, which is why this could be added without deciding the other
+ * question.
+ *
+ * `revealLabel` comes with it rather than after it, and the reason is that this
+ * window is drawn by three desktops that call the same thing three different
+ * names. A package that wrote one of the three would be wrong on the other two,
+ * and every package that did so would be wrong differently. It answers `null`
+ * where there is nothing to show a file in — the phone, which forwards its
+ * memory calls to a machine somebody else is sitting at — so the command is
+ * left out there rather than offered and refused. `desktop` is the same answer
+ * unworded, for a package with a different sentence to build from it.
+ *
+ * **3.13.0** is a record that says when it was written. `MemoryRecord` gains
+ * `createdAtEpochSeconds` and `updatedAtEpochSeconds`, two additions, so a
+ * minor and every package stating `^3.0` goes on installing.
+ *
+ * A list ordered by when its rows last changed is the order this system puts
+ * first almost everywhere, and until now no package could draw one: the row
+ * carried a name, a state and a folder, and nothing about time. Reconstructing
+ * it was not merely expensive but wrong — the only material a package has is
+ * the change history, which means reading every transaction ever written to
+ * fill one column, and for a record whose body is a file the obvious shortcut
+ * is the file's own timestamp, which would make the same column mean two
+ * different things in two rows of one list. Both numbers come from the engine,
+ * which derives them from the history it already keeps. `null` where it states
+ * neither, which is a row nothing can order by rather than a record nobody has
+ * touched.
+ *
  * **3.12.0** is a row that stays where it is put. `SourceListItem` gains
  * `fixed`, one optional member, so a minor and every package stating `^3.0`
  * goes on installing.
@@ -651,7 +724,7 @@ import { device } from "@/lib/device";
  * `AreaModule`, `ActivationResult` — arrived in the same commit, which on its
  * own would have been a minor.
  */
-export const SYNC_API_VERSION = "3.12.0" as const;
+export const SYNC_API_VERSION = "3.16.0" as const;
 
 /**
  * What this build can do, as opposed to what its surface looks like.

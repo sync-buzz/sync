@@ -1,7 +1,7 @@
 /**
  * The window's only route to a running agent.
  *
- * Every function here is one `invoke` into the Rust command layer, which owns
+ * Every function here is one command into the Rust command layer, which owns
  * the process, the protocol and the transcript. The window holds no connection
  * and no retry policy: a session outlives the screen that opened it, so a screen
  * that owned the connection would end the conversation by being navigated away
@@ -14,7 +14,8 @@
  * applications, not processes with a protocol on their standard input.
  */
 
-import { Channel, invoke } from "@tauri-apps/api/core";
+import { Channel } from "@tauri-apps/api/core";
+import { command } from "@/lib/command";
 import { open } from "@tauri-apps/plugin-dialog";
 
 import type { Worktree, WorktreeChoice } from "@/lib/worktrees/client";
@@ -436,9 +437,13 @@ export class SessionError extends Error {
   }
 }
 
-async function call<T>(command: string, args: Record<string, unknown> = {}): Promise<T> {
+async function call<T>(
+  name: string,
+  args: Record<string, unknown> = {},
+  options?: { quiet?: boolean },
+): Promise<T> {
   try {
-    return await invoke<T>(command, args);
+    return await command<T>(name, args, options);
   } catch (error) {
     if (typeof error === "object" && error !== null && "kind" in error && "message" in error) {
       const failure = error as { kind: string; message: string };
@@ -483,9 +488,15 @@ export function agentCatalog(): Promise<AgentDescriptor[]> {
   return call<AgentDescriptor[]>("session_catalog");
 }
 
-/** Everything running right now, across every extension. */
+/**
+ * Everything running right now, across every extension.
+ *
+ * Quiet, because this is the one read in the window that repeats on a timer:
+ * nobody asks for it, and a line under the header pulsing every two seconds
+ * would say the window is waiting when the person at it is not.
+ */
 export function liveSessions(): Promise<SessionRow[]> {
-  return call<SessionRow[]>("session_live");
+  return call<SessionRow[]>("session_live", {}, { quiet: true });
 }
 
 /**

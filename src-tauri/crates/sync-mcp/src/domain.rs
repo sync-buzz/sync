@@ -581,9 +581,33 @@ impl Domain {
             .map(|names| names.iter().filter_map(Value::as_str).collect())
             .unwrap_or_default();
 
+        // How big the selection is, counted the same way the page is filtered.
+        //
+        // A selection that names a kind is one kind already: hiding either takes
+        // all of it or none of it, and no read settles that. A selection that
+        // names none carries every kind with it, so each hidden one is counted
+        // under the selection's own filters and subtracted — a second `limit: 1`
+        // read per hidden kind, and only where something is hidden, because the
+        // corpus counts above answer a different question and cannot be reused:
+        // they are over everything, and this is over a folder, a freshness, or
+        // whatever else the selection narrowed to.
+        let total = match selection.get("kind").and_then(Value::as_str) {
+            Some(kind) if excluded.contains(kind) => 0,
+            Some(_) => listing.total,
+            None => {
+                let mut total = listing.total;
+                for kind in &excluded {
+                    total = total
+                        .saturating_sub(self.list_records(&hidden_query(selection, kind))?.total);
+                }
+                total
+            }
+        };
+
         Ok(RecordsPage {
             revision: listing.revision,
             counts: RecordsCounts::excluding(&everything.counts, &excluded_counts),
+            total,
             // A page of the whole corpus carries every kind with it, including
             // the ones not being shown. A page of one kind cannot, so this
             // filter only ever removes something from the unfiltered view.
@@ -2273,8 +2297,8 @@ impl Domain {
 /// A listing selection in the engine's own spelling.
 ///
 /// The window's selection is handed to the engine as it stands, which works
-/// because every member it can carry — `kind`, `freshness`, `folder`, `limit`,
-/// `offset` — is spelled the same on both sides. `folderScope` is the one that
+/// because every member it can carry — `kind`, `freshness`, `folder`, `tags`,
+/// `limit`, `offset` — is spelled the same on both sides. `folderScope` is the one that
 /// is not, and a key the engine does not recognise is *ignored* rather than
 /// refused: the filter would quietly stop applying and a tree would show a
 /// folder's whole subtree as though it were its contents.
@@ -2294,6 +2318,22 @@ fn engine_query(selection: &Value) -> Value {
             object.insert("folder_scope".to_owned(), scope);
         }
     }
+    query
+}
+
+/// The read that counts one hidden kind out of a selection.
+///
+/// The selection's own filters are kept and only the kind is added, which is
+/// the whole difficulty: a folder's list minus every record of a hidden kind
+/// *anywhere* would subtract records that were never in the list, and the
+/// header would report fewer than the rows under it. Asked for one row and its
+/// metadata, because what is wanted is the count beside the page rather than
+/// the page.
+fn hidden_query(selection: &Value, kind: &str) -> Value {
+    let mut query = engine_query(selection);
+    query["kind"] = json!(kind);
+    query["limit"] = json!(1);
+    query["metadata_only"] = json!(true);
     query
 }
 
@@ -2456,6 +2496,30 @@ mod tests {
         assert_eq!(query["folder"], json!("docs"), "the rest is left alone");
     }
 
+    /// Counting a hidden kind asks about the same records the list is showing.
+    #[test]
+    fn counting_a_hidden_kind_keeps_the_selection_it_is_counted_out_of() {
+        let query = hidden_query(
+            &json!({"folder": "docs", "folderScope": "subtree", "limit": 200}),
+            "note",
+        );
+
+        assert_eq!(query["kind"], json!("note"));
+        assert_eq!(
+            query["folder"],
+            json!("docs"),
+            "a count taken over the whole corpus would subtract records that were never in \
+             this list, and the header would report fewer than the rows under it"
+        );
+        assert_eq!(query["folder_scope"], json!("subtree"));
+        assert_eq!(
+            query["limit"],
+            json!(1),
+            "the count is wanted, not the page"
+        );
+        assert_eq!(query["metadata_only"], json!(true));
+    }
+
     #[test]
     fn the_fields_a_column_will_draw_do_not_travel_to_the_engine() {
         let query = engine_query(&json!({
@@ -2468,6 +2532,37 @@ mod tests {
             "which fields come back is a question about the answer, not a filter on what is              selected: sent on, it is a member of a query the engine validates"
         );
         assert_eq!(query["kind"], json!("tasks.task"), "the rest is left alone");
+    }
+
+    /// A tag filter is the engine's own, and reaches it under its own name.
+    ///
+    /// The failure this guards is silent in both directions. Added to the list
+    /// that `engine_query` strips, `tags` would leave a column showing every
+    /// record while its header said it was filtered; spelled differently on the
+    /// way over, it would be dropped by the engine with no error at all, which
+    /// is the same list and no way to tell why.
+    #[test]
+    fn the_tags_a_column_filters_by_reach_the_engine() {
+        let query = engine_query(&json!({
+            "kind": "tasks.task",
+            "tags": ["records", "hig"],
+        }));
+
+        assert_eq!(query["tags"], json!(["records", "hig"]));
+        assert_eq!(query["kind"], json!("tasks.task"), "the rest is left alone");
+    }
+
+    /// Counting a hidden kind is done under the tag filter too.
+    ///
+    /// The header's number and the rows under it have to be counting the same
+    /// records: a total taken without the tags would say a hundred over a list
+    /// of nine.
+    #[test]
+    fn counting_a_hidden_kind_keeps_the_tags_the_list_is_filtered_by() {
+        let query = hidden_query(&json!({"tags": ["records"], "limit": 200}), "note");
+
+        assert_eq!(query["tags"], json!(["records"]));
+        assert_eq!(query["kind"], json!("note"));
     }
 }
 

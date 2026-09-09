@@ -4,6 +4,7 @@ import { Check, ChevronsUpDown, FolderOpen, Search, Settings } from "lucide-reac
 import type { ProjectSetup } from "@/components/shell/project-setup";
 import { SyncIndicator } from "@/components/shell/sync-indicator";
 import { LayoutControls } from "@/components/shell/layout-controls";
+import { ProgressLine } from "@/components/shell/progress-line";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -115,6 +116,12 @@ export function AppHeader({
       ) : null}
 
       <SettingsControl />
+
+      {/* Last in the band and drawn over its own hairline. Here rather than in
+          any column because the wait is the window's: the header is the one
+          band every window of this application has, with a project open and
+          without one. */}
+      <ProgressLine />
     </header>
   );
 }

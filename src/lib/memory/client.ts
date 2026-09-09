@@ -1,12 +1,13 @@
 /**
  * The frontend's only route to project memory.
  *
- * Every function here is one `invoke` into the Rust command layer, which owns
+ * Every function here is one command into the Rust command layer, which owns
  * the engine session. The frontend holds no connection, no revision authority
  * and no retry policy — those belong where the session lives.
  */
 
-import { Channel, invoke } from "@tauri-apps/api/core";
+import { Channel } from "@tauri-apps/api/core";
+import { command } from "@/lib/command";
 
 import type {
   ContentView,
@@ -59,9 +60,13 @@ export function isMemoryFailure(error: unknown): error is MemoryError {
   return error instanceof MemoryError;
 }
 
-async function call<T>(command: string, args: Record<string, unknown>): Promise<T> {
+async function call<T>(
+  name: string,
+  args: Record<string, unknown>,
+  options?: { quiet?: boolean },
+): Promise<T> {
   try {
-    return await invoke<T>(command, args);
+    return await command<T>(name, args, options);
   } catch (error) {
     if (
       typeof error === "object" &&
@@ -547,6 +552,21 @@ export interface MemorySelection {
    */
   folderScope?: "exact" | "subtree";
   /**
+   * Tags a record must carry to be in the selection — **all of them**, not any.
+   *
+   * The engine intersects, and the difference is the whole meaning of the
+   * filter: on this project's own corpus `["hig"]` answers with seven records
+   * and `["records", "hig"]` with the five of them carrying both. A column that
+   * offered these as alternatives would narrow when a person expected it to
+   * widen, so whatever draws them says *and* rather than *or*.
+   *
+   * Passed through untouched, like `folder` above: this is a name for a filter
+   * the engine already had. Empty is not the same as absent and is not written
+   * — a list is filtered by nothing, and the engine is asked for everything
+   * rather than for the records carrying no tag in particular.
+   */
+  tags?: readonly string[];
+  /**
    * Which of the type's own fields each row should carry.
    *
    * A row is a name and a state, and for years that was every question anybody
@@ -620,6 +640,31 @@ export function createFileDocument(
     name,
     content,
   });
+}
+
+/**
+ * Show a record's file in Finder, for a record whose body is one.
+ *
+ * A key rather than a path, and that is the whole of it. The window is refused
+ * the opener's `reveal-item-in-dir` at the capability and stays refused: a
+ * record's body is somebody else's Markdown, and a link in it must not be able
+ * to point a file manager anywhere. What this asks about is the record's own locator —
+ * the engine's answer to where a document is kept — and the path is assembled
+ * on the far side out of that and the root the engine named, neither of which
+ * came from here.
+ *
+ * A record kept in `refs` has no file and the call fails saying so. What offers
+ * this leaves it out for such a record rather than offering it and explaining
+ * afterwards, and the same for a document this checkout does not have.
+ *
+ * Only the computer answers it. The phone shows the same document and forwards
+ * its memory calls to the machine holding the project, so a call made there
+ * would open a file manager on somebody else's desk — which is why it is not
+ * among the commands the phone forwards, and why [`revealLabel`] says `null`
+ * there so nothing offers it in the first place.
+ */
+export function revealDocument(project: string, key: string): Promise<void> {
+  return call<void>("memory_document_reveal", { project, key });
 }
 
 /**
@@ -862,9 +907,16 @@ export function removeMemoryRemote(project: string): Promise<TransportState> {
   return call<TransportState>("memory_remote_remove", { project });
 }
 
-/** Fetch memory from its remote and merge it. */
+/**
+ * Fetch memory from its remote and merge it.
+ *
+ * Quiet, and it is the one kind of wait that is: the header says `Fetching…` in
+ * words for as long as this is out, and the line on its hairline saying the
+ * same thing in the same band would be one report to too many — the two would
+ * also disagree about when it ended, because they end on different facts.
+ */
 export function fetchMemory(project: string): Promise<FetchOutcome> {
-  return call<FetchOutcome>("memory_fetch", { project });
+  return call<FetchOutcome>("memory_fetch", { project }, { quiet: true });
 }
 
 /**
@@ -891,8 +943,9 @@ export function rewindMemory(
   return call<void>("memory_rewind", { project, revision, expected });
 }
 
+/** The other half of the exchange, and quiet for the same reason as the fetch. */
 export function pushMemory(project: string, force = false): Promise<unknown> {
-  return call("memory_push", { project, force });
+  return call("memory_push", { project, force }, { quiet: true });
 }
 
 /** Rebuild the search index, after corruption or a manual Git operation. */

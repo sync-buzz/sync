@@ -13,7 +13,7 @@
  * is any use is the moment it is being put into the device it belongs to.
  */
 
-import { invoke } from "@tauri-apps/api/core";
+import { command } from "@/lib/command";
 
 /** One device somebody paired, as this Mac remembers it. Never its secret. */
 export interface RemoteDevice {
@@ -59,7 +59,7 @@ export interface PairedDevice {
 }
 
 export function loadRemoteStatus(): Promise<RemoteStatus> {
-  return invoke<RemoteStatus>("remote_status", {});
+  return command<RemoteStatus>("remote_status", {});
 }
 
 /**
@@ -70,17 +70,17 @@ export function loadRemoteStatus(): Promise<RemoteStatus> {
  * that is already running. Everything with a window open reconnects.
  */
 export function enableRemoteAccess(enabled: boolean): Promise<RemoteStatus> {
-  return invoke<RemoteStatus>("remote_enable", { enabled });
+  return command<RemoteStatus>("remote_enable", { enabled });
 }
 
 /** Pair a device, and answer with the secret it is to hold. */
 export function pairRemoteDevice(name: string): Promise<PairedDevice> {
-  return invoke<PairedDevice>("remote_pair", { name });
+  return command<PairedDevice>("remote_pair", { name });
 }
 
 /** Stop admitting a device. */
 export function revokeRemoteDevice(fingerprint: string): Promise<RemoteStatus> {
-  return invoke<RemoteStatus>("remote_revoke", { fingerprint });
+  return command<RemoteStatus>("remote_revoke", { fingerprint });
 }
 
 /**

@@ -1,6 +1,7 @@
 "use client";
 
-import { Channel, invoke } from "@tauri-apps/api/core";
+import { Channel } from "@tauri-apps/api/core";
+import { command } from "@/lib/command";
 
 import type {
   ExtensionTerminal,
@@ -36,7 +37,7 @@ import type {
 export function terminalFor(id: string): ExtensionTerminal {
   return {
     open: (opening: TerminalOpening) =>
-      invoke<string>("terminal_open", {
+      command<string>("terminal_open", {
         extension: id,
         project: opening.project,
         cwd: opening.cwd,
@@ -44,10 +45,10 @@ export function terminalFor(id: string): ExtensionTerminal {
       }),
 
     write: (terminal: string, data: string) =>
-      invoke<void>("terminal_write", { extension: id, id: terminal, data }),
+      command<void>("terminal_write", { extension: id, id: terminal, data }),
 
     resize: (terminal: string, size: TerminalSize) =>
-      invoke<void>("terminal_resize", { extension: id, id: terminal, size }),
+      command<void>("terminal_resize", { extension: id, id: terminal, size }),
 
     // The channel is made here and never handed back, which is what keeps the
     // caller from having to know it is a channel at all: what a package holds
@@ -61,7 +62,7 @@ export function terminalFor(id: string): ExtensionTerminal {
     ) => {
       const events = new Channel<TerminalEvent>();
       events.onmessage = onEvent;
-      return invoke<void>("terminal_watch", {
+      return command<void>("terminal_watch", {
         extension: id,
         id: terminal,
         from,
@@ -70,12 +71,12 @@ export function terminalFor(id: string): ExtensionTerminal {
     },
 
     list: (project: string) =>
-      invoke<readonly TerminalRow[]>("terminal_list", { extension: id, project }),
+      command<readonly TerminalRow[]>("terminal_list", { extension: id, project }),
 
     close: (terminal: string) =>
-      invoke<void>("terminal_close", { extension: id, id: terminal }),
+      command<void>("terminal_close", { extension: id, id: terminal }),
 
     closeProject: (project: string) =>
-      invoke<void>("terminal_close_project", { extension: id, project }),
+      command<void>("terminal_close_project", { extension: id, project }),
   };
 }

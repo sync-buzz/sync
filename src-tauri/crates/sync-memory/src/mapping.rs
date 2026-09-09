@@ -1696,6 +1696,22 @@ pub struct RecordEntry {
     /// document of its folder, which it also is. The engine says so only when
     /// it is true.
     pub is_folder: bool,
+    /// When the record first appeared and when it last changed, in seconds
+    /// since the epoch, UTC — the same unit and the same spelling the journal
+    /// states a transaction's time in.
+    ///
+    /// Read from the engine and never worked out here. The engine derives them
+    /// from its own history, which is the only place the answer is: this layer
+    /// would have to read every transaction ever written to reconstruct one
+    /// column, and it would still be reconstructing what the store already
+    /// knows.
+    ///
+    /// `None` from an engine that does not state them — an older one, or a
+    /// store with no history to read. A row with no date is a row nothing can
+    /// order by, and saying so is better than putting the epoch or the time of
+    /// the read where a fact belongs.
+    pub created_at_epoch_seconds: Option<i64>,
+    pub updated_at_epoch_seconds: Option<i64>,
 }
 
 /// What a record without a stated freshness is treated as.
@@ -1781,6 +1797,12 @@ impl RecordEntry {
                 .get("is_folder")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
+            created_at_epoch_seconds: record
+                .get("created_at_epoch_seconds")
+                .and_then(Value::as_i64),
+            updated_at_epoch_seconds: record
+                .get("updated_at_epoch_seconds")
+                .and_then(Value::as_i64),
         })
     }
 
@@ -1832,6 +1854,12 @@ const ENVELOPE_FIELDS: &[&str] = &[
     "folder",
     "is_folder",
     "profile",
+    // What the engine's history says about the record, which it states beside
+    // the record rather than inside it. Left out of this list they would be
+    // drawn as two fields of every type, under names no type declared and with
+    // an epoch second for a value.
+    "created_at_epoch_seconds",
+    "updated_at_epoch_seconds",
 ];
 
 /// One record, whole: what a document view shows and what its metadata panel
@@ -2013,8 +2041,19 @@ pub struct RecordsPage {
     pub revision: String,
     pub counts: RecordsCounts,
     pub records: Vec<RecordEntry>,
-    /// True when the selection holds more than this page. The interface says so
-    /// rather than presenting a truncated list as the whole of it.
+    /// How many records the selection holds altogether, page or no page.
+    ///
+    /// Separate from `counts`, which is about the corpus: a selection is a kind
+    /// *and* a folder *and* a freshness, and no arithmetic over per-kind totals
+    /// answers it. Carried on every page so that a header can say the size of
+    /// the list from the first read rather than growing its own number as the
+    /// list is read further — a count that climbed while somebody scrolled
+    /// would be the window reporting its own progress as a fact about the
+    /// project.
+    pub total: usize,
+    /// True when the selection holds more than this page. The next page is read
+    /// from `offset` plus what has been read; the ceiling on one read is the
+    /// engine's and is not raised here.
     pub has_more: bool,
 }
 
@@ -2857,6 +2896,67 @@ mod tests {
         assert_eq!(stored.folder.as_deref(), Some("docs/guides/api"));
     }
 
+    /// Both halves in one test, because either alone is a field that looks
+    /// present and is not: read off the engine's record and then written back
+    /// out under the name the window reads. A member that is parsed and then
+    /// dropped from the answer is exactly the failure this boundary has
+    /// already had — the drop is silent at both ends.
+    #[test]
+    fn a_row_carries_when_the_record_was_written() {
+        // Both shapes again: a metadata listing states them at the top level,
+        // and a record read by key states them inside its envelope.
+        for record in [
+            json!({
+                "key": "d-1",
+                "kind": "decision",
+                "created_at_epoch_seconds": 1_756_000_000_i64,
+                "updated_at_epoch_seconds": 1_757_400_000_i64,
+            }),
+            json!({"envelope": {
+                "key": "d-1",
+                "kind": "decision",
+                "created_at_epoch_seconds": 1_756_000_000_i64,
+                "updated_at_epoch_seconds": 1_757_400_000_i64,
+            }}),
+        ] {
+            let row = RecordEntry::from_record(&record).unwrap();
+            assert_eq!(row.created_at_epoch_seconds, Some(1_756_000_000));
+            assert_eq!(row.updated_at_epoch_seconds, Some(1_757_400_000));
+
+            let drawn = serde_json::to_value(&row).unwrap();
+            assert_eq!(drawn["createdAtEpochSeconds"], json!(1_756_000_000_i64));
+            assert_eq!(drawn["updatedAtEpochSeconds"], json!(1_757_400_000_i64));
+        }
+    }
+
+    /// An engine that says nothing about when a record was written is an older
+    /// one, or a store with no history. The row says nothing either, rather
+    /// than the epoch — a date drawn from a zero reads as a real date.
+    #[test]
+    fn a_row_from_an_engine_that_states_no_date_has_none() {
+        let row = RecordEntry::from_record(&json!({"key": "d-1", "kind": "decision"})).unwrap();
+        assert_eq!(row.created_at_epoch_seconds, None);
+        assert_eq!(row.updated_at_epoch_seconds, None);
+    }
+
+    /// The engine states them beside the record, and this layer takes the
+    /// envelope's own members out before what is left becomes the type's
+    /// fields. Left in, every record of every type would grow two fields no
+    /// type declared, each holding an epoch second.
+    #[test]
+    fn the_dates_are_the_envelopes_and_never_a_types_fields() {
+        let fields = product_fields(&json!({
+            "key": "d-1",
+            "kind": "decision",
+            "created_at_epoch_seconds": 1_756_000_000_i64,
+            "updated_at_epoch_seconds": 1_757_400_000_i64,
+            "status": "agreed",
+        }));
+        assert_eq!(fields.get("status"), Some(&json!("agreed")));
+        assert!(!fields.contains_key("created_at_epoch_seconds"));
+        assert!(!fields.contains_key("updated_at_epoch_seconds"));
+    }
+
     #[test]
     fn a_record_filed_nowhere_is_in_no_folder() {
         let row = RecordEntry::from_record(&json!({"key": "d-1", "kind": "decision"})).unwrap();
@@ -3050,6 +3150,30 @@ mod tests {
             icon,
         ));
         RecordType::from_record(&record["record"]["envelope"]).unwrap()
+    }
+
+    /// The size of a selection reaches the window under the name it is read by.
+    ///
+    /// A page that lost this member would not fail: an unknown one is dropped
+    /// on the way across and a missing one is read as absent, so the header
+    /// would fall back to counting the rows it has and say a page's worth of a
+    /// list that is longer.
+    #[test]
+    fn a_page_says_how_large_the_whole_selection_is() {
+        let page = RecordsPage {
+            revision: "abc".to_owned(),
+            counts: RecordsCounts::default(),
+            records: Vec::new(),
+            total: 377,
+            has_more: true,
+        };
+
+        let wire = serde_json::to_value(&page).unwrap();
+        assert_eq!(wire["total"], 377);
+        assert_eq!(wire["hasMore"], true, "spelled the way the window reads it");
+
+        let read: RecordsPage = serde_json::from_value(wire).unwrap();
+        assert_eq!(read.total, 377);
     }
 
     #[test]

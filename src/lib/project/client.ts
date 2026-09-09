@@ -7,7 +7,7 @@
  * runs `git`. The window holds no path policy of its own.
  */
 
-import { invoke } from "@tauri-apps/api/core";
+import { command } from "@/lib/command";
 import { open } from "@tauri-apps/plugin-dialog";
 
 import type {
@@ -44,11 +44,11 @@ export function isProjectFailure(error: unknown): error is ProjectError {
 }
 
 async function call<T>(
-  command: string,
+  name: string,
   args: Record<string, unknown>,
 ): Promise<T> {
   try {
-    return await invoke<T>(command, args);
+    return await command<T>(name, args);
   } catch (error) {
     if (
       typeof error === "object" &&

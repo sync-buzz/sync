@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import type { ComponentType, PointerEvent, ReactNode } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ProgressLine } from "@/components/shell/progress-line";
 import { cn } from "@/lib/utils";
 
 /**
@@ -69,7 +70,7 @@ export function NavBar({
 }) {
   return (
     <div
-      className="shrink-0 border-b border-separator"
+      className="relative shrink-0 border-b border-separator"
       style={
         inset ? { paddingTop: "max(0px, env(safe-area-inset-top))" } : undefined
       }
@@ -108,6 +109,13 @@ export function NavBar({
           {trailing}
         </div>
       </div>
+
+      {/* The same line the Mac draws under its header, on the one band a phone
+          screen always has. It is on this bar rather than at the foot because
+          the foot belongs to the column below it, and a report about the whole
+          window drawn in a package's strip would be the window speaking with
+          the package's voice. */}
+      <ProgressLine />
     </div>
   );
 }

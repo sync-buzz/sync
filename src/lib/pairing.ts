@@ -17,7 +17,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { command } from "@/lib/command";
 import {
   Format,
   checkPermissions,
@@ -94,7 +94,7 @@ export function usePairing(): Pairing {
     if (!isPhone) return;
 
     let listening = true;
-    void invoke<ChannelStatus>("channel_status", {}).then(
+    void command<ChannelStatus>("channel_status", {}).then(
       (answer) => {
         if (listening) setStatus(answer);
       },
@@ -114,7 +114,7 @@ export function usePairing(): Pairing {
   const refresh = useCallback(async () => {
     if (!isPhone) return;
     try {
-      setStatus(await invoke<ChannelStatus>("channel_status", {}));
+      setStatus(await command<ChannelStatus>("channel_status", {}));
     } catch (refused: unknown) {
       setFailure(said(refused));
     }
@@ -124,7 +124,7 @@ export function usePairing(): Pairing {
     setBusy(true);
     setFailure(null);
     try {
-      setStatus(await invoke<ChannelStatus>("channel_forget", {}));
+      setStatus(await command<ChannelStatus>("channel_forget", {}));
     } catch (refused: unknown) {
       setFailure(said(refused));
     } finally {
@@ -151,7 +151,7 @@ export function usePairing(): Pairing {
       // the glass here is a Mac window's edge, never a surface.
       const seen = await scan({ formats: [Format.QRCode] });
       setStatus(
-        await invoke<ChannelStatus>("channel_pair", { payload: seen.content }),
+        await command<ChannelStatus>("channel_pair", { payload: seen.content }),
       );
     } catch (refused: unknown) {
       setFailure(said(refused));
@@ -165,7 +165,7 @@ export function usePairing(): Pairing {
     setFailure(null);
     try {
       setStatus(
-        await invoke<ChannelStatus>("channel_pair_by_hand", {
+        await command<ChannelStatus>("channel_pair_by_hand", {
           endpoint,
           secret,
         }),

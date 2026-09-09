@@ -521,11 +521,13 @@ html[data-vibrancy="on"] body {
 /* ---------------------------------------------------------------- *
  * Animation
  *
- * The one keyframe animation in the shell. It belongs to the launch screen,
- * where something has to say that time is passing without claiming to know how
- * much of it is left.
+ * The one keyframe animation in the shell, and it is used wherever something
+ * has to say that time is passing without claiming to know how much of it is
+ * left: the launch screen, and the line on the hairline under the window's top
+ * band. One movement for one meaning — a second set of keyframes would be a
+ * second speed at which this window waits.
  * ---------------------------------------------------------------- */
-@keyframes launch-progress {
+@keyframes indeterminate-progress {
   from {
     transform: translateX(-100%);
   }

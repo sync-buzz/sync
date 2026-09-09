@@ -1,6 +1,6 @@
 "use client";
 
-import { invoke } from "@tauri-apps/api/core";
+import { command } from "@/lib/command";
 
 import type { ExtensionVault } from "@/lib/extension-api/contract";
 
@@ -26,9 +26,9 @@ import type { ExtensionVault } from "@/lib/extension-api/contract";
  */
 export function vaultFor(id: string): ExtensionVault {
   return {
-    read: (name: string) => invoke<string>("extension_secret_read", { id, name }),
+    read: (name: string) => command<string>("extension_secret_read", { id, name }),
     write: (name: string, secret: string) =>
-      invoke<void>("extension_secret_write", { id, name, secret }),
-    forget: (name: string) => invoke<void>("extension_secret_forget", { id, name }),
+      command<void>("extension_secret_write", { id, name, secret }),
+    forget: (name: string) => command<void>("extension_secret_forget", { id, name }),
   };
 }

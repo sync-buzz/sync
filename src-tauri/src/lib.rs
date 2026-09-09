@@ -236,6 +236,7 @@ pub fn run() {
             memory::memory_records,
             memory::memory_document,
             memory::memory_content,
+            memory::memory_document_reveal,
             memory::memory_file_create,
             memory::memory_document_update,
             memory::memory_document_create,

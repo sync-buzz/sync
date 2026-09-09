@@ -1113,10 +1113,27 @@ worse than one that indents for nothing.
 
 **A directory nothing is filed in is still drawn**, quieter. It is on disk, a
 person sees it in Finder, and it is somewhere they can file into; leaving it out
-would make Sync disagree with the file tree beside it. The count on a folder row
-is the documents of that type filed *directly* in it — not the subtree, and not
-the record that is the folder, so it is the same number as the rows the
-workspace then shows.
+would make Sync disagree with the file tree beside it. Nothing filed *anywhere
+under it*, so that the tier and the number beside it make one claim rather than
+two: a directory whose documents all sit a level further in is somewhere the
+project keeps something.
+
+The count on a folder row is the documents of that type filed **anywhere under
+it**, which is the question a row with a triangle beside it is asked: is there
+anything down there. It is deliberately *not* the number of rows the workspace
+then shows — that list is what is filed directly in the folder — because the
+alternative fails silently in the direction that matters. A folder whose
+documents all sit one level further in draws a perfectly good `0`, and so does a
+folder holding nothing at all; nothing on the screen tells the two apart, and a
+column of them reads as an empty project. The difference between the number and
+the list is the folders in between, and they are on the screen with their own
+numbers rather than hidden behind this one.
+
+Folders are not documents in that number, and neither is the record that *is* a
+folder. A folder holding nothing but an empty folder says `0`, which is the
+answer: nothing is filed anywhere under it. The same rule gives a type's row its
+number — every document of that type, wherever it is filed — so a type and its
+folders agree without anybody adding them up.
 
 A folder can say what it is for. That is an ordinary document filed in it,
 carrying `is_folder`, reached from a strip above the list rather than from a

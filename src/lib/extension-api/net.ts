@@ -1,6 +1,6 @@
 "use client";
 
-import { invoke } from "@tauri-apps/api/core";
+import { command } from "@/lib/command";
 
 import type {
   ExtensionNet,
@@ -36,6 +36,6 @@ export function netFor(id: string): ExtensionNet {
     // Rust reads it back into — so a member added to one is a member the other
     // refuses by name rather than one that quietly never arrives.
     fetch: (request: NetRequest) =>
-      invoke<NetResponse>("extension_fetch", { id, request }),
+      command<NetResponse>("extension_fetch", { id, request }),
   };
 }

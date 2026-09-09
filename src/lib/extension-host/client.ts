@@ -1,6 +1,6 @@
 "use client";
 
-import { invoke } from "@tauri-apps/api/core";
+import { command } from "@/lib/command";
 
 import type {
   FieldDeclaration,
@@ -255,7 +255,7 @@ export interface InstalledExtension {
 
 /** Installs a `.syncext` somebody chose in the open panel. */
 export function installExtensionFile(path: string): Promise<InstalledExtension> {
-  return invoke<InstalledExtension>("extension_install_file", { path });
+  return command<InstalledExtension>("extension_install_file", { path });
 }
 
 /**
@@ -266,12 +266,12 @@ export function installExtensionFile(path: string): Promise<InstalledExtension> 
  * somebody else's disk in a shared record is noise at best.
  */
 export function installExtensionFolder(path: string): Promise<InstalledExtension> {
-  return invoke<InstalledExtension>("extension_install_folder", { path });
+  return command<InstalledExtension>("extension_install_folder", { path });
 }
 
 /** Everything this machine can load, whatever any project declares. */
 export function installedExtensions(): Promise<InstalledExtension[]> {
-  return invoke<InstalledExtension[]>("extension_list");
+  return command<InstalledExtension[]>("extension_list");
 }
 
 /**
@@ -294,7 +294,7 @@ export function callExtensionHandler(
   occasion: string,
   payload: unknown,
 ): Promise<unknown> {
-  return invoke<unknown>("extension_handler_call", {
+  return command<unknown>("extension_handler_call", {
     project,
     id,
     occasion,
@@ -304,7 +304,7 @@ export function callExtensionHandler(
 
 /** Stops serving an id on this machine. The artefact and its records stay. */
 export function forgetExtension(id: string): Promise<void> {
-  return invoke<void>("extension_forget", { id });
+  return command<void>("extension_forget", { id });
 }
 
 /**
@@ -331,7 +331,7 @@ export function forgetExtension(id: string): Promise<void> {
  * list. Answering the other way round would be a second consent written down.
  */
 export function switchedOffClocks(project: string): Promise<string[]> {
-  return invoke<string[]>("schedule_switched_off", { project });
+  return command<string[]>("schedule_switched_off", { project });
 }
 
 /**
@@ -346,14 +346,14 @@ export function switchClock(
   id: string,
   on: boolean,
 ): Promise<void> {
-  return invoke<void>("schedule_switch", { project, id, on });
+  return command<void>("schedule_switch", { project, id, on });
 }
 
 export function rememberDeclaration(
   project: string,
   extensions: readonly string[],
 ): Promise<void> {
-  return invoke<void>("schedule_remember", { project, extensions });
+  return command<void>("schedule_remember", { project, extensions });
 }
 
 // ---------------------------------------------------------------------------
@@ -452,7 +452,7 @@ export interface RegistryLedger {
  * failure with nothing cached is the network's own words.
  */
 export function registryIndex(): Promise<FetchedRegistry> {
-  return invoke<FetchedRegistry>("registry_index");
+  return command<FetchedRegistry>("registry_index");
 }
 
 /**
@@ -468,7 +468,7 @@ export function registryIndex(): Promise<FetchedRegistry> {
  * there is nothing to say about updates yet, and the row says nothing.
  */
 export function cachedRegistryIndex(): Promise<RegistryIndex | null> {
-  return invoke<RegistryIndex | null>("registry_cached_index");
+  return command<RegistryIndex | null>("registry_cached_index");
 }
 
 /**
@@ -479,7 +479,7 @@ export function cachedRegistryIndex(): Promise<RegistryIndex | null> {
  * would make the file every marketplace fetches grow without limit.
  */
 export function registryLedger(id: string): Promise<RegistryLedger> {
-  return invoke<RegistryLedger>("registry_ledger", { id });
+  return command<RegistryLedger>("registry_ledger", { id });
 }
 
 /**
@@ -492,7 +492,7 @@ export function registryLedger(id: string): Promise<RegistryLedger> {
  * serves another.
  */
 export function repointExtension(pointer: Pointer): Promise<InstalledExtension> {
-  return invoke<InstalledExtension>("extension_repoint", { pointer });
+  return command<InstalledExtension>("extension_repoint", { pointer });
 }
 
 /**
@@ -507,5 +507,5 @@ export function repointExtension(pointer: Pointer): Promise<InstalledExtension> 
 export function installFromRegistry(
   artefact: RegistryArtefact,
 ): Promise<InstalledExtension> {
-  return invoke<InstalledExtension>("extension_install_registry", { artefact });
+  return command<InstalledExtension>("extension_install_registry", { artefact });
 }

@@ -15,6 +15,7 @@ import { Provider } from 'react';
 import * as React_2 from 'react';
 import { ReactNode } from 'react';
 import { Ref } from 'react';
+import { RefCallback } from 'react';
 import { ScrollArea as ScrollArea_2 } from 'radix-ui';
 import { Tooltip as Tooltip_2 } from 'radix-ui';
 import { VariantProps } from 'class-variance-authority';
@@ -180,11 +181,14 @@ export interface Corpus {
     readonly hasMore: boolean;
     readonly hidden: readonly string[];
     readonly isLoading: boolean;
+    readonly isReadingMore: boolean;
+    readonly readMore: () => void;
     readonly records: readonly MemoryRecord[];
     // (undocumented)
     readonly reload: () => void;
     readonly resolveUnmatched: (file: ScanChange, kind: string, adopt?: string) => Promise<void>;
     readonly revision: string | null;
+    readonly total: number;
     readonly types: readonly MemoryType[];
     readonly unmatched: readonly ScanChange[];
     readonly updateType: (type: TypeDefinition) => Promise<void>;
@@ -220,6 +224,12 @@ export interface Dependents {
 
 // @public
 export function describeMemoryFolder(project: string, folder: string, kind: string): Promise<MemoryDocument>;
+
+// @public
+export type Desktop = "mac" | "windows" | "linux";
+
+// @public (undocumented)
+export function desktop(): Desktop | null;
 
 // @public
 export function discardWorktree(args: {
@@ -664,6 +674,7 @@ export function memoryFolderToll(project: string, folder: string): Promise<numbe
 export interface MemoryRecord {
     // (undocumented)
     readonly archived: boolean;
+    readonly createdAtEpochSeconds: number | null;
     readonly fields?: Readonly<Record<string, unknown>>;
     readonly folder: string | null;
     // (undocumented)
@@ -681,6 +692,7 @@ export interface MemoryRecord {
     readonly tags: readonly string[];
     // (undocumented)
     readonly title: string;
+    readonly updatedAtEpochSeconds: number | null;
 }
 
 // @public
@@ -696,6 +708,7 @@ export interface MemorySelection {
     limit?: number;
     // (undocumented)
     offset?: number;
+    tags?: readonly string[];
 }
 
 // @public
@@ -724,6 +737,7 @@ export interface MemoryView {
     readonly records: readonly MemoryRecord[];
     // (undocumented)
     readonly revision: string;
+    readonly total: number;
 }
 
 // @public
@@ -1069,6 +1083,12 @@ export function renameSession(key: string, title: string): Promise<void>;
 
 // @public
 export function resumeSession(project: string, acpSession: string): Promise<OpenedSession>;
+
+// @public
+export function revealDocument(project: string, key: string): Promise<void>;
+
+// @public
+export function revealLabel(): string | null;
 
 // @public
 export function saveSessionImage(key: string, id: string, suggestedName: string): Promise<boolean>;
@@ -1430,7 +1450,7 @@ export function stopSession(key: string): Promise<void>;
 export function supportsApiRange(range: string): boolean;
 
 // @public
-export const SYNC_API_VERSION: "3.12.0";
+export const SYNC_API_VERSION: "3.16.0";
 
 // @public
 export const SYNC_CAPABILITIES: readonly ["records", "agents.acp", "markdown.plugins", "native-menu", "folders", "sheets", "net", "net.write", "vault", "background", "schedule", "work.agent", "agent.tools", "terminal"];
@@ -1667,6 +1687,9 @@ export function useDragHandle(id: string, payload: unknown): {
 
 // @public (undocumented)
 export function useFolders(projectPath: string, kinds: readonly string[], revision: string | null, active?: boolean): Folders;
+
+// @public
+export function useListEnd(onReach: (() => void) | null): RefCallback<HTMLElement | null>;
 
 // @public
 export function useLiveSessions(active?: boolean): {

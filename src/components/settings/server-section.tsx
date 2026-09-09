@@ -5,7 +5,7 @@ import { Check, Copy } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { invoke } from "@tauri-apps/api/core";
+import { command } from "@/lib/command";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 
 /**
@@ -44,17 +44,17 @@ export function ServerSection() {
   }, []);
 
   useEffect(() => {
-    void invoke<ServerStatus>("server_status").then(read, (error: unknown) =>
+    void command<ServerStatus>("server_status").then(read, (error: unknown) =>
       setFailure(messageOf(error)),
     );
     void isEnabled().then(setAtLogin, () => setAtLogin(null));
   }, [read]);
 
   const run = useCallback(
-    (command: string, args?: Record<string, unknown>) => {
+    (name: string, args?: Record<string, unknown>) => {
       setBusy(true);
       setFailure(null);
-      void invoke<ServerStatus>(command, args)
+      void command<ServerStatus>(name, args)
         .then(read, (error: unknown) => setFailure(messageOf(error)))
         .finally(() => setBusy(false));
     },

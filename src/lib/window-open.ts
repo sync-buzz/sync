@@ -15,7 +15,7 @@
  * all.
  */
 
-import { invoke } from "@tauri-apps/api/core";
+import { command } from "@/lib/command";
 
 function inTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -26,7 +26,7 @@ export async function openNewWindow(): Promise<void> {
   if (!inTauri()) return;
 
   try {
-    await invoke("window_new", {});
+    await command("window_new", {});
   } catch (error) {
     // Nothing to fall back to — a window is the one thing this cannot do some
     // smaller version of — so the failure is said out loud rather than

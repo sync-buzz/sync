@@ -14,7 +14,7 @@
  * reachable from the interface.
  */
 
-import { invoke } from "@tauri-apps/api/core";
+import { command } from "@/lib/command";
 
 /** One secret's address: whose it is and what they call it. Never its value. */
 export interface VaultEntry {
@@ -39,7 +39,7 @@ export type Persistence =
 
 /** Every secret Sync holds, whoever it belongs to. */
 export function loadVaultEntries(): Promise<VaultEntry[]> {
-  return invoke<VaultEntry[]>("vault_entries", {});
+  return command<VaultEntry[]>("vault_entries", {});
 }
 
 /** Put a secret in, or replace the one that is there. */
@@ -48,15 +48,15 @@ export function writeSecret(
   name: string,
   secret: string,
 ): Promise<void> {
-  return invoke<void>("vault_write", { owner, name, secret });
+  return command<void>("vault_write", { owner, name, secret });
 }
 
 /** Take a secret out. */
 export function forgetSecret(owner: string, name: string): Promise<void> {
-  return invoke<void>("vault_forget", { owner, name });
+  return command<void>("vault_forget", { owner, name });
 }
 
 /** What this machine's store promises about how long an entry lasts. */
 export function vaultPersistence(): Promise<Persistence> {
-  return invoke<Persistence>("vault_storage", {});
+  return command<Persistence>("vault_storage", {});
 }

@@ -6,7 +6,7 @@
 //! answer — live in that crate, which compiles and runs without Tauri.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
@@ -897,6 +897,117 @@ pub async fn memory_content<R: Runtime>(
         .await
 }
 
+/// Show a record's file where it lives, for a record whose body is one.
+///
+/// **The window names the record; the path is never on the wire.** The
+/// capability in `src-tauri/capabilities/default.json` refuses the opener's
+/// `reveal-item-in-dir` to the webview and goes on refusing it, because a
+/// record's body is somebody else's Markdown and a link inside it must not be
+/// able to point a file manager anywhere. A locator is not that: it is the
+/// engine's own answer to where a document is kept, relative to the root the
+/// engine named at the handshake — so both halves of the path are assembled
+/// here, out of two things the window did not write, and a caller that has no
+/// such record gets no path at all.
+///
+/// Capabilities gate calls made *from the webview*, so the reveal itself is a
+/// plain Rust call and no permission is added to reach it.
+///
+/// Three desktops answer it and each does something of its own: the Mac and
+/// Windows both select the file in a new window of their file manager, while
+/// Linux asks the session for `org.freedesktop.FileManager1` and falls back to
+/// opening the file's *folder* where no file manager claims that name. The
+/// weaker outcome is why nothing here promises the file will be selected — the
+/// words the window shows say where the file is, not what will be highlighted.
+///
+/// A locator of anything but ordinary segments is refused rather than joined:
+/// `..` would climb out of the project, and an absolute one would replace the
+/// root outright. Neither is a locator the engine writes, which is exactly why
+/// the check is here and not left to the day one is.
+#[tauri::command]
+pub async fn memory_document_reveal<R: Runtime>(
+    app: AppHandle<R>,
+    sessions: State<'_, MemorySessions>,
+    project: String,
+    key: String,
+) -> CommandResult<()> {
+    let found = sessions
+        .with_session(&app, &project, move |client| {
+            let root = PathBuf::from(&client.info().handshake.project_path);
+            let locator = client.document(&key)?.and_then(|document| document.locator);
+            Ok(locator.map(|locator| (root, locator)))
+        })
+        .await?;
+
+    // A record with no file is not a failure of this command — it is the answer
+    // to a question about a record kept in `refs`, where there is nothing to
+    // show. What offers the command decides not to offer it there; what reaches
+    // here anyway is told plainly rather than shown an empty Finder window.
+    let Some((root, locator)) = found else {
+        return Err(CommandError {
+            kind: "not_found".to_owned(),
+            message: "this record's body is not a file, so there is nothing to show".to_owned(),
+            data: Value::Null,
+        });
+    };
+
+    let Some(path) = file_under(&root, &locator) else {
+        return Err(CommandError {
+            kind: "invalid_argument".to_owned(),
+            message: format!("{locator} does not name a file inside this project"),
+            data: Value::Null,
+        });
+    };
+
+    // Asked before revealing so the reason names the file. The corpus holds
+    // every branch's documents and a checkout has only some of them, so a file
+    // that is not here is the ordinary case rather than a fault, and the
+    // plugin's own answer for it is an unadorned not-found from the step that
+    // makes the path absolute.
+    if !path.exists() {
+        return Err(CommandError {
+            kind: "not_found".to_owned(),
+            message: format!("{locator} is not in this checkout"),
+            data: Value::Null,
+        });
+    }
+
+    tauri_plugin_opener::reveal_item_in_dir(&path).map_err(|error| CommandError {
+        kind: "protocol".to_owned(),
+        message: format!("{locator} could not be shown: {error}"),
+        data: Value::Null,
+    })
+}
+
+/// The file a locator names inside `root`, or nothing where it names something
+/// else.
+///
+/// Every component has to be an ordinary name. `Component::Normal` is the whole
+/// rule: it excludes `..` and `.`, an absolute path, and a drive or share
+/// prefix, and it does so by what a component *is* rather than by a list of
+/// strings to reject. An empty locator lands back on the root and is refused
+/// with them — revealing the project folder is not what was asked for.
+///
+/// The rule is read by the platform it runs on, which is the point of stating
+/// it this way rather than as a search for `..` in a string: `C:` and `\\host`
+/// are a prefix on Windows and an ordinary file name everywhere else, and a
+/// backslash separates on Windows and does not on a Mac. A hand-written check
+/// would have had to know all of that, and would have known it as of the day it
+/// was written.
+///
+/// Symlinks are left to the system, which resolves them when it reveals. One
+/// inside an attached folder is a file the team committed to their own
+/// repository, and Finder showing where it goes is Finder working.
+fn file_under(root: &Path, locator: &str) -> Option<PathBuf> {
+    let mut path = root.to_path_buf();
+    for component in Path::new(locator).components() {
+        match component {
+            Component::Normal(name) => path.push(name),
+            _ => return None,
+        }
+    }
+    (path != root).then_some(path)
+}
+
 /// Change what a patch names in one record, and answer with the record as
 /// stored.
 ///
@@ -1260,6 +1371,66 @@ mod tests {
     use tauri::ipc::Channel;
 
     use super::*;
+
+    /// The ordinary case, and the one the row is about.
+    #[test]
+    fn a_locator_names_the_file_under_the_project() {
+        assert_eq!(
+            file_under(Path::new("/w/project"), "docs/architecture.md"),
+            Some(PathBuf::from("/w/project/docs/architecture.md"))
+        );
+    }
+
+    /// The refusal the join exists for: a locator that climbs is not joined and
+    /// then checked, it is never joined at all.
+    #[test]
+    fn a_locator_that_climbs_out_names_nothing() {
+        assert_eq!(
+            file_under(Path::new("/w/project"), "../../etc/passwd"),
+            None
+        );
+        assert_eq!(
+            file_under(Path::new("/w/project"), "docs/../../secrets"),
+            None
+        );
+    }
+
+    /// An absolute locator would replace the root rather than extend it, which
+    /// is the same escape written the other way round.
+    #[test]
+    fn an_absolute_locator_names_nothing() {
+        assert_eq!(file_under(Path::new("/w/project"), "/etc/passwd"), None);
+    }
+
+    /// The same refusal written the way Windows writes it.
+    ///
+    /// Only compiled there, because it is not the same assertion elsewhere: a
+    /// backslash separates on Windows and is an ordinary character in a file
+    /// name on a Mac, so this string climbs out on one system and is a single
+    /// oddly-named file on the other. `file_under` takes both readings from the
+    /// platform rather than holding an opinion of its own, and this is the half
+    /// of that the machines here cannot run.
+    #[test]
+    #[cfg(windows)]
+    fn a_locator_that_climbs_out_the_windows_way_names_nothing() {
+        assert_eq!(
+            file_under(Path::new(r"C:\w\project"), r"docs\..\..\secrets"),
+            None
+        );
+        assert_eq!(
+            file_under(Path::new(r"C:\w\project"), r"D:\etc\hosts"),
+            None
+        );
+    }
+
+    /// Nothing to reveal is not the project folder. A record with an empty
+    /// locator would otherwise open Finder on the whole repository, which is
+    /// not what any row asked for.
+    #[test]
+    fn an_empty_locator_is_not_the_project_folder() {
+        assert_eq!(file_under(Path::new("/w/project"), ""), None);
+        assert_eq!(file_under(Path::new("/w/project"), "."), None);
+    }
 
     /// A channel that counts, and its count.
     ///

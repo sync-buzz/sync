@@ -22,7 +22,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { command } from "@/lib/command";
 import type { AreaIntent } from "@/lib/area-intent";
 import { device } from "@/lib/device";
 import { openRegistered } from "@/lib/project/client";
@@ -79,7 +79,7 @@ export function useWindowHolds(project: string | null): void {
 
     void (async () => {
       try {
-        await invoke("window_holds", { project });
+        await command("window_holds", { project });
       } catch (error) {
         // The window works unaddressed: a banner clicked for its project opens
         // another window rather than finding this one. Reported rather than
@@ -117,7 +117,7 @@ export function useBannerAddress(): Address | null {
 
     const collect = async () => {
       try {
-        const waiting = await invoke<Address | null>("notifications_addressed");
+        const waiting = await command<Address | null>("notifications_addressed");
         if (listening && waiting !== null) setAddress(waiting);
       } catch (error) {
         // A click that cannot be collected leaves the window where it is, which

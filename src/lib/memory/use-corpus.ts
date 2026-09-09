@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   attachFolder,
@@ -26,6 +26,7 @@ import type {
   MemoryDocument,
   MemoryRecord,
   MemoryType,
+  MemoryView,
   ScanChange,
   ScanOutcome,
 } from "@/lib/memory/types";
@@ -73,9 +74,11 @@ export function typeName(
 /**
  * How much of a selection is read at once.
  *
- * The engine's own ceiling. Nothing in the column pages yet, so a selection
- * larger than this is reported as having more rather than presented as if this
- * were all of it.
+ * The engine's own ceiling, and the reason reading a selection is a sequence of
+ * reads rather than one. A caller asking for more than this would be answered
+ * with this anyway, so it is what a page is here whatever was asked for — which
+ * is what makes where the next page starts arithmetic rather than a second
+ * question for the store.
  */
 export const PAGE_LIMIT = 200;
 
@@ -92,9 +95,19 @@ export interface Corpus {
   readonly types: readonly MemoryType[];
   /** Counts over the whole corpus, not over the page. */
   readonly counts: MemoryCounts;
-  /** The rows of the current selection. */
+  /** The rows of the current selection that have been read so far. */
   readonly records: readonly MemoryRecord[];
-  /** True when the selection holds more rows than were read. */
+  /**
+   * How many rows the selection holds, read or not.
+   *
+   * What a header says, and it says it from the first page: a number that grew
+   * as somebody scrolled would be the window reporting its own progress as a
+   * fact about the project. It is the store's answer rather than the length of
+   * anything here, which is what makes it agree with the count on the row in
+   * the navigator that this selection was reached from.
+   */
+  readonly total: number;
+  /** True when the selection holds more rows than have been read. */
   readonly hasMore: boolean;
   /**
    * The kinds left out of all of this. Echoed back because a column showing
@@ -102,8 +115,25 @@ export interface Corpus {
    * own filter's.
    */
   readonly hidden: readonly string[];
-  /** True while the store has not yet answered for this selection. */
+  /** True while the store has not yet answered for this selection at all. */
   readonly isLoading: boolean;
+  /**
+   * True while a further page of the selection already on screen is being read.
+   *
+   * Separate from `isLoading`, because they are two different states to draw:
+   * one is a column with nothing in it, the other is a list somebody is reading
+   * down while the rest of it arrives.
+   */
+  readonly isReadingMore: boolean;
+  /**
+   * Read the next page onto the end of what is held.
+   *
+   * Adds; it never replaces. Somebody reaching the end of the list is still
+   * reading it, and rows arriving above where they are looking would move the
+   * thing they were about to click. Asking when the store has already said the
+   * selection is whole does nothing, so a list may ask as often as it likes.
+   */
+  readonly readMore: () => void;
   /**
    * Why memory could not be read, in words, or `null`.
    *
@@ -187,16 +217,21 @@ export interface Corpus {
  */
 interface Answer {
   readonly key: string;
+  /** How many pages of that question are in `records`. */
+  readonly pages: number;
   readonly revision: string | null;
   readonly counts: MemoryCounts;
+  readonly total: number;
   readonly records: readonly MemoryRecord[];
   readonly hasMore: boolean;
   readonly error: string | null;
 }
 
 const NOTHING: Omit<Answer, "key"> = {
+  pages: 0,
   revision: null,
   counts: { total: 0, byKind: {}, byFreshness: {} },
+  total: 0,
   records: [],
   hasMore: false,
   error: null,
@@ -220,6 +255,22 @@ export function useCorpus(
   const [typesError, setTypesError] = useState<string | null>(null);
   const [answer, setAnswer] = useState<Answer>({ key: "", ...NOTHING });
   const [attempt, setAttempt] = useState(0);
+  /**
+   * What is in hand, mirrored where the read can see it.
+   *
+   * The read is a loop over pages and has to know where the last one stopped;
+   * taking that from the state it is itself setting would make the effect
+   * depend on its own result and run again after every page. A ref is the
+   * ordinary answer to that, and it is exactly as authoritative — nothing else
+   * writes it, and it is written in the same breath as the state.
+   */
+  const held = useRef<{
+    question: string;
+    key: string;
+    pages: number;
+    hasMore: boolean;
+    records: readonly MemoryRecord[];
+  }>({ question: "", key: "", pages: 0, hasMore: false, records: [] });
   // What the last scan could not decide. Held here rather than derived from the
   // corpus because it is not in the corpus: a file nothing could be matched to
   // has no record, which is precisely the state somebody has to resolve.
@@ -376,7 +427,37 @@ export function useCorpus(
   // included, and a separator it could contain is a separator that will
   // eventually split one kind into two.
   const hiddenKey = JSON.stringify([...hidden].sort());
-  const key = `${projectPath} ${selectionKey} ${hiddenKey} ${attempt}`;
+  // What is being asked, and one read of it. The two are separate because how
+  // far down the list somebody has read belongs to the question and not to the
+  // read: a write lands, everything is asked again, and they are still reading
+  // the same list at the same depth. Only a different question starts over.
+  const question = `${projectPath} ${selectionKey} ${hiddenKey}`;
+  const key = `${question} ${attempt}`;
+
+  // How many pages of the question have been asked for. Kept per question, so
+  // choosing a different type starts at one page again rather than reading
+  // three of a list nobody has scrolled.
+  const [asked, setAsked] = useState<{ question: string; pages: number }>({
+    question: "",
+    pages: 1,
+  });
+  const wanted = asked.question === question ? asked.pages : 1;
+
+  const readMore = useCallback(() => {
+    setAsked((standing) => {
+      // Nothing to add to: a different question is in hand, or the store has
+      // already said this one is whole. Both are ordinary — a list asks
+      // whenever its end is on the screen, and its end is on the screen for as
+      // long as somebody sits at the bottom of a list that is finished.
+      if (held.current.question !== question || !held.current.hasMore) {
+        return standing;
+      }
+      const next = held.current.pages + 1;
+      return standing.question === question && standing.pages >= next
+        ? standing
+        : { question, pages: next };
+    });
+  }, [question]);
 
   useEffect(() => {
     if (!active) return;
@@ -424,36 +505,121 @@ export function useCorpus(
     return () => window.removeEventListener("focus", onFocus);
   }, [rescan, active]);
 
+  // The selection, read a page at a time until as much of it as was asked for
+  // is in hand.
+  //
+  // Sequential rather than at once, and that is not caution about the engine:
+  // each page says whether there is another, so page three is a question only
+  // page two can say is worth asking. A list of exactly two hundred records
+  // would otherwise cost a second read that answers nothing.
   useEffect(() => {
     if (!active) return;
+    // Already answered, or answered as far as the store goes. Without this the
+    // effect would re-read the whole selection every time anything above it
+    // rendered, because `wanted` and `key` are both unchanged by that.
+    if (
+      held.current.key === key &&
+      (held.current.pages >= wanted || !held.current.hasMore)
+    ) {
+      return;
+    }
     let current = true;
 
+    // One page's worth of answer, put up as this hook's whole state. Written
+    // out here because it is done from two places — after each page, and once
+    // at the end for a re-read — and the two must not drift.
+    const put = (
+      pages: number,
+      records: readonly MemoryRecord[],
+      view: MemoryView,
+    ) =>
+      setAnswer({
+        key,
+        pages,
+        revision: view.revision,
+        counts: view.counts,
+        // An engine older than this field states no total, and a member the
+        // reader does not know is dropped on the way across rather than
+        // refused — so what arrives is nothing at all, and a header drawn from
+        // it would print the word `undefined` where a number belongs. The rows
+        // in hand are the only count there is then. It is the one this header
+        // showed before the store could answer the question, and reading the
+        // list to its end still lands it on the truth.
+        total: view.total ?? records.length,
+        records,
+        hasMore: view.hasMore,
+        error: null,
+      });
+
     void (async () => {
-      try {
-        const view_ = await loadRecords(
-          projectPath,
-          JSON.parse(selectionKey) as MemorySelection,
-          JSON.parse(hiddenKey) as string[],
-        );
+      const selection = JSON.parse(selectionKey) as MemorySelection;
+      const kinds = JSON.parse(hiddenKey) as string[];
+      // The engine will not answer with more than its own ceiling, so that is
+      // what a page is here whatever the caller asked for — and where the next
+      // one starts is then arithmetic rather than a member the store has to
+      // send back.
+      const size = Math.min(selection.limit ?? PAGE_LIMIT, PAGE_LIMIT);
+      const first = selection.offset ?? 0;
+
+      // Carrying on with a read already under way, rather than starting one.
+      const carrying = held.current.key === key;
+      // The same question, asked again: a write landed, or the window came
+      // back. What is on screen is still what is being read, so the pages are
+      // gathered and put up in one go — published as they arrived, the list
+      // would shrink to its first page and grow back under somebody's eyes,
+      // taking their place in it with it.
+      const quietly = !carrying && held.current.question === question;
+
+      let page = carrying ? held.current.pages : 0;
+      let rows: readonly MemoryRecord[] = carrying ? held.current.records : [];
+      let last: MemoryView | null = null;
+
+      while (page < wanted) {
+        let view: MemoryView;
+        try {
+          view = await loadRecords(
+            projectPath,
+            { ...selection, limit: size, offset: first + page * size },
+            kinds,
+          );
+        } catch (failure) {
+          if (!current) return;
+          held.current = {
+            question,
+            key,
+            pages: 0,
+            hasMore: false,
+            records: [],
+          };
+          setAnswer({ key, ...NOTHING, error: explain(failure) });
+          return;
+        }
         if (!current) return;
-        setAnswer({
+
+        rows = [...rows, ...view.records];
+        last = view;
+        page += 1;
+        held.current = {
+          question,
           key,
-          revision: view_.revision,
-          counts: view_.counts,
-          records: view_.records,
-          hasMore: view_.hasMore,
-          error: null,
-        });
-      } catch (failure) {
-        if (!current) return;
-        setAnswer({ key, ...NOTHING, error: explain(failure) });
+          pages: page,
+          hasMore: view.hasMore,
+          records: rows,
+        };
+        if (!quietly) put(page, rows, view);
+        // The store has said this is the whole of it. Asking for the page after
+        // it would be one read for no rows and a second chance to disagree
+        // about how long the list is.
+        if (!view.hasMore) break;
       }
+
+      if (quietly && last !== null) put(page, rows, last);
     })();
 
     return () => {
       current = false;
     };
-  }, [key, projectPath, selectionKey, hiddenKey, active]);
+  }, [key, question, wanted, projectPath, selectionKey, hiddenKey, active]);
 
   return {
     revision: answer.revision,
@@ -462,9 +628,16 @@ export function useCorpus(
     types,
     counts: answer.counts,
     records: answer.records,
+    total: answer.total,
     hasMore: answer.hasMore,
     hidden,
     isLoading: answer.key !== key,
+    // Only ever true of a list that is already on screen: while the first page
+    // is in flight the answer in hand is for a different question, and that is
+    // `isLoading` above.
+    isReadingMore:
+      answer.key === key && answer.hasMore && answer.pages < wanted,
+    readMore,
     error: typesError ?? answer.error,
     reload,
     createType,
@@ -500,6 +673,13 @@ function normalise(selection: MemorySelection): MemorySelection {
   if (selection.folder !== undefined) query.folder = selection.folder;
   if (selection.folderScope !== undefined) {
     query.folderScope = selection.folderScope;
+  }
+  // Sorted for the same reason freshness is, and with one extra consequence:
+  // the engine intersects tags, so the order they were ticked in cannot change
+  // the answer — and two people arriving at the same pair of tags from opposite
+  // ends are then asking one question rather than two.
+  if (selection.tags !== undefined) {
+    query.tags = [...selection.tags].sort();
   }
   // Sorted, so that asking for status and then priority is the same question as
   // asking for priority and then status rather than a second read of the same

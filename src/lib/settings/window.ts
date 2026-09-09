@@ -15,7 +15,7 @@
  */
 
 import { useSyncExternalStore } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { command } from "@/lib/command";
 
 export type WindowRole = "main" | "settings";
 
@@ -78,7 +78,7 @@ export async function openSettings(): Promise<void> {
     // No project travels with the request. Everything in settings is this
     // Mac's: one server answers for every project, so connecting an agent no
     // longer names one.
-    await invoke("settings_open", {});
+    await command("settings_open", {});
   } catch (error) {
     // Nothing to fall back to: there is no in-window settings surface to show
     // instead, so the failure is said out loud rather than swallowed.
