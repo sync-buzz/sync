@@ -151,6 +151,45 @@ const SLOTS = {
   Footer: ({ context }: { context?: Slots }) => <>{context?.footer}</>,
 };
 
+/**
+ * How far down the rows that were already here have moved, or `null` for a list
+ * that has nothing in common with the one before it.
+ *
+ * Answered from the *first row still recognised* rather than from the first row
+ * there was, and that distinction is the whole function. A page arriving at the
+ * front of a conversation does not only insert rows: the block at the seam is
+ * the tail of the page and the head of what was on the screen joined into one,
+ * and whoever draws the rows may key that join either way. So the row the
+ * reader was standing on can come back under a name this list has never seen —
+ * while every row beneath it is untouched and says exactly how far everything
+ * moved. Reading only the first row calls that a different list and starts the
+ * numbering again, which is the jump this whole mechanism exists to prevent,
+ * on the one path paging almost always takes.
+ *
+ * Searched from the top down because that is where the answer is cheapest and
+ * most certain: the rows nearest the front are the ones a prepend leaves alone.
+ */
+function shift(was: readonly string[], is: readonly string[]): number | null {
+  if (was.length === 0) return 0;
+  const at = new Map<string, number>();
+  // First occurrence wins. A key is meant to be unique and a caller that
+  // repeats one is already broken, but the earliest position is the one that
+  // makes the arithmetic below hold for the rows above the reader.
+  is.forEach((key, index) => {
+    if (!at.has(key)) at.set(key, index);
+  });
+  for (let index = 0; index < was.length; index += 1) {
+    const found = at.get(was[index]);
+    if (found === undefined) continue;
+    // Moved *up* means rows were taken off the front rather than added to it —
+    // a reading whose oldest events have been let go. The numbering cannot
+    // follow that: it only ever counts down, so a list that has lost rows at
+    // the front is told apart from a longer one and begins again.
+    return found >= index ? found - index : null;
+  }
+  return null;
+}
+
 export function VirtualList<T>({
   items,
   keyOf,
@@ -175,7 +214,7 @@ export function VirtualList<T>({
   const slots = useMemo<Slots>(() => ({ header, footer }), [header, footer]);
 
   // Where the numbering starts, moved down by however many rows arrived in
-  // front of the row that used to be first. This is the whole of "the screen
+  // front of the rows that were already here. This is the whole of "the screen
   // does not jump": the reader is holding an index, and the rows they are
   // looking at keep the index they had.
   //
@@ -185,15 +224,23 @@ export function VirtualList<T>({
   // what a jump is. React is told during that same render, which it answers by
   // discarding this pass and running it again with the new numbering; nothing
   // is committed in between, so there is no frame at the old one.
-  const leads = keys[0] ?? null;
-  const [numbering, setNumbering] = useState({ first: FIRST, key: leads });
-  if (numbering.key !== leads) {
-    const moved = numbering.key === null ? 0 : keys.indexOf(numbering.key);
+  //
+  // Only when the row at the front is a different one, which is what makes
+  // this free: a list being appended to — a conversation being written, a log
+  // being added to — answers no here and nothing is recomputed. The keys kept
+  // alongside are then the ones from the last time the front changed, and that
+  // is the set worth keeping: what is searched below is the top of it.
+  const [numbering, setNumbering] = useState<{
+    readonly first: number;
+    readonly keys: readonly string[];
+  }>(() => ({ first: FIRST, keys }));
+  if (numbering.keys[0] !== keys[0]) {
+    const moved = shift(numbering.keys, keys);
     setNumbering({
-      // Not found at all is a different list rather than a longer one — every
+      // Nothing recognised is a different list rather than a longer one — every
       // row it used to hold is gone — so the numbering starts again.
-      first: moved > 0 ? numbering.first - moved : moved === 0 ? numbering.first : FIRST,
-      key: leads,
+      first: moved === null ? FIRST : numbering.first - moved,
+      keys,
     });
   }
 
