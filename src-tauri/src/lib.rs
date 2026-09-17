@@ -87,6 +87,7 @@ pub fn run() {
         // the answer is put the right window in front of somebody who clicked
         // a banner about that project.
         .manage(windows::Holding::default())
+        .manage(windows::Pending::default())
         // Where somebody sent to a particular settings screen waits until that
         // window exists to read it: it is built hidden, so there is a moment
         // with nobody to tell.
@@ -312,6 +313,8 @@ pub fn run() {
             windows::window_new,
             windows::window_named,
             windows::window_holds,
+            windows::window_open_project,
+            windows::take_pending_open,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Sync")

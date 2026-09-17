@@ -1,6 +1,7 @@
 "use client";
 
-import { Check, ChevronsUpDown, FolderOpen, Search, Settings } from "lucide-react";
+import type { ReactNode } from "react";
+import { Check, ChevronsUpDown, ExternalLink, FolderOpen, Search, Settings, X } from "lucide-react";
 import type { ProjectSetup } from "@/components/shell/project-setup";
 import { SyncIndicator } from "@/components/shell/sync-indicator";
 import { LayoutControls } from "@/components/shell/layout-controls";
@@ -14,17 +15,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { SyncStatus } from "@/lib/memory/use-sync-state";
+import { openProjectInNewWindow } from "@/lib/window-open";
 import { openSettings } from "@/lib/settings/window";
-import type {
-  CollapsedPanels,
-  CollapsiblePanelRole,
-} from "@/lib/shell-layout";
+import type { CollapsedPanels, CollapsiblePanelRole } from "@/lib/shell-layout";
 import type { OpenProject, RecentProject } from "@/lib/project/types";
 
 /**
@@ -91,9 +86,7 @@ export function AppHeader({
       className="relative flex h-(--header-height) shrink-0 items-center gap-2 border-b border-separator bg-sidebar pr-2 pl-(--titlebar-inset)"
     >
       <ProjectSwitcher project={project} setup={setup} />
-      {project && sync && onOpenSync ? (
-        <SyncIndicator sync={sync} onOpen={onOpenSync} />
-      ) : null}
+      {project && sync && onOpenSync ? <SyncIndicator sync={sync} onOpen={onOpenSync} /> : null}
 
       <div data-tauri-drag-region className="min-w-4 flex-1 self-stretch" />
 
@@ -165,27 +158,14 @@ function SettingsControl() {
  * the path is what tells two folders with the same name apart, which is the
  * only question a list like this ever has to answer.
  */
-function ProjectSwitcher({
-  project,
-  setup,
-}: {
-  project: OpenProject | null;
-  setup: ProjectSetup;
-}) {
+function ProjectSwitcher({ project, setup }: { project: OpenProject | null; setup: ProjectSetup }) {
   const projects = listedProjects(project, setup.recent);
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="min-w-0 gap-1.5 text-fg"
-          aria-label="Project"
-        >
-          <span className="truncate font-medium">
-            {project ? project.name : "No project"}
-          </span>
+        <Button variant="ghost" size="sm" className="min-w-0 gap-1.5 text-fg" aria-label="Project">
+          <span className="truncate font-medium">{project ? project.name : "No project"}</span>
           <ChevronsUpDown className="opacity-50" />
         </Button>
       </DropdownMenuTrigger>
@@ -201,14 +181,14 @@ function ProjectSwitcher({
                   key={entry.path}
                   disabled={isOpen}
                   onSelect={() => setup.open(entry.path)}
-                  className="items-start gap-2 py-1.5"
+                  className="items-center gap-1.5 py-1 pr-1"
                 >
                   <Check
                     aria-hidden="true"
-                    className={isOpen ? "mt-0.5" : "mt-0.5 invisible"}
+                    className={isOpen ? "shrink-0" : "shrink-0 invisible"}
                   />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate">{entry.name}</span>
+                  <span className="min-w-0 flex-1 leading-tight">
+                    <span className="block truncate text-sm">{entry.name}</span>
                     <span
                       className="block truncate font-mono text-xs text-fg-tertiary"
                       title={entry.path}
@@ -216,6 +196,22 @@ function ProjectSwitcher({
                       {entry.path}
                     </span>
                   </span>
+                  {isOpen ? null : (
+                    <span className="flex shrink-0 items-center gap-px">
+                      <IconButton
+                        label="Open in new window"
+                        onClick={() => void openProjectInNewWindow(entry.path)}
+                      >
+                        <ExternalLink className="size-3.5" />
+                      </IconButton>
+                      <IconButton
+                        label="Remove from Recents"
+                        onClick={() => setup.forget(entry.path)}
+                      >
+                        <X className="size-3.5" />
+                      </IconButton>
+                    </span>
+                  )}
                 </DropdownMenuItem>
               );
             })}
@@ -247,6 +243,43 @@ function listedProjects(
 }
 
 /**
+ * An icon button inside a dropdown item that does not select the item.
+ *
+ * Radix's `MenuItem` fires `onSelect` from its own `onClick`, composed over
+ * the handler that dispatches the select event. Stopping the click here keeps
+ * the event from reaching the item, so the button acts alone — the pointer
+ * events are left alone so Radix's own pointer-down/up tracking stays honest.
+ */
+function IconButton({
+  label,
+  onClick,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label={label}
+          onClick={(event) => {
+            event.stopPropagation();
+            onClick();
+          }}
+          className="flex size-6 items-center justify-center rounded-(--radius-control) text-fg-tertiary transition-colors duration-(--motion-duration-fast) ease-shell hover:bg-accent hover:text-fg"
+        >
+          {children}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+/**
  * The way into search.
  *
  * A field to look at and a button to use: what it opens is a palette, and
@@ -265,12 +298,8 @@ function SearchAffordance({ onSearch }: { onSearch: () => void }) {
           className="flex h-(--control-height) w-80 items-center gap-2 rounded-(--radius-control) border border-separator-strong bg-raised/60 px-2 text-sm text-fg-tertiary transition-colors duration-(--motion-duration-fast) ease-shell hover:border-separator-strong hover:bg-raised hover:text-fg-secondary"
         >
           <Search className="size-3.5 shrink-0" />
-          <span className="min-w-0 flex-1 truncate text-left">
-            Search this project
-          </span>
-          <kbd className="shrink-0 font-sans text-xs text-fg-tertiary">
-            &#8984;K
-          </kbd>
+          <span className="min-w-0 flex-1 truncate text-left">Search this project</span>
+          <kbd className="shrink-0 font-sans text-xs text-fg-tertiary">&#8984;K</kbd>
         </button>
       </TooltipTrigger>
       <TooltipContent>Search this project</TooltipContent>

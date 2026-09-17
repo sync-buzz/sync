@@ -1,12 +1,6 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronDown, Folder } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -34,6 +28,7 @@ import {
 } from "@/lib/project/client";
 import { fetchMemory, memoryPresence, setMemoryRemote } from "@/lib/memory/client";
 import type { MemoryPresence } from "@/lib/memory/types";
+import { command } from "@/lib/command";
 import {
   DEFAULT_LANGUAGE_ID,
   PROJECT_LANGUAGES,
@@ -87,12 +82,7 @@ import {
  * switcher — without any of them owning its state.
  */
 
-type Stage =
-  | "closed"
-  | "repository"
-  | "memory"
-  | "details"
-  | "collision";
+type Stage = "closed" | "repository" | "memory" | "details" | "collision";
 
 /** A project being described. It is an `OpenProject` that is not open yet. */
 type Draft = OpenProject;
@@ -266,9 +256,7 @@ export function useProjectSetup({
       }
 
       const root =
-        chosen.repositoryRoot === chosen.path
-          ? chosen
-          : await probeFolder(chosen.repositoryRoot);
+        chosen.repositoryRoot === chosen.path ? chosen : await probeFolder(chosen.repositoryRoot);
 
       const known = await loadProjectSettings(root.path);
       if (known.settings) {
@@ -341,6 +329,52 @@ export function useProjectSetup({
     (path: string) => attempt(() => continueWith(path)),
     [attempt, continueWith],
   );
+
+  // A window told to open a project on its way up — *open in new window* from
+  // the header's menu — reads it here. The path is left on a shelf keyed by
+  // label, and the window takes it once: the first read is on mount, the second
+  // is when the event arrives for a window that was already running. `openRef`
+  // holds the current `open` so the event handler does not close over a stale
+  // one, and the initial read uses the mount's own.
+  const openRef = useRef(open);
+  useEffect(() => {
+    openRef.current = open;
+  }, [open]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) {
+      return;
+    }
+
+    let listening = true;
+
+    const check = async () => {
+      try {
+        const path = await command<string | null>("take_pending_open");
+        if (listening && path) openRef.current(path);
+      } catch {
+        // Outside Tauri, or the command is not available — nothing to open.
+      }
+    };
+
+    void (async () => {
+      try {
+        const { listen } = await import("@tauri-apps/api/event");
+        const unlisten = await listen("window://pending-open", () => void check());
+        if (!listening) {
+          unlisten();
+          return;
+        }
+        await check();
+      } catch {
+        // Outside Tauri — nothing to listen for.
+      }
+    })();
+
+    return () => {
+      listening = false;
+    };
+  }, []);
 
   const initialize = useCallback(() => {
     if (!probe) return;
@@ -476,9 +510,7 @@ export function useProjectSetup({
 }
 
 function messageOf(failure: unknown): string {
-  return failure instanceof Error
-    ? failure.message
-    : "The folder could not be opened.";
+  return failure instanceof Error ? failure.message : "The folder could not be opened.";
 }
 
 export function ProjectSetupSheet({ setup }: { setup: ProjectSetup }) {
@@ -501,8 +533,7 @@ export function ProjectSetupSheet({ setup }: { setup: ProjectSetup }) {
         {setup.stage === "repository" && setup.probe ? (
           <RepositoryStep setup={setup} probe={setup.probe} />
         ) : null}
-        {setup.stage === "memory" &&
-        setup.presence?.state === "not_fetched" ? (
+        {setup.stage === "memory" && setup.presence?.state === "not_fetched" ? (
           <MemoryStep setup={setup} presence={setup.presence} />
         ) : null}
         {setup.stage === "details" && setup.draft ? (
@@ -544,13 +575,11 @@ function MemoryStep({
             This project already has memory, and it is not here yet.
           </h3>
           <SheetDescription id="project-setup-lead">
-            A clone copies branches and tags. It does not copy the refs Sync
-            keeps a project&rsquo;s knowledge in, so what this project has
-            decided, constrained and specified is still on its remote.
+            A clone copies branches and tags. It does not copy the refs Sync keeps a project&rsquo;s
+            knowledge in, so what this project has decided, constrained and specified is still on
+            its remote.
           </SheetDescription>
-          <p className="break-all font-mono text-xs text-fg-tertiary">
-            {presence.url}
-          </p>
+          <p className="break-all font-mono text-xs text-fg-tertiary">{presence.url}</p>
           <p className="text-xs text-fg-tertiary">
             {presence.configured
               ? "Fetching merges what the remote holds into this repository. Nothing in the working tree is touched."
@@ -560,9 +589,9 @@ function MemoryStep({
 
         {setup.fetchFailed ? (
           <p className="text-xs text-fg-tertiary">
-            The memory could not be fetched. Describing this project instead
-            makes a second, separate memory for it: what is on the remote stays
-            there, and the two cannot be merged afterwards.
+            The memory could not be fetched. Describing this project instead makes a second,
+            separate memory for it: what is on the remote stays there, and the two cannot be merged
+            afterwards.
           </p>
         ) : null}
 
@@ -576,11 +605,7 @@ function MemoryStep({
         </Button>
         {/* Wide enough for the longest label it shows, so the row does not
             resize under the pointer while the network is being waited on. */}
-        <Button
-          onClick={setup.fetchExisting}
-          disabled={setup.isBusy}
-          className="min-w-52"
-        >
+        <Button onClick={setup.fetchExisting} disabled={setup.isBusy} className="min-w-52">
           {setup.isBusy
             ? "Fetching\u2026"
             : setup.fetchFailed
@@ -600,31 +625,22 @@ function MemoryStep({
  * person who reads this and still says no has decided, and being told again
  * would be an argument, not an interface.
  */
-function RepositoryStep({
-  setup,
-  probe,
-}: {
-  setup: ProjectSetup;
-  probe: FolderProbe;
-}) {
+function RepositoryStep({ setup, probe }: { setup: ProjectSetup; probe: FolderProbe }) {
   return (
     <>
       <StepBody>
         <FolderLine path={probe.path} />
 
         <div className="space-y-2">
-          <h3 className="text-lg font-medium text-fg">
-            This folder is not a Git repository.
-          </h3>
+          <h3 className="text-lg font-medium text-fg">This folder is not a Git repository.</h3>
           <SheetDescription id="project-setup-lead">
-            Sync keeps what a project knows in its own repository, so decisions,
-            constraints and specifications are versioned with the code and
-            travel with it. Without a repository there is nowhere to put any of
-            that, and the folder cannot be opened as a project.
+            Sync keeps what a project knows in its own repository, so decisions, constraints and
+            specifications are versioned with the code and travel with it. Without a repository
+            there is nowhere to put any of that, and the folder cannot be opened as a project.
           </SheetDescription>
           <p className="text-xs text-fg-tertiary">
-            Initializing runs <span className="font-mono">git init</span> in the
-            folder. Nothing is committed and nothing already there is changed.
+            Initializing runs <span className="font-mono">git init</span> in the folder. Nothing is
+            committed and nothing already there is changed.
           </p>
         </div>
 
@@ -640,11 +656,7 @@ function RepositoryStep({
             git runs, and a button that resizes drags its neighbour sideways
             with it — under the pointer, and leaving the webview repainting a
             strip of the row that has already moved. */}
-        <Button
-          onClick={setup.initialize}
-          disabled={setup.isBusy}
-          className="min-w-44"
-        >
+        <Button onClick={setup.initialize} disabled={setup.isBusy} className="min-w-44">
           {setup.isBusy ? "Initializing…" : "Initialize Repository"}
         </Button>
       </SheetFooter>
@@ -662,13 +674,7 @@ function RepositoryStep({
  * else, and everything either repository has ever written goes on saying what
  * it said.
  */
-function CollisionStep({
-  setup,
-  collision,
-}: {
-  setup: ProjectSetup;
-  collision: Collision;
-}) {
+function CollisionStep({ setup, collision }: { setup: ProjectSetup; collision: Collision }) {
   const [identifier, setIdentifier] = useState(collision.project.identifier);
   const derivation = useRef(0);
 
@@ -687,11 +693,9 @@ function CollisionStep({
         <FolderLine path={collision.project.path} />
         <SheetDescription id="project-setup-lead">
           {collision.project.name} answers to{" "}
-          <strong className="font-medium text-fg-primary">
-            {collision.project.identifier}
-          </strong>
-          , and so does another project on this machine. Give this one a
-          different name to be called by here.
+          <strong className="font-medium text-fg-primary">{collision.project.identifier}</strong>,
+          and so does another project on this machine. Give this one a different name to be called
+          by here.
         </SheetDescription>
 
         <div className="space-y-1 rounded-(--radius-control) border border-separator-strong bg-panel p-2.5">
@@ -726,8 +730,7 @@ function CollisionStep({
 
           {identifier && !isTaken ? (
             <p className="text-xs text-fg-tertiary">
-              Agents on this machine will mean {collision.project.name} when
-              they say {identifier}.
+              Agents on this machine will mean {collision.project.name} when they say {identifier}.
             </p>
           ) : null}
         </div>
@@ -740,10 +743,7 @@ function CollisionStep({
         <Button variant="outline" onClick={setup.cancel}>
           Cancel
         </Button>
-        <Button
-          onClick={() => setup.settleCollision(identifier)}
-          disabled={!identifier || isTaken}
-        >
+        <Button onClick={() => setup.settleCollision(identifier)} disabled={!identifier || isTaken}>
           Register and open
         </Button>
       </SheetFooter>
@@ -752,22 +752,14 @@ function CollisionStep({
 }
 
 /** Name, description and language: what the project is, in its own words. */
-function DetailsStep({
-  setup,
-  draft,
-}: {
-  setup: ProjectSetup;
-  draft: Draft;
-}) {
+function DetailsStep({ setup, draft }: { setup: ProjectSetup; draft: Draft }) {
   const [name, setName] = useState(draft.name);
   const [description, setDescription] = useState(draft.description);
   const [language, setLanguage] = useState<ProjectLanguageId>(draft.language);
   const [identifier, setIdentifier] = useState(draft.identifier);
   // Whether the person has taken the field over. Until they do it follows the
   // name; once they have, the name stops writing over what they typed.
-  const [identifierIsTheirs, setIdentifierIsTheirs] = useState(
-    draft.identifier !== "",
-  );
+  const [identifierIsTheirs, setIdentifierIsTheirs] = useState(draft.identifier !== "");
   // Which derivation is the current one. The rule is asked for over IPC, so two
   // keystrokes are two answers in flight, and the one that comes back last is
   // not necessarily the one that was asked last.
@@ -809,22 +801,18 @@ function DetailsStep({
       <StepBody>
         <FolderLine path={draft.path} />
         <SheetDescription id="project-setup-lead">
-          The project is new. Its name, description and language are stored in
-          the repository at that path, alongside everything else it comes to
-          know, so it is only asked once.
+          The project is new. Its name, description and language are stored in the repository at
+          that path, alongside everything else it comes to know, so it is only asked once.
         </SheetDescription>
 
         {setup.memoryError ? (
           <div className="space-y-1 rounded-(--radius-control) border border-separator-strong bg-panel p-2.5">
-            <p className="text-xs font-medium text-warning">
-              Project memory could not be read
-            </p>
+            <p className="text-xs font-medium text-warning">Project memory could not be read</p>
             {/* The engine's own words, then what they mean here. A project
                 that already exists must not be quietly described again. */}
             <p className="text-xs text-fg-secondary">{setup.memoryError}</p>
             <p className="text-xs text-fg-tertiary">
-              If this repository was already a Sync project, continuing
-              describes it a second time.
+              If this repository was already a Sync project, continuing describes it a second time.
             </p>
           </div>
         ) : null}
@@ -894,9 +882,7 @@ function DetailsStep({
               <select
                 id="project-language"
                 value={language}
-                onChange={(event) =>
-                  setLanguage(event.target.value as ProjectLanguageId)
-                }
+                onChange={(event) => setLanguage(event.target.value as ProjectLanguageId)}
                 className={cn(FIELD_CONTROL, "cursor-default appearance-none pr-8")}
               >
                 {PROJECT_LANGUAGES.map((option) => (
@@ -918,25 +904,13 @@ function DetailsStep({
 
       <SheetFooter>
         <div className="min-w-0 flex-1" />
-        <Button
-          variant="outline"
-          onClick={setup.cancel}
-          disabled={setup.isBusy}
-        >
+        <Button variant="outline" onClick={setup.cancel} disabled={setup.isBusy}>
           Cancel
         </Button>
         {/* Three labels, one width. Wide enough for "Open Anyway", which is the
             longest of them, so pressing the button never moves "Cancel". */}
-        <Button
-          onClick={submit}
-          disabled={!trimmedName || setup.isBusy}
-          className="min-w-32"
-        >
-          {setup.isBusy
-            ? "Opening…"
-            : setup.saveFailed
-              ? "Open Anyway"
-              : "Open Project"}
+        <Button onClick={submit} disabled={!trimmedName || setup.isBusy} className="min-w-32">
+          {setup.isBusy ? "Opening…" : setup.saveFailed ? "Open Anyway" : "Open Project"}
         </Button>
       </SheetFooter>
     </>
@@ -971,9 +945,7 @@ export function Field({
         className="flex items-baseline gap-1.5 text-sm font-medium text-fg-secondary"
       >
         {label}
-        {optional ? (
-          <span className="text-xs font-normal text-fg-tertiary">Optional</span>
-        ) : null}
+        {optional ? <span className="text-xs font-normal text-fg-tertiary">Optional</span> : null}
       </label>
       {children}
       {hint ? <p className="text-xs text-fg-tertiary">{hint}</p> : null}

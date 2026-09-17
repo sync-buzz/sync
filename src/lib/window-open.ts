@@ -34,3 +34,20 @@ export async function openNewWindow(): Promise<void> {
     console.error("A new window could not be opened.", error);
   }
 }
+
+/**
+ * Open a project in its own window.
+ *
+ * The window is chosen the same way a banner click's is: the one that already
+ * has the project, an empty one, or a new one. A project already open is
+ * brought forward rather than opened twice.
+ */
+export async function openProjectInNewWindow(path: string): Promise<void> {
+  if (!inTauri()) return;
+
+  try {
+    await command("window_open_project", { project: path });
+  } catch (error) {
+    console.error("The project could not be opened in a window.", error);
+  }
+}

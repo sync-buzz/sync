@@ -22,7 +22,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use tauri::utils::config::WindowConfig;
-use tauri::{AppHandle, Manager, Runtime, WebviewWindow, WebviewWindowBuilder};
+use tauri::{
+    AppHandle, Emitter as _, Manager, Runtime, State, WebviewWindow, WebviewWindowBuilder,
+};
 
 /// The label the window Tauri opens with carries, and the one a lone window
 /// keeps: a person with one window open has `main`, whatever order the windows
@@ -177,7 +179,86 @@ pub fn closed<R: Runtime>(app: &AppHandle<R>, label: &str) {
     if let Ok(mut held) = app.state::<Holding>().0.lock() {
         held.remove(label);
     }
+    // A pending open left for a window that never collected it would open the
+    // project the next time the label was reused, so it goes with the window.
+    if let Ok(mut pending) = app.state::<Pending>().0.lock() {
+        pending.remove(label);
+    }
 }
+
+/// A project a window was told to open on its way up, keyed by label.
+///
+/// Distinct from the banner address in `attention.rs`: that carries a
+/// conversation and a record the window was told to look at, and this carries
+/// only a project path — it is what *open in new window* from the header's menu
+/// leaves behind, and the window opens it through the same flow a click in the
+/// welcome list does rather than through `openRegistered`.
+#[derive(Default)]
+pub struct Pending(Mutex<HashMap<String, String>>);
+
+/// Open a project in a window of its own, or focus the one that has it.
+///
+/// [`reveal`] finds the window that already has the project, an empty one, or
+/// makes a new one. A window that already has the project is brought forward and
+/// left alone — there is nothing to tell it. An empty or new window is given
+/// the path to open, and it picks it up on the way up through
+/// [`take_pending_open`].
+///
+/// # Errors
+///
+/// When a window could not be found or made.
+#[tauri::command]
+pub fn window_open_project<R: Runtime>(app: AppHandle<R>, project: String) -> Result<(), String> {
+    let path = Path::new(&project);
+
+    let Some(window) = reveal(&app, path) else {
+        return Err("a window could not be opened".to_owned());
+    };
+
+    // A window that already holds this project has nothing to collect.
+    let already = app.state::<Holding>().0.lock().is_ok_and(|held| {
+        held.get(window.label())
+            .is_some_and(|p| p.as_deref() == Some(path))
+    });
+    if already {
+        return Ok(());
+    }
+
+    app.state::<Pending>()
+        .0
+        .lock()
+        .map_err(|_| "the pending list could not be written".to_owned())?
+        .insert(window.label().to_owned(), project);
+
+    // The event is for a window that is already running; one being made hears
+    // nothing, which is what the initial read in `take_pending_open` is for.
+    let _ = app.emit_to(window.label(), PENDING_OPEN, ());
+    Ok(())
+}
+
+/// Take the project this window was told to open, if it was told one.
+///
+/// Read once and gone: a window asks when it starts and again when it is told
+/// there is something, and a pending entry left behind would open the project a
+/// second time on the next change of project.
+///
+/// # Errors
+///
+/// When the pending list could not be read.
+#[tauri::command]
+pub fn take_pending_open<R: Runtime>(
+    window: WebviewWindow<R>,
+    state: State<'_, Pending>,
+) -> Result<Option<String>, String> {
+    Ok(state
+        .0
+        .lock()
+        .map_err(|_| "the pending list could not be read".to_owned())?
+        .remove(window.label()))
+}
+
+/// The event sent to a window that has a pending project to collect.
+const PENDING_OPEN: &str = "window://pending-open";
 
 /// Name a window after the project it has open.
 ///
