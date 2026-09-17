@@ -236,6 +236,8 @@ pub fn run() {
             schedule::schedule_switch,
             project::project_view_load,
             project::project_view_save,
+            project::extension_settings_load,
+            project::extension_settings_set,
             project::recent_projects_load,
             project::projects_registered,
             project::project_register,

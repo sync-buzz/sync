@@ -48,4 +48,4 @@ pub use net::{
 };
 pub use registry::{Artefact, Fetched, Index, Ledger, Listed, Registry, RegistryError, Release};
 pub use store::{Installed, Pointer, Source, Store, StoreError};
-pub use vocabulary::{TypeDefinition, VocabularyError, read_prompt, read_types};
+pub use vocabulary::{TypeDefinition, VocabularyError, read_prompt, read_settings, read_types};

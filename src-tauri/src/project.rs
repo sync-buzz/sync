@@ -434,6 +434,59 @@ fn project_views<R: Runtime>(app: &AppHandle<R>) -> BTreeMap<String, ProjectView
 
 const PROJECT_VIEWS_FILE: &str = "project-views.json";
 const RECENT_PROJECTS_FILE: &str = "recent-projects.json";
+const EXTENSION_SETTINGS_FILE: &str = "extension-settings.json";
+
+/// Local extension settings for one project and one extension.
+///
+/// Portable values live in the project's memory, on the `InstalledExtension`
+/// record; these are the rest — this machine's answer to a question the
+/// project did not ask. One file, one map, keyed by project then extension.
+#[tauri::command(async)]
+pub fn extension_settings_load<R: Runtime>(
+    app: AppHandle<R>,
+    project: String,
+    extension_id: String,
+) -> serde_json::Value {
+    extension_settings(&app)
+        .get(&project)
+        .and_then(|projects| projects.get(&extension_id))
+        .cloned()
+        .unwrap_or(serde_json::json!({}))
+}
+
+/// Write one local setting. The host decided where it goes; this is the half
+/// that stays on this machine.
+#[tauri::command(async)]
+pub fn extension_settings_set<R: Runtime>(
+    app: AppHandle<R>,
+    project: String,
+    extension_id: String,
+    key: String,
+    value: serde_json::Value,
+) -> Result<(), ProjectError> {
+    let mut settings = extension_settings(&app);
+    let entry = settings
+        .entry(project)
+        .or_default()
+        .entry(extension_id)
+        .or_insert_with(|| serde_json::json!({}));
+    if let Some(obj) = entry.as_object_mut() {
+        obj.insert(key, value);
+    }
+    let path = configuration_file(&app, EXTENSION_SETTINGS_FILE)?;
+    write_configuration(&path, &settings)?;
+    Ok(())
+}
+
+fn extension_settings<R: Runtime>(
+    app: &AppHandle<R>,
+) -> BTreeMap<String, BTreeMap<String, serde_json::Value>> {
+    configuration_file(app, EXTENSION_SETTINGS_FILE)
+        .ok()
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default()
+}
 
 /// What a folder is, as far as opening a project is concerned.
 #[derive(Debug, Serialize)]

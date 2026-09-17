@@ -423,6 +423,7 @@ export type { AreaIntent } from "@/lib/area-intent";
 // ---------------------------------------------------------------------------
 
 export { useBadge, type BadgeReport } from "@/lib/extension-api/badge";
+export { useSettings, SettingsScope } from "@/lib/extension-api/settings";
 export { TableCommandsProvider, type TableCommands } from "@/lib/editor/table-commands";
 
 // ---------------------------------------------------------------------------

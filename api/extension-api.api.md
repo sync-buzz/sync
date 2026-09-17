@@ -1369,6 +1369,12 @@ export interface SettingsHandle {
 }
 
 // @public
+export function SettingsScope(input: {
+    handle: SettingsHandle;
+    children: ReactNode;
+}): JSX.Element;
+
+// @public
 export function Sheet(input: React_2.ComponentProps<typeof Dialog.Root>): React_2.JSX.Element;
 
 // @public (undocumented)
@@ -1482,7 +1488,7 @@ export function stopSession(key: string): Promise<void>;
 export function supportsApiRange(range: string): boolean;
 
 // @public
-export const SYNC_API_VERSION: "3.20.0";
+export const SYNC_API_VERSION: "3.21.0";
 
 // @public
 export const SYNC_CAPABILITIES: readonly ["records", "agents.acp", "markdown.plugins", "native-menu", "folders", "sheets", "net", "net.write", "vault", "background", "schedule", "work.agent", "agent.tools", "terminal", "tools.call"];
@@ -1744,6 +1750,9 @@ export function useOpenRecord(): ((record: {
 
 // @public (undocumented)
 export function useProjectView(projectPath: string): ProjectViewState;
+
+// @public
+export function useSettings(): SettingsHandle;
 
 // @public (undocumented)
 export function VirtualList<T>(input: VirtualListProps<T>): JSX.Element;

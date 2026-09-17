@@ -25,8 +25,11 @@ import { useAreas, type MountedArea } from "@/lib/extension-host/areas";
 import { useSectionOrder } from "@/lib/project/use-section-order";
 import { useHiddenSections, useWatchedKinds } from "@/lib/project/use-project-view";
 import { BadgeScope } from "@/lib/extension-api/badge";
+import { SettingsScope } from "@/lib/extension-api/settings";
 import { mergeBadges, useDeclaredBadges, useLiveBadges } from "@/lib/extension-host/badges";
-import { PackagesProvider, usePackagesState } from "@/lib/extension-host/packages";
+import { useExtensionSettings } from "@/lib/extension-host/settings";
+import { ExtensionSettingsSheet } from "@/components/settings/extension-settings-sheet";
+import { PackagesProvider, usePackagesState, type Packages } from "@/lib/extension-host/packages";
 import { updatesFor, useCachedIndex } from "@/lib/extension-host/updates";
 import { useActivity } from "@/lib/memory/use-activity";
 import { useSyncState } from "@/lib/memory/use-sync-state";
@@ -69,6 +72,44 @@ import { cn } from "@/lib/utils";
  * area has to keep the DOM it built, and taking the panel out of the tree would
  * take that with it.
  */
+/**
+ * Wraps one area's layer in a `SettingsScope` and renders the settings sheet
+ * the host draws from the extension's schema.
+ *
+ * A component rather than a hook called inline, because hooks may not run
+ * inside the `reduceRight` that builds the area layers. For an extension that
+ * declares no settings, the scope is inert — `values` is `null`, `set` and
+ * `open` do nothing — and the sheet never opens.
+ */
+function AreaSettingsScope({
+  project,
+  extensionId,
+  packages,
+  children,
+}: {
+  project: OpenProject;
+  extensionId: string;
+  packages: Packages;
+  children: ReactNode;
+}) {
+  const state = useExtensionSettings(project, extensionId, packages);
+  return (
+    <SettingsScope handle={state.handle}>
+      {children}
+      {state.schema !== null ? (
+        <ExtensionSettingsSheet
+          open={state.sheetOpen}
+          onOpenChange={state.setSheetOpen}
+          schema={state.schema}
+          values={state.handle.values}
+          extensionName={state.extensionName}
+          onSet={state.handle.set}
+        />
+      ) : null}
+    </SettingsScope>
+  );
+}
+
 export function ProjectWindow({
   project,
   setup,
@@ -590,9 +631,16 @@ export function ProjectWindow({
     // those opens a scope of its own around everything of its own, and the
     // nearer one is the one a hook finds.
     return (
-      <BadgeScope key={key} areaKey={key} report={live.report}>
-        {layer}
-      </BadgeScope>
+      <AreaSettingsScope
+        key={key}
+        project={project}
+        extensionId={area.extensionId}
+        packages={packages}
+      >
+        <BadgeScope areaKey={key} report={live.report}>
+          {layer}
+        </BadgeScope>
+      </AreaSettingsScope>
     );
   }, null);
 

@@ -24,7 +24,7 @@ use serde::Serialize;
 use sync_extensions::{
     Archive, Artefact, Fetched, Index, Installed, Ledger, Manifest, NET_CAPABILITY,
     NET_WRITE_CAPABILITY, NetRequest, NetResponse, Pointer, Registry, Source, Store,
-    TypeDefinition, read_prompt, read_types,
+    TypeDefinition, read_prompt, read_settings, read_types,
 };
 use tauri::http::{Request, Response, StatusCode};
 use tauri::{AppHandle, Manager, Runtime, UriSchemeContext};
@@ -271,6 +271,13 @@ pub struct InstalledExtension {
     pub types: Vec<TypeDefinition>,
     /// What it tells an agent, whole.
     pub prompt: Option<String>,
+    /// The settings schema, parsed, or `None` when the package asks for none.
+    ///
+    /// Read out of the artefact for the reason `types` and `prompt` are: the
+    /// window cannot fetch a file from inside an archive without widening its
+    /// `connect-src`. The host renders a form from it; the extension reads
+    /// values through `useSettings`.
+    pub settings: Option<serde_json::Value>,
     /// Why this package cannot be used, when it cannot.
     ///
     /// A package whose manifest parsed and whose type definitions did not is
@@ -317,6 +324,10 @@ impl InstalledExtension {
             Err(error) => (Vec::new(), None, Some(error.to_string())),
         };
 
+        let settings = read_settings(&installed.root, &installed.manifest)
+            .ok()
+            .flatten();
+
         Self {
             manifest: installed.manifest,
             pointer: installed.pointer,
@@ -324,6 +335,7 @@ impl InstalledExtension {
             styles,
             types,
             prompt,
+            settings,
             defect,
         }
     }

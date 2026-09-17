@@ -148,6 +148,35 @@ pub fn read_prompt(root: &Path, manifest: &Manifest) -> Result<Option<String>, V
         })
 }
 
+/// The settings schema, parsed, or `None` when the package asks for none.
+///
+/// Read and parsed here rather than fetched from the window: a file inside an
+/// artefact is reachable only over `syncext://`, and fetching one would widen
+/// the webview's `connect-src`. The schema travels with the installed
+/// extension, like the types and the prompt.
+///
+/// # Errors
+///
+/// When the manifest names a settings file and it is not there or not JSON.
+pub fn read_settings(
+    root: &Path,
+    manifest: &Manifest,
+) -> Result<Option<serde_json::Value>, VocabularyError> {
+    let Some(path) = &manifest.settings else {
+        return Ok(None);
+    };
+    let bytes = std::fs::read(root.join(path)).map_err(|source| VocabularyError::Unreadable {
+        path: path.clone(),
+        source,
+    })?;
+    serde_json::from_slice(&bytes)
+        .map(Some)
+        .map_err(|source| VocabularyError::Unparsable {
+            path: path.clone(),
+            source,
+        })
+}
+
 #[cfg(test)]
 mod tests {
     // A test that cannot set itself up has failed, and panicking is the

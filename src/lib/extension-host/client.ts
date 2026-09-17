@@ -250,6 +250,14 @@ export interface InstalledExtension {
   /** What it tells an agent, whole, or `null` when it says nothing. */
   readonly prompt: string | null;
   /**
+   * The settings schema, parsed, or `null` when the package asks for none.
+   *
+   * Read out of the artefact by Rust, for the reason `types` and `prompt` are:
+   * the window cannot fetch a file from inside an archive. The host renders a
+   * form from it; the extension reads values through `useSettings`.
+   */
+  readonly settings: Record<string, unknown> | null;
+  /**
    * Why this package cannot be used, when it cannot.
    *
    * A package whose manifest read and whose type definitions did not is still
