@@ -28,6 +28,9 @@ there to keep it that way.
   it is heard. Start here if you are changing the host or reading the seam cold.
 - [docs/writing-an-extension.md](docs/writing-an-extension.md) — one package
   built from nothing, with every file it contains.
+- [docs/extension-settings.md](docs/extension-settings.md) — how a package
+  declares settings, how the host renders them, and which values travel with a
+  project.
 - [docs/background.md](docs/background.md) — service modules, clocks, work
   orders: the half of an extension with no screen.
 - [docs/voice.md](docs/voice.md), [docs/releasing.md](docs/releasing.md).

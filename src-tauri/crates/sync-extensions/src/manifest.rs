@@ -627,6 +627,15 @@ pub struct Manifest {
     /// only appear once.
     #[serde(default)]
     pub schedule: Vec<Scheduled>,
+    /// Path to a JSON Schema describing the settings this extension asks for.
+    ///
+    /// Optional. When present, the host reads the schema from the archive,
+    /// renders a settings form from it, and stores the values. Fields marked
+    /// `sync:portable` in the schema travel with the project's memory; the rest
+    /// are local to this machine. The schema is a file inside the archive,
+    /// hashed and signed like every other.
+    #[serde(default)]
+    pub settings: Option<String>,
 }
 
 impl Manifest {
@@ -1012,6 +1021,9 @@ impl Manifest {
         paths.extend(self.types.iter().map(String::as_str));
         if let Some(prompt) = &self.prompt {
             paths.push(prompt.as_str());
+        }
+        if let Some(settings) = &self.settings {
+            paths.push(settings.as_str());
         }
         paths
     }

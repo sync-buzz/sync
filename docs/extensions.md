@@ -1313,6 +1313,7 @@ extensions, and no rule left to enforce against the next one.*
 | **Markdown plugin** | Replacing how one block of stored prose is drawn |
 | **Native menu** | Secondary click, through the host's own menu |
 | **Handler** | A function the host calls with no screen mounted — at install, on a clock, and by the name a tool published (§5a) |
+| **Settings** | A JSON Schema the host renders as a form; values marked `sync:portable` travel with the project's memory, the rest are local. See [`extension-settings.md`](extension-settings.md) |
 
 **Not open, and each for its own reason.** The record inspector: it is drawn by
 whichever extension shows records, so contributing to it would be a protocol
@@ -1545,6 +1546,12 @@ and means *touched*.
 
 Three more places a package might have appeared, closed for the reason the set
 in §9a is closed at all: a page of the settings window, entries in ⌘K, and a
-system notification. The last has a rule of its own worth stating so it is not
-re-proposed as a small thing — a banner is the badge said louder, and an
-extension that could send one is an extension that could shout.
+system notification. The first is closed because settings are the
+installation's — what is true of this machine whatever project is open — and
+an extension's preferences are true of a project, which is the one thing
+settings are not. A package's own settings reach the person from the area's
+own context: a sheet the host renders from a schema the manifest declares,
+described in [`extension-settings.md`](extension-settings.md). The last has a
+rule of its own worth stating so it is not re-proposed as a small thing — a
+banner is the badge said louder, and an extension that could send one is an
+extension that could shout.

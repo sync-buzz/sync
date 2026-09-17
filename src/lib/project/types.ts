@@ -135,6 +135,15 @@ export interface InstalledExtension {
    * Absent for an extension that offers none, which is most of them.
    */
   readonly tools?: readonly ToolDeclaration[];
+  /**
+   * The portable settings values, as the project stores them.
+   *
+   * Only the fields marked `sync:portable` in the extension's settings schema.
+   * Local values are this machine's and live in app config, not in the
+   * project's memory. Absent for an extension that declares no settings,
+   * which is most of them.
+   */
+  readonly settings?: Readonly<Record<string, unknown>>;
 }
 
 /** One tool an extension offers an agent, as the project records it. */

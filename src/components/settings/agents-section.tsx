@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ModelChoice } from "@/components/settings/model-choice";
 import { AGENT_GROUPS } from "@/components/settings/sections";
 import { ToolConsent } from "@/components/settings/tool-consent";
+import { messageOf } from "@/components/settings/shared";
 import { Button } from "@/components/ui/button";
 import {
   connectAgent,
@@ -76,7 +77,7 @@ export function AgentsSection({ only }: { only: string }) {
         const loaded = await loadAgents();
         if (live) setRows(loaded);
       } catch (error: unknown) {
-        if (live) setFailure(explain(error));
+        if (live) setFailure(messageOf(error, "The agent's configuration could not be changed."));
       }
     })();
     return () => {
@@ -99,7 +100,7 @@ export function AgentsSection({ only }: { only: string }) {
           refresh();
         })
         .catch((error: unknown) => {
-          setFailure(explain(error));
+          setFailure(messageOf(error, "The agent's configuration could not be changed."));
         })
         .finally(() => setBusy(null));
     },
@@ -218,19 +219,3 @@ const LABEL: Record<AgentRow["state"], string> = {
   foreign: "Name taken",
   unreadable: "Unreadable",
 };
-
-/**
- * A refusal in the words it arrived in.
- *
- * The commands answer with a `kind` and a message written for a person — the
- * file that could not be written, the name already spoken for — and a sentence
- * of our own would drop the path, which is the part somebody acts on.
- */
-function explain(error: unknown): string {
-  if (typeof error === "object" && error !== null && "message" in error) {
-    const message = (error as { message?: unknown }).message;
-    if (typeof message === "string" && message.trim() !== "") return message;
-  }
-  if (error instanceof Error) return error.message;
-  return "The agent's configuration could not be changed.";
-}

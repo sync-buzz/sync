@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { messageOf } from "@/components/settings/shared";
 import { chooseFolder, registeredProjects } from "@/lib/project/client";
 import {
   discardWorktree,
@@ -42,7 +43,7 @@ export function WorktreesSection() {
         if (live) setLocation(path);
       })
       .catch((error: unknown) => {
-        if (live) setFailure(explain(error));
+        if (live) setFailure(messageOf(error, "That location could not be used."));
       });
     return () => {
       live = false;
@@ -78,7 +79,7 @@ export function WorktreesSection() {
         if (live) setHeld(answers);
       } catch (error: unknown) {
         if (live) {
-          setFailure(explain(error));
+          setFailure(messageOf(error, "That location could not be used."));
           setHeld([]);
         }
       }
@@ -97,7 +98,7 @@ export function WorktreesSection() {
       // that showed the request would be showing a location nothing uses.
       setLocation(await setWorktreeLocation(path));
     } catch (error: unknown) {
-      setFailure(explain(error));
+      setFailure(messageOf(error, "That location could not be used."));
     } finally {
       setBusy(false);
     }
@@ -111,7 +112,7 @@ export function WorktreesSection() {
         await discardWorktree({ project, path: tree.path });
         setHeld(await read());
       } catch (error: unknown) {
-        setFailure(explain(error));
+        setFailure(messageOf(error, "That location could not be used."));
       } finally {
         setBusy(false);
       }
@@ -120,12 +121,11 @@ export function WorktreesSection() {
   );
 
   return (
-    <section className="flex flex-col gap-3">
+    <section className="flex flex-col gap-5">
       <p className="text-sm text-fg-secondary">
-        A conversation can be held in a working tree of its own: a copy of the
-        project at its last commit, which an agent works in without touching
-        what you have open. Each project keeps its trees in a directory of its
-        own under this one.
+        A conversation can be held in a working tree of its own: a copy of the project at its last
+        commit, which an agent works in without touching what you have open. Each project keeps its
+        trees in a directory of its own under this one.
       </p>
 
       <div className="flex items-center gap-3 rounded-(--radius-control) px-2 py-2">
@@ -151,7 +151,7 @@ export function WorktreesSection() {
                 // A panel that never opened is a refusal like any other, and
                 // one thrown away here is a button that does nothing with no
                 // sentence anywhere saying why.
-                setFailure(explain(error));
+                setFailure(messageOf(error, "That location could not be used."));
               }
             })();
           }}
@@ -164,9 +164,9 @@ export function WorktreesSection() {
       </div>
 
       <p className="text-xs text-fg-tertiary">
-        A tree starts from the project&apos;s last commit, so work you have not
-        committed is not in it. Nothing that was built is either: dependencies
-        and build output are not copied, and a tree is the source alone.
+        A tree starts from the project&apos;s last commit, so work you have not committed is not in
+        it. Nothing that was built is either: dependencies and build output are not copied, and a
+        tree is the source alone.
       </p>
 
       {held === null || held.length === 0 ? null : (
@@ -226,17 +226,4 @@ interface Held {
   /** Its repository root, which every call about a tree takes. */
   readonly path: string;
   readonly trees: readonly Worktree[];
-}
-
-/**
- * A refusal in the words it arrived in — the path that could not be made is the
- * part somebody acts on, and a sentence of our own would drop it.
- */
-function explain(error: unknown): string {
-  if (typeof error === "object" && error !== null && "message" in error) {
-    const message = (error as { message?: unknown }).message;
-    if (typeof message === "string" && message.trim() !== "") return message;
-  }
-  if (error instanceof Error) return error.message;
-  return "That location could not be used.";
 }

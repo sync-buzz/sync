@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Check } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { FIELD, messageOf, Segment, SegmentedToggle, Setting } from "@/components/settings/shared";
 import {
   chooseVoice,
   FASTEST,
@@ -60,7 +60,7 @@ export function VoiceSection() {
         if (live) setStatus(answer);
       },
       (error: unknown) => {
-        if (live) setFailure(messageOf(error));
+        if (live) setFailure(messageOf(error, "Sync could not reach a voice engine."));
       },
     );
     return () => {
@@ -72,68 +72,48 @@ export function VoiceSection() {
     setBusy(true);
     setFailure(null);
     void chooseVoice(settings)
-      .then(setStatus, (error: unknown) => setFailure(messageOf(error)))
+      .then(setStatus, (error: unknown) =>
+        setFailure(messageOf(error, "Sync could not reach a voice engine.")),
+      )
       .finally(() => setBusy(false));
   }, []);
 
   const say = useCallback(() => {
     setFailure(null);
-    // Interrupting, because pressing it twice means "say it again", not "say it
-    // twice" — the second press is somebody who did not hear the first.
     void speak(sentence, true).catch((error: unknown) =>
-      setFailure(messageOf(error)),
+      setFailure(messageOf(error, "Sync could not reach a voice engine.")),
     );
   }, [sentence]);
 
   const settings = status?.settings;
-  const grouped = useMemo(
-    () => byLanguage(status?.voices ?? []),
-    [status?.voices],
-  );
+  const grouped = useMemo(() => byLanguage(status?.voices ?? []), [status?.voices]);
   const chosen = settings?.voice ?? null;
   const stranded = useMemo(
-    () =>
-      chosen && !(status?.voices ?? []).some((voice) => voice.id === chosen)
-        ? chosen
-        : null,
+    () => (chosen && !(status?.voices ?? []).some((voice) => voice.id === chosen) ? chosen : null),
     [chosen, status?.voices],
   );
 
   return (
     <section className="flex flex-col gap-5">
-      <Choice
+      <Setting
         label="Engine"
         detail="What turns the words into sound. The system's own synthesiser uses the voices macOS has, including the ones it downloads in System Settings."
       >
         <div role="radiogroup" aria-label="Engine" className="flex gap-1">
           {(status?.engines ?? []).map((engine) => (
-            <button
+            <Segment
               key={engine.id}
-              type="button"
-              role="radio"
-              aria-checked={settings?.engine === engine.id}
+              label={engine.label}
+              isSelected={settings?.engine === engine.id}
               disabled={engine.absent !== null || busy}
               title={engine.absent ?? undefined}
-              onClick={() =>
-                settings && choose({ ...settings, engine: engine.id })
-              }
-              className={cn(
-                "flex h-(--control-height-lg) items-center gap-1.5 rounded-(--radius-control) border border-transparent px-2.5 text-sm transition-colors duration-(--motion-duration-fast) ease-shell disabled:opacity-50",
-                settings?.engine === engine.id
-                  ? "border-separator-strong bg-selected font-medium text-fg"
-                  : "text-fg-secondary hover:bg-hover hover:text-fg",
-              )}
-            >
-              {settings?.engine === engine.id ? (
-                <Check aria-hidden="true" className="size-3 shrink-0" />
-              ) : null}
-              {engine.label}
-            </button>
+              onSelect={() => settings && choose({ ...settings, engine: engine.id })}
+            />
           ))}
         </div>
-      </Choice>
+      </Setting>
 
-      <Choice
+      <Setting
         label="Voice"
         detail="The voices macOS reads text in, grouped by language. Enhanced and Premium ones are the downloads it offers in System Settings; the rest ship with it."
       >
@@ -142,22 +122,12 @@ export function VoiceSection() {
           disabled={busy || grouped.length === 0}
           value={settings?.voice ?? ""}
           onChange={(event) =>
-            settings &&
-            choose({ ...settings, voice: event.target.value || null })
+            settings && choose({ ...settings, voice: event.target.value || null })
           }
           className={cn(FIELD, "w-full max-w-[42ch]")}
         >
-          {/* Not choosing is a real answer, and it is the one somebody who has
-              never opened this page already has. */}
           <option value="">The system&apos;s own choice</option>
-          {/* A voice chosen before the list was narrowed to the reading ones.
-              It still speaks — the crate filters what is offered, not what may
-              be said — so the control has to show it. A `select` whose value
-              matches no option draws blank, which would say nothing is chosen
-              while Sync goes on talking in Zarvox. */}
-          {stranded ? (
-            <option value={stranded}>{stranded} — no longer offered</option>
-          ) : null}
+          {stranded ? <option value={stranded}>{stranded} — no longer offered</option> : null}
           {grouped.map(([language, voices]) => (
             <optgroup key={language} label={languageNamed(language)}>
               {voices.map((voice) => (
@@ -169,15 +139,10 @@ export function VoiceSection() {
             </optgroup>
           ))}
         </select>
-        {status?.failure ? (
-          <p className="text-sm text-warning">{status.failure}</p>
-        ) : null}
-      </Choice>
+        {status?.failure ? <p className="text-sm text-warning">{status.failure}</p> : null}
+      </Setting>
 
-      <Choice
-        label="Rate"
-        detail="A multiplier over the engine's normal speed. One is normal."
-      >
+      <Setting label="Rate" detail="A multiplier over the engine's normal speed. One is normal.">
         <div className="flex items-center gap-2">
           <input
             type="number"
@@ -203,52 +168,24 @@ export function VoiceSection() {
             {SLOWEST}–{FASTEST}
           </span>
         </div>
-      </Choice>
+      </Setting>
 
-      <Choice
+      <Setting
         label="Agents"
         detail="An agent connected to Sync can say a sentence out loud — that a long job finished, or that something it was watching happened. It decides when; this decides whether."
       >
-        <div role="radiogroup" aria-label="Agents" className="flex gap-1">
-          {[
-            { label: "Off", wanted: false },
-            { label: "On", wanted: true },
-          ].map((option) => (
-            <button
-              key={option.label}
-              type="button"
-              role="radio"
-              aria-checked={settings?.agents === option.wanted}
-              disabled={busy || !settings}
-              onClick={() =>
-                settings && choose({ ...settings, agents: option.wanted })
-              }
-              className={cn(
-                "flex h-(--control-height-lg) items-center gap-1.5 rounded-(--radius-control) border border-transparent px-2.5 text-sm transition-colors duration-(--motion-duration-fast) ease-shell",
-                settings?.agents === option.wanted
-                  ? "border-separator-strong bg-selected font-medium text-fg"
-                  : "text-fg-secondary hover:bg-hover hover:text-fg",
-              )}
-            >
-              {settings?.agents === option.wanted ? (
-                <Check aria-hidden="true" className="size-3 shrink-0" />
-              ) : null}
-              {option.label}
-            </button>
-          ))}
-        </div>
-        {/* Said where the switch is, because the consequence is invisible: the
-            tool leaves the agent's catalogue entirely rather than staying in it
-            and refusing, so an agent cannot tell it was ever there. */}
+        <SegmentedToggle
+          isOn={settings?.agents === true}
+          disabled={busy || !settings}
+          onChange={(wanted) => settings && choose({ ...settings, agents: wanted })}
+          label="Agents"
+        />
         <p className="max-w-[64ch] text-xs text-fg-tertiary">
           Off, an agent has no way to speak at all — Sync does not offer it one.
         </p>
-      </Choice>
+      </Setting>
 
-      <Choice
-        label="Try it"
-        detail="A voice cannot be chosen from a name. Say something in it."
-      >
+      <Setting label="Try it" detail="A voice cannot be chosen from a name. Say something in it.">
         <div className="flex flex-wrap items-center gap-2">
           <input
             aria-label="What to say"
@@ -259,22 +196,15 @@ export function VoiceSection() {
             }}
             className={cn(FIELD, "w-full max-w-[42ch] flex-1")}
           />
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={sentence.trim().length === 0}
-            onClick={say}
-          >
+          <Button variant="outline" size="sm" disabled={sentence.trim().length === 0} onClick={say}>
             Speak
           </Button>
           <Button variant="ghost" size="sm" onClick={() => void stopSpeaking()}>
             Stop
           </Button>
         </div>
-        {/* A command that did not happen says so, beside the control that was
-            pressed rather than somewhere else in the window. */}
         {failure ? <p className="text-sm text-warning">{failure}</p> : null}
-      </Choice>
+      </Setting>
     </section>
   );
 }
@@ -289,9 +219,7 @@ export function VoiceSection() {
  * language the downloaded voices lead, because a Premium voice beside a compact
  * one of the same name is the whole reason quality is shown at all.
  */
-function byLanguage(
-  voices: readonly Voice[],
-): readonly (readonly [string, readonly Voice[]])[] {
+function byLanguage(voices: readonly Voice[]): readonly (readonly [string, readonly Voice[]])[] {
   const held = new Map<string, Voice[]>();
   for (const voice of voices) {
     const group = held.get(voice.language) ?? [];
@@ -300,8 +228,7 @@ function byLanguage(
   }
 
   const mine = typeof navigator === "undefined" ? "" : navigator.language;
-  const first = (tag: string) =>
-    tag === mine || tag.split("-")[0] === mine.split("-")[0] ? 0 : 1;
+  const first = (tag: string) => (tag === mine || tag.split("-")[0] === mine.split("-")[0] ? 0 : 1);
   const rank = { premium: 0, enhanced: 1, standard: 2 } as const;
 
   return [...held.entries()]
@@ -311,47 +238,12 @@ function byLanguage(
           language,
           [...group].sort(
             (one, other) =>
-              rank[one.quality] - rank[other.quality] ||
-              one.name.localeCompare(other.name),
+              rank[one.quality] - rank[other.quality] || one.name.localeCompare(other.name),
           ),
         ] as const,
     )
     .sort(
       ([one], [other]) =>
-        first(one) - first(other) ||
-        languageNamed(one).localeCompare(languageNamed(other)),
+        first(one) - first(other) || languageNamed(one).localeCompare(languageNamed(other)),
     );
-}
-
-function Choice({
-  label,
-  detail,
-  children,
-}: {
-  label: string;
-  detail: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="space-y-2">
-      <div className="space-y-0.5">
-        <h2 className="text-base font-medium text-fg">{label}</h2>
-        <p className="max-w-[64ch] text-sm text-fg-tertiary">{detail}</p>
-      </div>
-      {children}
-    </div>
-  );
-}
-
-/** The height every control in this window shares. */
-const FIELD =
-  "h-(--control-height-lg) rounded-(--radius-control) border border-separator-strong bg-workspace px-2 text-sm text-fg";
-
-function messageOf(error: unknown): string {
-  if (error && typeof error === "object" && "message" in error) {
-    return String((error as { message: unknown }).message);
-  }
-  return typeof error === "string"
-    ? error
-    : "Sync could not reach a voice engine.";
 }

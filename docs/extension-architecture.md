@@ -159,6 +159,7 @@ somepackage.syncext            a zip, registered as a document type
 ├── ui/index.css               the rules its own markup uses, compiled from its own source
 ├── service/index.js           the handlers
 ├── prompt/instructions.md     served to agents as the topic extension:<id>
+├── settings/schema.json       a JSON Schema for the extension's settings, if it asks for any
 └── META/
     ├── hashes.json            path -> sha256, for every file above
     └── signature              minisign over the canonical hashes file
@@ -198,6 +199,7 @@ section that never appears.
 | `schedule[]` | `{handler, every, description}` | The clock: an interval, a floor of one minute | Present without `schedule`; `description` absent |
 | `tools[]` | `{handler, name, description, input?}` | What an agent is told it may call | Present without `agent.tools`; a name with a dot; a name this build already uses |
 | `prompt` | path | What a connected agent reads, as `extension:<id>` | — |
+| `settings` | path | A JSON Schema describing the settings the extension asks for | — |
 | `requires.extensions` | `id@range` | A statement, **not a gate** — this build does not enforce it | — |
 | `dependencies.npm` | package names | That something is fetched before it works | — |
 | `author`, `license`, `repository` | | The card's provenance | — |
@@ -811,7 +813,7 @@ any other, and §9 of `docs/background.md` promises no sandbox.
 
 ---
 
-## 10. The nine places an extension may appear
+## 10. The ten places an extension may appear
 
 The set is closed, and the closing is the point: a window whose shape is decided
 by whatever is installed has as many shapes as it has extensions, and no rule
@@ -844,6 +846,7 @@ left to enforce against the next one.
 | **Markdown plugin** | Replacing how one block of stored prose is drawn | yes |
 | **Native menu** | Secondary click, through the host's own menu | yes |
 | **Handler** | A function called with no screen mounted: at install, on a clock, by a tool's published name | yes, without a window |
+| **Settings** | A JSON Schema the host renders as a form; values split between the project's memory and this machine | no |
 
 **A figure and a dot are two claims, and never each other.** A figure is how
 many there are, and is as true when nobody is looking; a dot is *something
@@ -860,8 +863,12 @@ by whichever extension shows records — contributing to it would be a protocol
 between extensions rather than a host API. Geometry, because `shell-layout.ts`
 is the window's. The shell's own screens. The Dock and the menu bar, because
 they belong to the application rather than to a project. A page of the settings
-window, an entry in ⌘K, and a system notification — a banner is the badge said
-louder, and an extension that could send one is an extension that could shout.
+window, because settings are the installation's and an extension's preferences
+are a project's — a package's own settings reach the person from its area, as a
+sheet the host renders from the schema (see
+[`extension-settings.md`](extension-settings.md)). An entry in ⌘K, and a
+system notification — a banner is the badge said louder, and an extension that
+could send one is an extension that could shout.
 
 ---
 

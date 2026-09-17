@@ -2,10 +2,7 @@
 
 import { command } from "@/lib/command";
 
-import type {
-  FieldDeclaration,
-  RelationshipDeclaration,
-} from "@/lib/memory/types";
+import type { FieldDeclaration, RelationshipDeclaration } from "@/lib/memory/types";
 
 /**
  * What this machine has installed, as Rust answers.
@@ -169,6 +166,16 @@ export interface Manifest {
    * carries no values — every rule refers to a variable the window defines.
    */
   readonly styles: string | null;
+  /**
+   * Path to a JSON Schema describing the extension's settings, or `null`.
+   *
+   * Mirrored here for the reason the rest of this shape is: a field that
+   * crosses this boundary undeclared arrives as `undefined` without an error
+   * anywhere. When present, the host renders a settings form from the schema.
+   * Fields marked `sync:portable` in the schema travel with the project's
+   * memory; the rest are local to this machine.
+   */
+  readonly settings: string | null;
 }
 
 /**
@@ -341,18 +348,11 @@ export function switchedOffClocks(project: string): Promise<string[]> {
  * what installing the package agreed to, without removing the package, and it
  * says nothing about any other project the same extension is in.
  */
-export function switchClock(
-  project: string,
-  id: string,
-  on: boolean,
-): Promise<void> {
+export function switchClock(project: string, id: string, on: boolean): Promise<void> {
   return command<void>("schedule_switch", { project, id, on });
 }
 
-export function rememberDeclaration(
-  project: string,
-  extensions: readonly string[],
-): Promise<void> {
+export function rememberDeclaration(project: string, extensions: readonly string[]): Promise<void> {
   return command<void>("schedule_remember", { project, extensions });
 }
 
@@ -504,8 +504,6 @@ export function repointExtension(pointer: Pointer): Promise<InstalledExtension> 
  * `syncApi` range the index carries — which is why a card for a package this
  * build refuses offers no button rather than a button that fails.
  */
-export function installFromRegistry(
-  artefact: RegistryArtefact,
-): Promise<InstalledExtension> {
+export function installFromRegistry(artefact: RegistryArtefact): Promise<InstalledExtension> {
   return command<InstalledExtension>("extension_install_registry", { artefact });
 }

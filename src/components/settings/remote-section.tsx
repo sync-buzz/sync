@@ -6,6 +6,7 @@ import { Check, Copy, Minus, Plus, X } from "lucide-react";
 import { PanelFooter } from "@/components/shell/panel";
 import { RemotePairSheet } from "@/components/settings/remote-pair";
 import { RemoteRemovalSheet } from "@/components/settings/remote-removal";
+import { messageOf } from "@/components/settings/shared";
 import { Button } from "@/components/ui/button";
 import { elapsed } from "@/lib/elapsed";
 import { showNativeContextMenu } from "@/lib/native-menu";
@@ -74,7 +75,7 @@ export function RemoteSection() {
     let live = true;
     void loadRemoteStatus().then(
       (answer) => live && read(answer),
-      (error: unknown) => live && setFailure(explain(error)),
+      (error: unknown) => live && setFailure(messageOf(error, "Remote access could not be read.")),
     );
     return () => {
       live = false;
@@ -82,8 +83,7 @@ export function RemoteSection() {
   }, [reading, read]);
 
   const devices = status?.devices ?? [];
-  const chosen =
-    devices.find((device) => device.fingerprint === selected) ?? null;
+  const chosen = devices.find((device) => device.fingerprint === selected) ?? null;
 
   const [copied, setCopied] = useState(false);
   const copy = (value: string) => {
@@ -97,7 +97,9 @@ export function RemoteSection() {
     setBusy(true);
     setFailure(null);
     void enableRemoteAccess(enabled)
-      .then(read, (error: unknown) => setFailure(explain(error)))
+      .then(read, (error: unknown) =>
+        setFailure(messageOf(error, "Remote access could not be read.")),
+      )
       .finally(() => setBusy(false));
   };
 
@@ -132,9 +134,9 @@ export function RemoteSection() {
           </Button>
         </div>
         <p className="max-w-[64ch] text-sm text-fg-tertiary">
-          Turning this on or off restarts the memory engine: what this Mac is
-          called on the network is settled when its door opens. A paired device
-          reaches it from anywhere, not only from this network.
+          Turning this on or off restarts the memory engine: what this Mac is called on the network
+          is settled when its door opens. A paired device reaches it from anywhere, not only from
+          this network.
         </p>
       </div>
 
@@ -149,8 +151,7 @@ export function RemoteSection() {
                 status?.endpoint ? "text-fg" : "text-fg-tertiary",
               )}
             >
-              {status?.endpoint ??
-                "No address yet — the door is opening, or it did not open."}
+              {status?.endpoint ?? "No address yet — the door is opening, or it did not open."}
             </code>
             <Button
               variant="ghost"
@@ -168,13 +169,13 @@ export function RemoteSection() {
       <div className="overflow-hidden rounded-(--radius-control) border border-separator-strong bg-panel">
         {status === null ? (
           <Nothing>
-            The engine has not answered, so which devices are admitted is
-            unknown. That is not the same as admitting none.
+            The engine has not answered, so which devices are admitted is unknown. That is not the
+            same as admitting none.
           </Nothing>
         ) : devices.length === 0 ? (
           <Nothing>
-            No devices paired. Until one is, nothing off this Mac can reach it —
-            whether remote access is on or off.
+            No devices paired. Until one is, nothing off this Mac can reach it — whether remote
+            access is on or off.
           </Nothing>
         ) : (
           <ul className="max-h-72 overflow-y-auto py-1">
@@ -194,9 +195,7 @@ export function RemoteSection() {
                     }}
                     className={cn(
                       "flex w-full items-center gap-3 px-3 py-1.5 text-left transition-colors duration-(--motion-duration-fast) ease-shell",
-                      isSelected
-                        ? "bg-selected font-medium text-fg"
-                        : "text-fg hover:bg-hover",
+                      isSelected ? "bg-selected font-medium text-fg" : "text-fg hover:bg-hover",
                     )}
                   >
                     <span className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -279,23 +278,5 @@ export function RemoteSection() {
 
 /** What the box says instead of simulating rows it does not have. */
 function Nothing({ children }: { children: React.ReactNode }) {
-  return (
-    <p className="px-3 py-6 text-center text-sm text-fg-tertiary">{children}</p>
-  );
-}
-
-/**
- * A refusal in the words it arrived in.
- *
- * The commands answer with a sentence written for a person — a keychain that
- * would not open, an engine that did not come back — and a sentence of our own
- * would drop exactly the part somebody acts on.
- */
-function explain(error: unknown): string {
-  if (typeof error === "string" && error.trim() !== "") return error;
-  if (typeof error === "object" && error !== null && "message" in error) {
-    const message = (error as { message?: unknown }).message;
-    if (typeof message === "string" && message.trim() !== "") return message;
-  }
-  return "Remote access could not be read.";
+  return <p className="px-3 py-6 text-center text-sm text-fg-tertiary">{children}</p>;
 }

@@ -21,6 +21,7 @@
 import { Check } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Setting } from "@/components/settings/shared";
 import {
   DEFAULT_TYPOGRAPHY,
   LIMITS,
@@ -40,7 +41,7 @@ export function TypographySection() {
 
   return (
     <section className="flex flex-col gap-5">
-      <Choice
+      <Setting
         label="Size"
         detail="The base every other size in a record is measured from. Headings, quotes, code and tables move with it."
       >
@@ -52,9 +53,9 @@ export function TypographySection() {
           limits={LIMITS.size}
           onChange={(size) => set({ size })}
         />
-      </Choice>
+      </Setting>
 
-      <Choice
+      <Setting
         label="Typeface"
         detail="Four the system guarantees. A free choice over every font installed would include ones with no Cyrillic and no italic, and a record set in one of those is a record somebody has to repair."
       >
@@ -81,9 +82,9 @@ export function TypographySection() {
             </button>
           ))}
         </div>
-      </Choice>
+      </Setting>
 
-      <Choice
+      <Setting
         label="Column width"
         detail="How far a line runs before it wraps. Fixed in pixels, so making the text bigger shortens the line rather than widening the window."
       >
@@ -95,9 +96,9 @@ export function TypographySection() {
           limits={LIMITS.measure}
           onChange={(measure) => set({ measure })}
         />
-      </Choice>
+      </Setting>
 
-      <Choice
+      <Setting
         label="Line spacing"
         detail="A multiple of the size. The gap between paragraphs is half a line, so it follows this rather than being set on its own."
       >
@@ -108,31 +109,25 @@ export function TypographySection() {
           limits={LIMITS.leading}
           onChange={(leading) => set({ leading: Math.round(leading * 100) / 100 })}
         />
-      </Choice>
+      </Setting>
 
-      <div className="space-y-2">
-        <div className="space-y-0.5">
-          <h2 className="text-base font-medium text-fg">Preview</h2>
-          <p className="max-w-[64ch] text-sm text-fg-tertiary">
-            The surface a record is set on, not a picture of it.
-          </p>
-        </div>
+      <Setting label="Preview" detail="The surface a record is set on, not a picture of it.">
         <div className="rounded-(--radius-control) border border-separator bg-workspace p-4">
           <div className="prose-surface prose-blocks">
             <h3 className="pt-0 text-[1.54em] leading-tight font-semibold text-fg">
               A heading, at the size it will be
             </h3>
             <p className="text-[1em] text-fg-secondary">
-              A claim is prose, and prose is what the widest column in the
-              window is for. This paragraph is set exactly as one in a record
-              is — the same face, the same measure, the same line.
+              A claim is prose, and prose is what the widest column in the window is for. This
+              paragraph is set exactly as one in a record is — the same face, the same measure, the
+              same line.
             </p>
             <p className="text-[1em] text-fg-secondary">
               A second paragraph, so the gap between them is visible too.
             </p>
           </div>
         </div>
-      </div>
+      </Setting>
 
       <div>
         <Button variant="outline" size="sm" disabled={untouched} onClick={reset}>
@@ -140,26 +135,6 @@ export function TypographySection() {
         </Button>
       </div>
     </section>
-  );
-}
-
-function Choice({
-  label,
-  detail,
-  children,
-}: {
-  label: string;
-  detail: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="space-y-2">
-      <div className="space-y-0.5">
-        <h2 className="text-base font-medium text-fg">{label}</h2>
-        <p className="max-w-[64ch] text-sm text-fg-tertiary">{detail}</p>
-      </div>
-      {children}
-    </div>
   );
 }
 

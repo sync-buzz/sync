@@ -1,6 +1,5 @@
 "use client";
 
-import { Check } from "lucide-react";
 import {
   APPEARANCES,
   TINTS,
@@ -8,7 +7,7 @@ import {
   type Appearance,
   type Tint,
 } from "@/lib/settings/appearance";
-import { cn } from "@/lib/utils";
+import { Segment, Setting } from "@/components/settings/shared";
 
 /**
  * How the shell is painted.
@@ -28,7 +27,7 @@ export function AppearanceSection() {
 
   return (
     <section className="flex flex-col gap-5">
-      <Choice
+      <Setting
         label="Appearance"
         detail="Following the system is the default, and it changes with it."
       >
@@ -42,9 +41,9 @@ export function AppearanceSection() {
             />
           ))}
         </div>
-      </Choice>
+      </Setting>
 
-      <Choice
+      <Setting
         label="Base colour"
         detail="The hue the greys are mixed from. Surfaces, text and separators move together; nothing else changes."
       >
@@ -67,57 +66,7 @@ export function AppearanceSection() {
             </button>
           ))}
         </div>
-      </Choice>
+      </Setting>
     </section>
-  );
-}
-
-function Choice({
-  label,
-  detail,
-  children,
-}: {
-  label: string;
-  detail: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="space-y-2">
-      <div className="space-y-0.5">
-        <h2 className="text-base font-medium text-fg">{label}</h2>
-        <p className="max-w-[64ch] text-sm text-fg-tertiary">{detail}</p>
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function Segment({
-  label,
-  isSelected,
-  onSelect,
-}: {
-  label: string;
-  isSelected: boolean;
-  onSelect: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={isSelected}
-      onClick={onSelect}
-      className={cn(
-        "flex h-(--control-height-lg) items-center gap-1.5 rounded-(--radius-control) border border-transparent px-2.5 text-sm transition-colors duration-(--motion-duration-fast) ease-shell",
-        isSelected
-          ? "border-separator-strong bg-selected font-medium text-fg"
-          : "text-fg-secondary hover:bg-hover hover:text-fg",
-      )}
-    >
-      {isSelected ? (
-        <Check aria-hidden="true" className="size-3 shrink-0" />
-      ) : null}
-      {label}
-    </button>
   );
 }

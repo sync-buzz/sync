@@ -1,14 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Check } from "lucide-react";
 
 import {
   chooseNotifications,
   loadNotifications,
   type NotificationSettings,
 } from "@/lib/settings/notifications";
-import { cn } from "@/lib/utils";
+import { messageOf, Segment, Setting } from "@/components/settings/shared";
 
 /**
  * When Sync interrupts, and what it will not interrupt for.
@@ -45,7 +44,7 @@ export function NotificationsSection() {
         if (live) setSettings(answer);
       },
       (error: unknown) => {
-        if (live) setFailure(messageOf(error));
+        if (live) setFailure(messageOf(error, "Sync could not write the setting down."));
       },
     );
     return () => {
@@ -57,62 +56,38 @@ export function NotificationsSection() {
     setBusy(true);
     setFailure(null);
     void chooseNotifications(next)
-      .then(setSettings, (error: unknown) => setFailure(messageOf(error)))
+      .then(setSettings, (error: unknown) =>
+        setFailure(messageOf(error, "Sync could not write the setting down.")),
+      )
       .finally(() => setBusy(false));
   }, []);
 
   return (
     <section className="flex flex-col gap-5">
       {WHEN.map((occasion) => (
-        <Choice
-          key={occasion.id}
-          label={occasion.label}
-          detail={occasion.detail}
-        >
-          <div
-            role="radiogroup"
-            aria-label={occasion.label}
-            className="flex gap-1"
-          >
+        <Setting key={occasion.id} label={occasion.label} detail={occasion.detail}>
+          <div role="radiogroup" aria-label={occasion.label} className="flex gap-1">
             {[
               { label: "Off", wanted: false },
               { label: "On", wanted: true },
             ].map((option) => (
-              <button
+              <Segment
                 key={option.label}
-                type="button"
-                role="radio"
-                aria-checked={settings?.[occasion.id] === option.wanted}
+                label={option.label}
+                isSelected={settings?.[occasion.id] === option.wanted}
                 disabled={busy || !settings}
-                onClick={() =>
-                  settings &&
-                  choose({ ...settings, [occasion.id]: option.wanted })
-                }
-                className={cn(
-                  "flex h-(--control-height-lg) items-center gap-1.5 rounded-(--radius-control) border border-transparent px-2.5 text-sm transition-colors duration-(--motion-duration-fast) ease-shell",
-                  settings?.[occasion.id] === option.wanted
-                    ? "border-separator-strong bg-selected font-medium text-fg"
-                    : "text-fg-secondary hover:bg-hover hover:text-fg",
-                )}
-              >
-                {settings?.[occasion.id] === option.wanted ? (
-                  <Check aria-hidden="true" className="size-3 shrink-0" />
-                ) : null}
-                {option.label}
-              </button>
+                onSelect={() => settings && choose({ ...settings, [occasion.id]: option.wanted })}
+              />
             ))}
           </div>
-        </Choice>
+        </Setting>
       ))}
 
       <p className="max-w-[64ch] text-xs text-fg-tertiary">
-        A banner appears only while no Sync window is in front. Whether it
-        appears at all is macOS&apos;s to decide, under Notifications in System
-        Settings.
+        A banner appears only while no Sync window is in front. Whether it appears at all is
+        macOS&apos;s to decide, under Notifications in System Settings.
       </p>
 
-      {/* A command that did not happen says so, in the section that was
-          clicked rather than somewhere else in the window. */}
       {failure ? <p className="text-sm text-warning">{failure}</p> : null}
     </section>
   );
@@ -148,32 +123,3 @@ const WHEN = [
   label: string;
   detail: string;
 }[];
-
-function Choice({
-  label,
-  detail,
-  children,
-}: {
-  label: string;
-  detail: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="space-y-2">
-      <div className="space-y-0.5">
-        <h2 className="text-base font-medium text-fg">{label}</h2>
-        <p className="max-w-[64ch] text-sm text-fg-tertiary">{detail}</p>
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function messageOf(error: unknown): string {
-  if (error && typeof error === "object" && "message" in error) {
-    return String((error as { message: unknown }).message);
-  }
-  return typeof error === "string"
-    ? error
-    : "Sync could not write the setting down.";
-}

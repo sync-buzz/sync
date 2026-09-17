@@ -552,6 +552,7 @@ export interface InstalledExtension {
     readonly id: string;
     readonly integrity?: string;
     readonly prompt?: string;
+    readonly settings?: Readonly<Record<string, unknown>>;
     readonly source?: string;
     readonly tools?: readonly ToolDeclaration[];
     readonly version: string;
@@ -1233,6 +1234,7 @@ export type SessionEvent = {
     readonly atMs: number;
     readonly status: SessionStatus;
     readonly detail: string | null;
+    readonly replayed?: boolean;
 } | {
     readonly kind: "prompt";
     readonly seq: number;
@@ -1357,6 +1359,16 @@ export type SessionStatus =
 | "failed";
 
 // @public
+export interface SettingsHandle {
+    // (undocumented)
+    readonly open: () => void;
+    // (undocumented)
+    readonly set: (key: string, value: unknown) => void;
+    // (undocumented)
+    readonly values: Readonly<Record<string, unknown>> | null;
+}
+
+// @public
 export function Sheet(input: React_2.ComponentProps<typeof Dialog.Root>): React_2.JSX.Element;
 
 // @public (undocumented)
@@ -1470,7 +1482,7 @@ export function stopSession(key: string): Promise<void>;
 export function supportsApiRange(range: string): boolean;
 
 // @public
-export const SYNC_API_VERSION: "3.19.0";
+export const SYNC_API_VERSION: "3.20.0";
 
 // @public
 export const SYNC_CAPABILITIES: readonly ["records", "agents.acp", "markdown.plugins", "native-menu", "folders", "sheets", "net", "net.write", "vault", "background", "schedule", "work.agent", "agent.tools", "terminal", "tools.call"];

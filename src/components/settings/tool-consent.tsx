@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { messageOf } from "@/components/settings/shared";
 import {
   loadToolConsent,
   revokeToolConsent,
@@ -31,9 +32,7 @@ import {
  * be standing the day they installed that id again.
  */
 export function ToolConsent() {
-  const [listed, setListed] = useState<readonly ConsentedExtension[] | null>(
-    null,
-  );
+  const [listed, setListed] = useState<readonly ConsentedExtension[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
 
@@ -44,7 +43,7 @@ export function ToolConsent() {
         if (live) setListed(answer);
       })
       .catch((error: unknown) => {
-        if (live) setFailure(explain(error));
+        if (live) setFailure(messageOf(error, "The agreement could not be changed."));
       });
     return () => {
       live = false;
@@ -56,7 +55,9 @@ export function ToolConsent() {
     setFailure(null);
     void revokeToolConsent(extension, server)
       .then(setListed)
-      .catch((error: unknown) => setFailure(explain(error)))
+      .catch((error: unknown) =>
+        setFailure(messageOf(error, "The agreement could not be changed.")),
+      )
       .finally(() => setBusy(null));
   }, []);
 
@@ -66,8 +67,8 @@ export function ToolConsent() {
   if (listed !== null && listed.length === 0) {
     return (
       <p className="max-w-[64ch] text-xs text-fg-tertiary">
-        Nothing has been agreed to. A package asks on its own page, under
-        Marketplace, and until somebody has agreed there it can call nothing.
+        Nothing has been agreed to. A package asks on its own page, under Marketplace, and until
+        somebody has agreed there it can call nothing.
       </p>
     );
   }
@@ -79,9 +80,7 @@ export function ToolConsent() {
           <h3 className="flex items-baseline gap-2 text-sm font-medium text-fg-secondary">
             {held.name}
             {held.installed ? null : (
-              <span className="text-xs font-normal text-fg-tertiary">
-                No longer installed
-              </span>
+              <span className="text-xs font-normal text-fg-tertiary">No longer installed</span>
             )}
           </h3>
           <ul className="flex flex-col gap-px">
@@ -97,9 +96,7 @@ export function ToolConsent() {
                   <p className="truncate text-base text-fg">
                     <span className="font-mono">{server}</span>
                   </p>
-                  <p className="truncate text-xs text-fg-tertiary">
-                    Every tool it publishes
-                  </p>
+                  <p className="truncate text-xs text-fg-tertiary">Every tool it publishes</p>
                 </div>
 
                 <Button
@@ -119,20 +116,4 @@ export function ToolConsent() {
       {failure !== null && <p className="text-xs text-danger">{failure}</p>}
     </div>
   );
-}
-
-/**
- * A refusal in the words it arrived in.
- *
- * The command answers with a `kind` and a message written for a person — the
- * file that could not be written, and its path — and a sentence of our own
- * would drop the path, which is the part somebody acts on.
- */
-function explain(error: unknown): string {
-  if (typeof error === "object" && error !== null && "message" in error) {
-    const message = (error as { message?: unknown }).message;
-    if (typeof message === "string" && message.trim() !== "") return message;
-  }
-  if (error instanceof Error) return error.message;
-  return "The agreement could not be changed.";
 }

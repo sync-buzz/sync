@@ -799,7 +799,7 @@ import { device } from "@/lib/device";
  * `AreaModule`, `ActivationResult` — arrived in the same commit, which on its
  * own would have been a minor.
  */
-export const SYNC_API_VERSION = "3.19.0" as const;
+export const SYNC_API_VERSION = "3.20.0" as const;
 
 /**
  * What this build can do, as opposed to what its surface looks like.

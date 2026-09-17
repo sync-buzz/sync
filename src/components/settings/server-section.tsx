@@ -4,9 +4,10 @@ import { useCallback, useEffect, useState } from "react";
 import { Check, Copy } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { FIELD, messageOf, SegmentedToggle, Setting } from "@/components/settings/shared";
 import { command } from "@/lib/command";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
+import { cn } from "@/lib/utils";
 
 /**
  * What this machine serves, and to whom.
@@ -45,7 +46,7 @@ export function ServerSection() {
 
   useEffect(() => {
     void command<ServerStatus>("server_status").then(read, (error: unknown) =>
-      setFailure(messageOf(error)),
+      setFailure(messageOf(error, "The server could not be reached.")),
     );
     void isEnabled().then(setAtLogin, () => setAtLogin(null));
   }, [read]);
@@ -55,7 +56,9 @@ export function ServerSection() {
       setBusy(true);
       setFailure(null);
       void command<ServerStatus>(name, args)
-        .then(read, (error: unknown) => setFailure(messageOf(error)))
+        .then(read, (error: unknown) =>
+          setFailure(messageOf(error, "The server could not be reached.")),
+        )
         .finally(() => setBusy(false));
     },
     [read],
@@ -88,9 +91,7 @@ export function ServerSection() {
               status?.running ? "bg-success" : "bg-warning",
             )}
           />
-          <code className="font-mono text-sm text-fg">
-            {status?.url ?? "—"}
-          </code>
+          <code className="font-mono text-sm text-fg">{status?.url ?? "—"}</code>
           <Button
             variant="ghost"
             size="icon-sm"
@@ -111,9 +112,7 @@ export function ServerSection() {
           <input
             aria-label="Port"
             value={port}
-            onChange={(event) =>
-              setPort(event.target.value.replace(/[^0-9]/g, "").slice(0, 5))
-            }
+            onChange={(event) => setPort(event.target.value.replace(/[^0-9]/g, "").slice(0, 5))}
             inputMode="numeric"
             className={cn(FIELD, "w-24 font-mono")}
           />
@@ -149,11 +148,7 @@ export function ServerSection() {
           >
             {copied === "token" ? <Check /> : <Copy />}
           </Button>
-          <Button
-            variant="outline"
-            disabled={busy}
-            onClick={() => run("server_new_token")}
-          >
+          <Button variant="outline" disabled={busy} onClick={() => run("server_new_token")}>
             New
           </Button>
         </div>
@@ -163,15 +158,23 @@ export function ServerSection() {
         label="Start at login"
         detail="An agent reaches Sync through this port, so an agent working while Sync is closed reaches nothing."
       >
-        <Toggle
-          isOn={atLogin ?? false}
-          isAvailable={atLogin !== null}
-          onChange={(wanted) => {
-            void (wanted ? enable() : disable())
-              .then(() => setAtLogin(wanted))
-              .catch((error: unknown) => setFailure(messageOf(error)));
-          }}
-        />
+        {atLogin === null ? (
+          <p className="text-sm text-fg-tertiary">
+            This system does not offer login items to Sync.
+          </p>
+        ) : (
+          <SegmentedToggle
+            isOn={atLogin}
+            onChange={(wanted) => {
+              void (wanted ? enable() : disable())
+                .then(() => setAtLogin(wanted))
+                .catch((error: unknown) =>
+                  setFailure(messageOf(error, "The server could not be reached.")),
+                );
+            }}
+            label="Start at login"
+          />
+        )}
       </Setting>
 
       {failure ? (
@@ -181,88 +184,4 @@ export function ServerSection() {
       ) : null}
     </section>
   );
-}
-
-/** The same shape every settings row in this window has. */
-function Setting({
-  label,
-  detail,
-  children,
-}: {
-  label: string;
-  detail: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="space-y-2">
-      <div className="space-y-0.5">
-        <h2 className="text-base font-medium text-fg">{label}</h2>
-        <p className="max-w-[64ch] text-sm text-fg-tertiary">{detail}</p>
-      </div>
-      {children}
-    </div>
-  );
-}
-
-/**
- * Two states, said in words rather than drawn as a rocker.
- *
- * The window has no switch of its own, and a lone one built here would be the
- * only control in the application drawn that way. This is the segmented control
- * Appearance already uses, with two segments.
- */
-function Toggle({
-  isOn,
-  isAvailable,
-  onChange,
-}: {
-  isOn: boolean;
-  isAvailable: boolean;
-  onChange: (wanted: boolean) => void;
-}) {
-  if (!isAvailable) {
-    return (
-      <p className="text-sm text-fg-tertiary">
-        This system does not offer login items to Sync.
-      </p>
-    );
-  }
-  return (
-    <div role="radiogroup" aria-label="Start at login" className="flex gap-1">
-      {[
-        { label: "Off", wanted: false },
-        { label: "On", wanted: true },
-      ].map((option) => (
-        <button
-          key={option.label}
-          type="button"
-          role="radio"
-          aria-checked={isOn === option.wanted}
-          onClick={() => onChange(option.wanted)}
-          className={cn(
-            "flex h-(--control-height-lg) items-center gap-1.5 rounded-(--radius-control) border border-transparent px-2.5 text-sm transition-colors duration-(--motion-duration-fast) ease-shell",
-            isOn === option.wanted
-              ? "border-separator-strong bg-selected font-medium text-fg"
-              : "text-fg-secondary hover:bg-hover hover:text-fg",
-          )}
-        >
-          {isOn === option.wanted ? (
-            <Check aria-hidden="true" className="size-3 shrink-0" />
-          ) : null}
-          {option.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-/** The height every control in this window shares. */
-const FIELD =
-  "h-(--control-height-lg) rounded-(--radius-control) border border-separator-strong bg-workspace px-2 text-sm text-fg";
-
-function messageOf(error: unknown): string {
-  if (error && typeof error === "object" && "message" in error) {
-    return String((error as { message: unknown }).message);
-  }
-  return typeof error === "string" ? error : "The server could not be reached.";
 }

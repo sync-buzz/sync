@@ -157,12 +157,7 @@ export {
 // case — one that would otherwise be answered by copying the class list.
 export { Button, buttonVariants } from "@/components/ui/button";
 export { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
-export {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+export { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 export {
   DropdownMenu,
   DropdownMenuPortal,
@@ -208,11 +203,7 @@ export { DocumentView } from "@/components/shell/document-view";
  * has to keep agreeing with the editor, and a plugin able to invent block kinds
  * would be a second Markdown dialect in one window.
  */
-export {
-  Markdown,
-  type MarkdownBlock,
-  type MarkdownPlugin,
-} from "@/components/shell/markdown";
+export { Markdown, type MarkdownBlock, type MarkdownPlugin } from "@/components/shell/markdown";
 export { RecordMetadata } from "@/components/shell/record-metadata";
 export { ContextInspector } from "@/components/shell/context-inspector";
 
@@ -252,12 +243,7 @@ export {
 
 export type { MemorySelection } from "@/lib/memory/client";
 
-export {
-  PROJECT_KEY,
-  absenceLabel,
-  isAttachedType,
-  typeOfLocator,
-} from "@/lib/memory/types";
+export { PROJECT_KEY, absenceLabel, isAttachedType, typeOfLocator } from "@/lib/memory/types";
 
 export type {
   MemoryType,
@@ -390,6 +376,7 @@ export type {
   NetPart,
   NetRequest,
   NetResponse,
+  SettingsHandle,
   TerminalEvent,
   TerminalOpening,
   TerminalRow,
@@ -407,11 +394,7 @@ export type {
 // menu — the caret is several components below anything that could ask.
 // ---------------------------------------------------------------------------
 
-export {
-  useAppMenu,
-  type WindowCommands,
-  type MenuRecordType,
-} from "@/lib/app-menu";
+export { useAppMenu, type WindowCommands, type MenuRecordType } from "@/lib/app-menu";
 
 // ---------------------------------------------------------------------------
 // What the window asks an area to show.
@@ -440,10 +423,7 @@ export type { AreaIntent } from "@/lib/area-intent";
 // ---------------------------------------------------------------------------
 
 export { useBadge, type BadgeReport } from "@/lib/extension-api/badge";
-export {
-  TableCommandsProvider,
-  type TableCommands,
-} from "@/lib/editor/table-commands";
+export { TableCommandsProvider, type TableCommands } from "@/lib/editor/table-commands";
 
 // ---------------------------------------------------------------------------
 // The project, and how it is being looked at.
@@ -482,10 +462,7 @@ export { PROJECT_LANGUAGES } from "@/lib/project/types";
  * question for a section to ask on its behalf.
  */
 export { projectRemote } from "@/lib/project/client";
-export {
-  useProjectView,
-  type ProjectViewState,
-} from "@/lib/project/use-project-view";
+export { useProjectView, type ProjectViewState } from "@/lib/project/use-project-view";
 
 // ---------------------------------------------------------------------------
 // Agents.
@@ -512,11 +489,7 @@ export {
 // that wants a different answer can write one over the same events.
 // ---------------------------------------------------------------------------
 
-export {
-  useAgents,
-  useLiveSessions,
-  type Agent,
-} from "@/lib/agent-sessions/use-agents";
+export { useAgents, useLiveSessions, type Agent } from "@/lib/agent-sessions/use-agents";
 // Where a conversation is held, for a section that offers the choice. The
 // window itself makes no use of these: it opens no conversations and lists
 // none, so a tree is only ever chosen from a screen a package drew.

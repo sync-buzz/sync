@@ -314,11 +314,7 @@ export interface ExtensionTerminal {
    * it, which is what a terminal is everywhere else and what stops a section
    * that re-attaches from leaving its previous watcher behind.
    */
-  watch(
-    terminal: string,
-    from: number,
-    onEvent: (event: TerminalEvent) => void,
-  ): Promise<void>;
+  watch(terminal: string, from: number, onEvent: (event: TerminalEvent) => void): Promise<void>;
   /** What a project has open. */
   list(project: string): Promise<readonly TerminalRow[]>;
   /** End one. */
@@ -522,3 +518,26 @@ export interface AreaModule {
  * one costs an author a wrapper object for no reason.
  */
 export type ActivationResult = Readonly<Record<string, AreaModule>>;
+
+/**
+ * What a mounted area reads and writes of its own settings.
+ *
+ * The schema lives in the manifest; the host reads it, renders the form, and
+ * routes each value to the store its field declares. An extension reads the
+ * merged result and asks for the sheet to open — it does not draw the form,
+ * because a form drawn by every extension is a standard held by none.
+ *
+ * `values` is `null` while the host reads, not empty: an extension that asked
+ * for a setting and has not been answered is not the same as one that was
+ * answered with nothing. `set` writes one field; the host decides where it
+ * goes from the schema, so the extension does not know which of its values
+ * travel with the project and which stay on this machine. `open` raises the
+ * sheet the host renders from the schema — the same form, reached from the
+ * area's own context rather than from a window that does not know which
+ * project is open.
+ */
+export interface SettingsHandle {
+  readonly values: Readonly<Record<string, unknown>> | null;
+  readonly set: (key: string, value: unknown) => void;
+  readonly open: () => void;
+}

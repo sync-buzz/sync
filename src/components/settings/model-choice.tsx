@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { FIELD, messageOf } from "@/components/settings/shared";
 import {
   loadModelChoice,
   setModelChoice,
@@ -34,7 +35,7 @@ export function ModelChoice() {
         if (live) settle(answered);
       })
       .catch((error: unknown) => {
-        if (live) setFailure(explain(error));
+        if (live) setFailure(messageOf(error, "The choice could not be made."));
       });
     return () => {
       live = false;
@@ -47,7 +48,7 @@ export function ModelChoice() {
       setFailure(null);
       void setModelChoice({ cloudAgent })
         .then(settle)
-        .catch((error: unknown) => setFailure(explain(error)))
+        .catch((error: unknown) => setFailure(messageOf(error, "The choice could not be made.")))
         .finally(() => setBusy(false));
     },
     [settle],
@@ -105,7 +106,7 @@ function Providers({
       onChange={(event) => {
         if (event.target.value !== "") onChoose(event.target.value);
       }}
-      className={cn(FIELD, "w-full max-w-[42ch]")}
+      className={cn(FIELD, "w-full max-w-[42ch] disabled:opacity-50")}
     >
       {chosen === null ? <option value="">No provider chosen</option> : null}
       {offered.map((provider) => (
@@ -134,23 +135,4 @@ function said(status: ModelChoiceStatus, busy: boolean): string {
   return file === null || file === undefined
     ? "Turns run wherever that provider's account runs them, and are charged to it."
     : `Turns are charged to that provider's account, and its tools are read from ${file}.`;
-}
-
-const FIELD =
-  "h-(--control-height-lg) rounded-(--radius-control) border border-separator-strong bg-workspace px-2 text-sm text-fg disabled:opacity-50";
-
-/**
- * A refusal in the words it arrived in.
- *
- * The command answers with a sentence naming the provider and what happened at
- * it; a sentence of our own would drop that name, which is the part somebody
- * acts on.
- */
-function explain(error: unknown): string {
-  if (typeof error === "object" && error !== null && "message" in error) {
-    const message = (error as { message?: unknown }).message;
-    if (typeof message === "string" && message.trim() !== "") return message;
-  }
-  if (error instanceof Error) return error.message;
-  return "The choice could not be made.";
 }

@@ -6,6 +6,7 @@ import { Minus, Pencil, Plus, X } from "lucide-react";
 import { PanelFooter } from "@/components/shell/panel";
 import { VaultRemovalSheet } from "@/components/settings/vault-removal";
 import { VaultSheet } from "@/components/settings/vault-sheet";
+import { messageOf } from "@/components/settings/shared";
 import { Button } from "@/components/ui/button";
 import { showNativeContextMenu } from "@/lib/native-menu";
 import { cn } from "@/lib/utils";
@@ -78,7 +79,7 @@ export function VaultSection() {
         // Not an empty list: the refusal is the thing to read.
         if (live) {
           setEntries(null);
-          setFailure(explain(error));
+          setFailure(messageOf(error, "The keychain could not be reached."));
         }
       }
     })();
@@ -89,7 +90,7 @@ export function VaultSection() {
 
   useEffect(() => {
     void vaultPersistence().then(setPersistence, (error: unknown) =>
-      setStorage(explain(error)),
+      setStorage(messageOf(error, "The keychain could not be reached.")),
     );
   }, []);
 
@@ -123,7 +124,7 @@ export function VaultSection() {
   ];
 
   return (
-    <section className="flex flex-col gap-3">
+    <section className="flex flex-col gap-5">
       <p className="max-w-[64ch] text-sm text-fg-tertiary">
         {storage ?? DURABILITY[persistence ?? "unknown"]}
       </p>
@@ -131,13 +132,13 @@ export function VaultSection() {
       <div className="overflow-hidden rounded-(--radius-control) border border-separator-strong bg-panel">
         {entries === null ? (
           <Nothing>
-            The keychain has not been read, so what is in it is unknown. That is
-            not the same as holding nothing.
+            The keychain has not been read, so what is in it is unknown. That is not the same as
+            holding nothing.
           </Nothing>
         ) : held.length === 0 ? (
           <Nothing>
-            No secrets on this Mac. A package that reaches a service in your
-            name asks for one by the name in its own documentation.
+            No secrets on this Mac. A package that reaches a service in your name asks for one by
+            the name in its own documentation.
           </Nothing>
         ) : (
           <ul className="max-h-72 overflow-y-auto py-1">
@@ -159,14 +160,10 @@ export function VaultSection() {
                     }}
                     className={cn(
                       "flex w-full flex-col items-start gap-0.5 px-3 py-1.5 text-left transition-colors duration-(--motion-duration-fast) ease-shell",
-                      isSelected
-                        ? "bg-selected font-medium text-fg"
-                        : "text-fg hover:bg-hover",
+                      isSelected ? "bg-selected font-medium text-fg" : "text-fg hover:bg-hover",
                     )}
                   >
-                    <span className="w-full truncate text-sm">
-                      {entry.name}
-                    </span>
+                    <span className="w-full truncate text-sm">{entry.name}</span>
                     <span className="w-full truncate font-mono text-xs font-normal text-fg-tertiary">
                       {entry.owner}
                     </span>
@@ -250,11 +247,8 @@ export function VaultSection() {
 
 /** What the box says instead of simulating rows it does not have. */
 function Nothing({ children }: { children: React.ReactNode }) {
-  return (
-    <p className="px-3 py-6 text-center text-sm text-fg-tertiary">{children}</p>
-  );
+  return <p className="px-3 py-6 text-center text-sm text-fg-tertiary">{children}</p>;
 }
-
 function keyOf(entry: VaultEntry): string {
   return `${entry.owner}/${entry.name}`;
 }
@@ -266,27 +260,9 @@ function keyOf(entry: VaultEntry): string {
  * difference between them is what somebody weighs before typing a token in.
  */
 const DURABILITY: Record<Persistence, string> = {
-  untilDeleted:
-    "Kept until you take it out — here, or in Keychain Access.",
+  untilDeleted: "Kept until you take it out — here, or in Keychain Access.",
   untilLogout: "Lost when you log out of this Mac.",
   untilReboot: "Lost when this Mac restarts.",
-  whileRunning:
-    "Held only while something is running: nothing here survives on its own.",
+  whileRunning: "Held only while something is running: nothing here survives on its own.",
   unknown: "This Mac's store did not say how long it keeps what it is given.",
 };
-
-/**
- * A refusal in the words it arrived in.
- *
- * The commands answer with a sentence written for a person — the store with
- * nowhere to keep a secret, the dialog nobody was there to answer — and a
- * sentence of our own would drop exactly the part somebody acts on.
- */
-function explain(error: unknown): string {
-  if (typeof error === "string" && error.trim() !== "") return error;
-  if (typeof error === "object" && error !== null && "message" in error) {
-    const message = (error as { message?: unknown }).message;
-    if (typeof message === "string" && message.trim() !== "") return message;
-  }
-  return "The keychain could not be reached.";
-}
