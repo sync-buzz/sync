@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { FolderGit2, SlidersHorizontal } from "lucide-react";
+import { SlidersHorizontal } from "lucide-react";
 
-import { BarButton, WindowBar } from "@/components/shell/mobile-chrome";
+import { ProjectWheel } from "@/components/shell/project-wheel";
 import { openRegistered, registeredProjects } from "@/lib/project/client";
 import type { OpenProject } from "@/lib/project/types";
 import { said } from "@/lib/refusal";
@@ -30,9 +30,20 @@ import { said } from "@/lib/refusal";
  * what closing a project already does.
  */
 export function ProjectsScreen({
+  startAt,
   onOpened,
   onOpenSettings,
 }: {
+  /**
+   * The project this phone was in a moment ago, so the wheel opens turned to
+   * it rather than to the top of the list.
+   *
+   * Held by the window above and not asked of the computer: what the computer
+   * keeps is where the phone *is*, and this is a fact about where it has just
+   * been. A phone whose webview was reloaded has neither, and opens at the top
+   * — which is the same screen as before and no worse than it was.
+   */
+  startAt?: string | null;
   onOpened: (project: OpenProject) => void;
   /**
    * What this phone is, in the band under the list.
@@ -96,70 +107,44 @@ export function ProjectsScreen({
     [onOpened],
   );
 
+  if (projects === null) {
+    // Nothing at all rather than a wheel with no names in it: the list arrives
+    // in a moment, and an empty wheel that fills itself reads as a wheel that
+    // lost something.
+    return <div className="min-h-0 flex-1 bg-workspace" />;
+  }
+
+  if (projects.length === 0) {
+    return <Nothing failure={failure} onOpenSettings={onOpenSettings} />;
+  }
+
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-workspace">
-      <div
-        className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4"
-        // The head a phone keeps for itself, asked for rather than measured. The
-        // foot is not padded here any more: the band below is outside this
-        // scroller and keeps its own clearance, so a list long enough to scroll
-        // ends against a bar rather than against the hardware.
-        style={{ paddingTop: "max(1rem, env(safe-area-inset-top))" }}
-      >
-        <h1 className="px-2 pt-2 pb-4 text-2xl font-semibold text-fg">Projects</h1>
-
-        {projects === null ? null : projects.length === 0 ? (
-          <Nothing failure={failure} />
-        ) : (
-          <ul className="flex flex-col gap-px">
-            {projects.map((project) => (
-              <li key={project.path}>
-                <button
-                  type="button"
-                  disabled={opening !== null}
-                  onClick={() => void open(project)}
-                  className="flex w-full items-center gap-3 rounded-(--radius-control) px-2 py-3 text-left transition-colors duration-(--motion-duration-fast) ease-shell active:bg-hover disabled:opacity-50"
-                >
-                  <span
-                    aria-hidden="true"
-                    className="flex size-8 shrink-0 items-center justify-center rounded-(--radius-surface) border border-separator-strong bg-panel text-fg-secondary"
-                  >
-                    <FolderGit2 className="size-4" />
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-base text-fg">
-                    {project.name}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        {failure !== null && projects !== null && projects.length > 0 ? (
-          <p className="px-2 pt-4 text-sm text-danger">{failure}</p>
-        ) : null}
-      </div>
-
-      {/* One control, at the end of the screen — the same place, with the same
-          icon, that the list of a project's sections keeps it in. Two roots and
-          one habit: a person learns where this is once. */}
-      <div
-        className="shrink-0 border-t border-separator"
-        style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
-      >
-        <WindowBar>
-          {/* The leading end, empty. A band with one control puts it at the
-              trailing end, which is where the same control is on the screen a
-              project opens on to. */}
-          <span aria-hidden />
-          <BarButton
-            label="Settings"
-            icon={SlidersHorizontal}
-            onPress={onOpenSettings}
-          />
-        </WindowBar>
-      </div>
-    </div>
+    <ProjectWheel
+      projects={projects.map((project) => ({
+        key: project.path,
+        name: project.name,
+      }))}
+      startAt={startAt ?? undefined}
+      busy={opening !== null}
+      onOpen={(chosen) => {
+        const project = projects.find((one) => one.path === chosen.key);
+        if (project !== undefined) void open(project);
+      }}
+      // The one control that is not about a project, at the end of the band a
+      // thumb rests on — the same place, with the same icon, that the shade
+      // keeps it in once a project is open. One habit, learned once.
+      trailing={
+        <button
+          type="button"
+          aria-label="Settings"
+          onClick={onOpenSettings}
+          className="flex size-11 shrink-0 items-center justify-center rounded-(--radius-control) text-fg-secondary active:bg-hover"
+        >
+          <SlidersHorizontal className="size-5" />
+        </button>
+      }
+      failure={failure}
+    />
   );
 }
 
@@ -183,9 +168,15 @@ interface Listed {
  * places: an empty registry is fixed on the computer, and a refusal is the
  * computer's own words about why it could not be read.
  */
-function Nothing({ failure }: { failure: string | null }) {
+function Nothing({
+  failure,
+  onOpenSettings,
+}: {
+  failure: string | null;
+  onOpenSettings: () => void;
+}) {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 bg-workspace px-6 text-center">
       <p className="text-base text-fg">
         {failure === null
           ? "That computer holds no projects"
@@ -195,6 +186,17 @@ function Nothing({ failure }: { failure: string | null }) {
         {failure ??
           "Add a project on the computer, and it will be here."}
       </p>
+      {/* The way off a screen that otherwise has none: somebody whose computer
+          has stopped answering can read that there are no projects and change
+          which computer this phone dials. */}
+      <button
+        type="button"
+        onClick={onOpenSettings}
+        className="mt-4 flex h-11 items-center gap-2 rounded-(--radius-control) px-3 text-[17px] leading-[22px] text-focus active:bg-hover"
+      >
+        <SlidersHorizontal className="size-5" />
+        Settings
+      </button>
     </div>
   );
 }

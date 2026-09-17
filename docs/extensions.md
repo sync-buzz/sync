@@ -199,18 +199,18 @@ the thing* — a platform without a bundled ACP sidecar exposes the same
 So a build publishes named capabilities and a manifest may require them:
 `records`, `agents.acp`, `markdown.plugins`, `native-menu`, `folders`, `sheets`,
 `net`, `net.write`, `vault`, `background`, `schedule`, `work.agent`,
-`agent.tools`, `terminal`. A missing capability is a refusal
+`agent.tools`, `terminal`, `tools.call`. A missing capability is a refusal
 with a sentence a person can act on, and it is also what lets an extension
 degrade deliberately — asking for a capability is a choice, and reading whether
 one is present is allowed.
 
 That list is what the *build* publishes, and one build is now shown by two
 applications. `capabilitiesHere()` is what the machine in front of somebody
-honours: on a phone it drops `agents.acp`, `vault`, `terminal` and
-`native-menu`, each of which needs something only the computer has. An
+honours: on a phone it drops `agents.acp`, `vault`, `terminal`, `native-menu`
+and `tools.call`, each of which needs something only the computer has. An
 extension that degrades deliberately reads that one.
 
-Two of the four also decide whether a section is opened at all. A package asks
+Two of the five also decide whether a section is opened at all. A package asks
 for `terminal` because it is a terminal and for `vault` because it works
 through a credential it has to read first — there is no smaller version of
 either to fall back to — while a menu that will not open and an agent that
@@ -502,6 +502,78 @@ what else is open.
 That is what a terminal is everywhere else on this system, and it is what stops
 a section that re-attaches after a reload from leaving its previous watcher
 behind — awake on every byte, encoding it for a channel nobody reads.
+
+### `tools.call` reaches nothing new, and that is the whole of its shape
+
+A package holding it may ask one tool of one MCP server — one of the servers the
+person configured in their own agent, in their own file, long before this
+package existed. It cannot add one, name one that is not there, or find out what
+the list holds. Sync opens no connection of its own and holds no credential of
+anybody's: what carries the ask is a turn of the agent this installation works
+through, which is a program that person has already set up and authorised.
+
+**It is a separate agreement from `net`, in both directions.** A package holding
+`tools.call` reaches no host it did not declare, and a package holding `net`
+cannot ask a tool anything. They answer different questions — *where may this
+reach* and *may this spend a turn of my agent* — and a card that folded them
+would ask one and answer both. The second question is the reason this is named
+at all rather than folded into `records`: reading and writing the project's own
+memory is free, and every ask here costs tokens and a wait.
+
+**The ask is spelled in the far end's words.** A server, a tool, the arguments
+that tool takes, and nothing about the carrier — no session, no prompt, no
+account of how it went. That is what makes the carrier replaceable: the turn of
+an agent is what performs an ask today, it is the expensive part, and the day it
+is performed some other way no package is rebuilt.
+
+**What comes back is the tool's own answer, never an account of it.** A turn in
+which the agent talked about the tool instead of calling it rejects by name and
+does not resolve with prose. A panel filled from a summary looks like a working
+panel, which is what makes it worse than an empty one.
+
+**It is not a render path, and a package that treats it as one has built
+something that is blank on a train.** A section draws what is in the project's
+memory. An ask is how what a tool returned gets into that memory — a type of the
+package's own, records written through the ordinary door, and a field of its own
+saying when the copy was taken. The engine's freshness cannot say that: it
+reconciles a claim against the code it covers, and a row copied out of somebody
+else's service covers no code, so it stands at `unverified` for ever. That is a
+true statement about a claim nobody checked and a useless one about a copy taken
+four minutes ago.
+
+**The capability is not the agreement.** `tools.call` says *this build spends
+turns of your agent*, which is the same sentence for everybody who installs it.
+Which server it may spend one on is a second answer, given on that package's
+own page — one row per server of theirs — and withdrawn in Settings under
+Agents. An ask for a server
+nobody agreed to is refused before an agent is raised, under the same name the
+agent's own refusal carries: to whoever asked, *nobody agreed to this* and *the
+agent would not run it without somebody agreeing* are one situation with one
+thing to do about it.
+
+**One agreement covers a server, which is wider than it looks and is the width
+that can honestly be asked for.** It reaches every tool that server publishes,
+including the ones that change things. Sync speaks no MCP, and the agent's
+configuration holds a server's key and how to reach it and nothing else, so
+there is no list of tools for a page to show: the only parties that know the
+names are the person, from memory, and the agent that would be asked, after a
+turn has been spent. What is stored is the package and the server, and a
+narrower answer would be a tool named inside that same row.
+
+**The question is never put during the turn.** A turn carrying an ask has no
+window — it runs for a panel that is redrawing, or for a clock, with nobody
+watching — so a question raised inside one waits for a person who is not there
+until the turn's patience runs out and the panel is left with nothing. The
+agreement is taken where somebody is already reading and deciding what the
+package is, which is its own page — beside the sections it adds and the hosts it
+named.
+
+**The capability is read when the ask is made**, like `vault` and `work.agent`
+and unlike `agent.tools`: whether a package ever asks, and what it asks for, is
+inside its built JavaScript, and there is nothing in the file to answer for.
+Reading it means resolving the package on this machine and parsing its manifest,
+and the id it is resolved under is closed over when the door is built — a
+package states what it wants, never who it is.
 
 ## 5. What a package is
 

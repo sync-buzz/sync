@@ -53,7 +53,7 @@ the prose rules at the foot of this file.
 ## Verify with these, and read the exit code
 
 ```sh
-pnpm lint && pnpm typecheck && pnpm api:check && pnpm prose:check && pnpm build
+pnpm lint && pnpm typecheck && pnpm test && pnpm grammar:check && pnpm api:check && pnpm prose:check && pnpm build
 cd src-tauri
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
@@ -66,6 +66,25 @@ becomes the pager's, and a failing `cargo fmt --check` reads as a pass.
 `cargo check` builds the workspace's default members, which **exclude**
 `sync-mcp`: it links the memory engine, and building it is minutes rather than
 seconds. Reach it deliberately with `-p sync-mcp`.
+
+`pnpm test` is Node's own runner over `src/**/*.test.ts`, and there is no test
+framework in `package.json` on purpose: what is tested here is pure functions —
+reading a typed line, ordering suggestions, folding state — and Node runs those
+from TypeScript directly. A framework would buy a transform, and the only thing
+that needs one is a `.tsx` component, which nothing here tests. The day one
+does, that is a decision with a price rather than a file to add.
+
+Two consequences of taking the platform's runner. It needs **Node 24**, which
+is what CI installs: type stripping is ordinary behaviour there and an
+experimental warning on 22. And `@/…` resolves only because
+`scripts/test-aliases.mjs` teaches it to — `tsconfig.json` is read by the
+compiler and the bundler, never by Node.
+
+`pnpm grammar:check` reads `src/lib/console/console.grammar` and fails when the
+parser committed beside it is not what that grammar produces. The generated
+file is committed on purpose — a file that appears only during a build is a
+file nobody reviews, and the grammar and the parser belong in one diff. `pnpm
+grammar` rewrites it.
 
 ## What lives where
 

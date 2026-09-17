@@ -28,7 +28,7 @@ import { updatesFor, type AvailableUpdate } from "@/lib/extension-host/updates";
 import type { OpenProject } from "@/lib/project/types";
 
 /**
- * Extensions, as an area of the window.
+ * The marketplace, as an area of the window.
  *
  * The same shape an extension's area has, and deliberately so: a provider
  * holding what the area has selected, and one component per column. It is the

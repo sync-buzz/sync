@@ -24,11 +24,24 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          # 24 rather than 22 because `pnpm test` is Node's own runner reading
+          # TypeScript: stripping types is ordinary behaviour here and an
+          # experimental warning one major back.
+          node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Lint
         run: pnpm lint
+      # Before the build, because these are pure functions and answer in a
+      # tenth of a second: a line read wrong should not wait on a static export
+      # to say so.
+      - name: Test
+        run: pnpm test
+      # The console's parser is generated from its grammar and committed. This
+      # fails when the two have parted company, which otherwise shows up as a
+      # line read the way the grammar used to say.
+      - name: Grammar
+        run: pnpm grammar:check
       # Before the type-check, and that order is load-bearing rather than
       # tidy. `next build` generates `.next/types/**`, which `tsconfig.json`
       # includes and which declares the globals the app's own files use —

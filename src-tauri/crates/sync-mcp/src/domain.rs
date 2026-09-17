@@ -57,6 +57,14 @@ pub struct Domain {
     initialised: bool,
     /// How many transaction ids this session has handed out.
     transactions: u64,
+    /// The raw `__type__` records, cached by revision.
+    ///
+    /// Reading them is a walk of `refs/memory/main`, and the answer changes
+    /// only when the corpus is written to — and every write moves the
+    /// revision, so a revision match is a guarantee they have not moved.
+    /// Writability is not cached: it is a filesystem fact (`chmod` does not
+    /// move a revision), and `list_types` fetches it fresh each time.
+    type_records: Option<(String, Vec<Value>)>,
 }
 
 impl Domain {
@@ -76,6 +84,7 @@ impl Domain {
             revision: String::new(),
             initialised: false,
             transactions: 0,
+            type_records: None,
         }
     }
 
@@ -250,6 +259,32 @@ impl Domain {
         parse(value)
     }
 
+    /// The raw `__type__` records, served from a revision-gated cache.
+    ///
+    /// The query is fixed — every caller asks for the same thing — and the
+    /// answer changes only when the corpus is written to. Every write moves
+    /// the revision, so a revision match is a guarantee the records have not
+    /// moved. [`Self::list_types`] and [`Self::publish_types`] both go through
+    /// here, so a `list_types` that follows an `open` (which already read
+    /// them for `publish_types`) is free.
+    ///
+    /// Writability is deliberately not cached here: it is a fact about the
+    /// filesystem, and `chmod` does not move a revision.
+    ///
+    /// # Errors
+    ///
+    /// Returns whatever reading the records refused.
+    fn type_records(&mut self) -> Result<Vec<Value>> {
+        if let Some((ref rev, ref records)) = self.type_records
+            && rev == &self.revision
+        {
+            return Ok(records.clone());
+        }
+        let listing = self.list_records(&json!({"kind": TYPE_KIND, "limit": TYPE_PAGE}))?;
+        self.type_records = Some((self.revision.clone(), listing.records.clone()));
+        Ok(listing.records)
+    }
+
     /// Publish the definitions Sync needs for its own records, if the store
     /// does not already hold them.
     ///
@@ -270,8 +305,8 @@ impl Domain {
     ///
     /// Returns the engine failure.
     pub fn publish_types(&mut self) -> Result<bool> {
-        let stored = self.list_records(&json!({"kind": TYPE_KIND, "limit": TYPE_PAGE}))?;
-        if corpus_matches(&stored.records) {
+        let stored = self.type_records()?;
+        if corpus_matches(&stored) {
             return Ok(false);
         }
         let transaction = self.next_transaction_id("sync-types");
@@ -300,16 +335,18 @@ impl Domain {
     /// the definition, because a type created in the window is one no build
     /// knows about.
     ///
+    /// The definitions are served from [`Self::type_records`], a revision-gated
+    /// cache: a `list_types` that follows an `open` — which already read them
+    /// for `publish_types` — is free. Writability is fetched fresh, because it
+    /// is a filesystem fact rather than a corpus one.
+    ///
     /// # Errors
     ///
     /// Returns the engine failure.
     pub fn list_types(&mut self) -> Result<Vec<RecordType>> {
-        let listing = self.list_records(&json!({"kind": TYPE_KIND, "limit": TYPE_PAGE}))?;
-        let mut types: Vec<RecordType> = listing
-            .records
-            .iter()
-            .filter_map(RecordType::from_record)
-            .collect();
+        let records = self.type_records()?;
+        let mut types: Vec<RecordType> =
+            records.iter().filter_map(RecordType::from_record).collect();
         // One question the definitions cannot answer, asked once for the whole
         // corpus. Whether a type can be written is a fact about the storage it
         // names — a folder may be read-only or simply not there — and the

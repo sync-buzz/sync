@@ -19,9 +19,12 @@
 pub mod attending;
 pub mod attention;
 pub mod connect;
+pub mod consent;
+pub mod console;
 #[cfg(target_os = "macos")]
 pub mod dock;
 pub mod extensions;
+pub mod flagship;
 pub mod handlers;
 pub mod memory;
 pub mod project;
@@ -84,6 +87,10 @@ pub fn run() {
         // the answer is put the right window in front of somebody who clicked
         // a banner about that project.
         .manage(windows::Holding::default())
+        // Where somebody sent to a particular settings screen waits until that
+        // window exists to read it: it is built hidden, so there is a moment
+        // with nobody to tell.
+        .manage(settings::AskedSection::default())
         // Where a click on a banner is left for the window that will answer it,
         // which is a window that may not have been made when it was clicked.
         .manage(attention::Addressed::default())
@@ -92,6 +99,9 @@ pub fn run() {
         // reason for a build to stop. What ends them is closing the project.
         .manage(sync_terminal::Terminals::new())
         .manage(terminal::Watchers::default())
+        // Where each console tab is working. Held by the host because a folder
+        // that arrived with the call would be a boundary the caller draws.
+        .manage(console::Working::default())
         // The server comes up with the application, before any window does.
         // Nothing about it waits for a person: an agent may be running against
         // a project of theirs while every window is closed, and "is Sync
@@ -171,6 +181,15 @@ pub fn run() {
             sessions::session_set_mode,
             sessions::session_close,
             sessions::session_forget,
+            console::console_work_start,
+            console::console_works,
+            console::console_shell_start,
+            console::console_shell_watch,
+            console::console_shell_close,
+            console::console_folder,
+            console::console_cd,
+            console::console_tab,
+            console::console_tab_close,
             worktree::worktree_location,
             worktree::worktree_set_location,
             worktree::worktree_list,
@@ -179,6 +198,14 @@ pub fn run() {
             connect::agents_list,
             connect::agent_connect,
             connect::agent_disconnect,
+            flagship::model_choice_status,
+            flagship::model_choice_set,
+            flagship::flagship_servers,
+            flagship::flagship_call,
+            flagship::extension_tool_call,
+            consent::tool_consent_status,
+            consent::tool_consent_grant,
+            consent::tool_consent_revoke,
             extensions::extension_install_file,
             extensions::extension_install_folder,
             extensions::extension_list,
@@ -258,6 +285,7 @@ pub fn run() {
             memory::memory_reindex,
             memory::memory_reconcile,
             settings::settings_open,
+            settings::settings_section,
             vault::vault_entries,
             vault::vault_write,
             vault::vault_forget,

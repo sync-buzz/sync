@@ -41,6 +41,7 @@ fn app() -> (App<MockRuntime>, WebviewWindow<MockRuntime>) {
             sync_lib::memory::memory_extension_types_publish,
             sync_lib::memory::memory_reindex,
             sync_lib::memory::memory_document_create,
+            sync_lib::memory::memory_records,
             sync_lib::memory::memory_document_delete,
             sync_lib::memory::memory_document_dependents,
             sync_lib::memory::memory_folders,
@@ -418,6 +419,212 @@ fn an_extension_publishes_a_vocabulary_and_the_project_holds_all_of_it() {
     assert_eq!(
         created["fields"]["status"], "open",
         "a new record starts at the default the declaration states"
+    );
+}
+
+/// A section fed from somewhere outside this project writes its own fields and
+/// reads every one of them back.
+///
+/// The case a package that keeps a copy of somebody else's data is: a type with
+/// fields of its own, a record written through the commands the window uses,
+/// and — the part nothing else covers — a field saying **when the copy was
+/// taken**. That last one is the type's own field rather than anything the
+/// engine derives, and it has to be, because the engine's freshness is a claim
+/// about code: it reconciles a record against the paths it says it covers, and
+/// a row copied out of somebody's tracker covers no code at all. So it would
+/// stand at unverified for ever, which is a true statement about a claim nobody
+/// checked and a useless one about a copy taken four minutes ago.
+///
+/// Written and read back rather than asserted on the answer to the write. A
+/// field that crosses this boundary and is not understood on the far side is
+/// dropped without an error anywhere — the window and the engine agree on a
+/// shape, and an unknown member of it is silence — so the only test worth
+/// having is the one that asks for it again afterwards.
+#[test]
+fn a_section_that_copies_something_writes_its_own_fields_and_reads_them_back() {
+    if !common::sidecar_is_available() {
+        eprintln!("{}", common::NO_SIDECAR);
+        return;
+    }
+    let project = repository();
+    let project_path = project.path().to_string_lossy().into_owned();
+    let (_app, webview) = app();
+
+    invoke(&webview, "memory_open", json!({"project": project_path}))
+        .expect("opening memory succeeds");
+
+    invoke(
+        &webview,
+        "memory_extension_types_publish",
+        json!({
+            "project": project_path,
+            "types": [{
+                "kind": "example.item",
+                "title": "Item",
+                "description": "One row of somebody else's list, kept here.",
+                "icon": "inbox",
+                "fields": {
+                    // Deliberately not `title`, `content` or `folder`: those
+                    // are the envelope's, and the test below is what says so.
+                    "identifier": {"type": "string", "required": false},
+                    "state": {
+                        "type": "enum",
+                        "values": ["open", "closed"],
+                        "required": true,
+                        "default": "open",
+                    },
+                    "synced": {"type": "string", "required": false},
+                    // Not reserved, and the reason is worth pinning: what the
+                    // envelope stores is `archive`, and `archived` is only what
+                    // the window calls the flag inside it. The documentation
+                    // says a type may declare this one, so a test says it too —
+                    // a sentence about a boundary is worth exactly as much as
+                    // the check standing on it.
+                    "archived": {"type": "string", "required": false},
+                },
+            }],
+        }),
+    )
+    .expect("the vocabulary publishes");
+
+    let made = invoke(
+        &webview,
+        "memory_document_create",
+        json!({"project": project_path, "kind": "example.item", "title": "Deploy the sidecar"}),
+    )
+    .expect("a record of the type is created");
+    let key = made["key"].as_str().expect("a key").to_owned();
+
+    const TAKEN: &str = "2026-09-10T11:04:00Z";
+    let written = invoke(
+        &webview,
+        "memory_document_update",
+        json!({
+            "project": project_path,
+            "key": key,
+            "edits": {
+                "content": "Whatever the far end said about it.\n",
+                "archived": true,
+                "fields": {
+                    "identifier": "PROJ-41",
+                    "state": "closed",
+                    "synced": TAKEN,
+                    "archived": "by hand, last April",
+                },
+            },
+        }),
+    )
+    .expect("the fields are written");
+    assert_eq!(written["fields"]["synced"], TAKEN);
+
+    // The read the panel does when somebody opens the section again, which on a
+    // relaunch is the only thing that has happened: no agent has run, and
+    // nothing has been fetched.
+    let read = invoke(
+        &webview,
+        "memory_document",
+        json!({"project": project_path, "key": key}),
+    )
+    .expect("the record reads back");
+    assert_eq!(read["fields"]["identifier"], "PROJ-41");
+    assert_eq!(read["fields"]["state"], "closed");
+    assert_eq!(
+        read["fields"]["synced"], TAKEN,
+        "when the copy was taken is the section's own field and survives the \
+         round trip: {read}"
+    );
+
+    // And what the engine says about the same record, which is the reason the
+    // field above exists. Nothing checked this claim against any code, because
+    // there is no code for it to be a claim about.
+    assert_eq!(
+        read["fields"]["archived"], "by hand, last April",
+        "a field named after what the window calls an envelope member is the \
+         type's own, and does not collide with the flag: {read}"
+    );
+    assert_eq!(
+        read["archived"], true,
+        "and the flag is still the flag: {read}"
+    );
+
+    assert_eq!(
+        read["freshness"], "unverified",
+        "the engine's freshness is about code and says nothing about a copy: {read}"
+    );
+
+    // The whole list, as a panel asks for it: the fields it will draw, named.
+    let listed = invoke(
+        &webview,
+        "memory_records",
+        json!({
+            "project": project_path,
+            "selection": {"kind": "example.item", "fields": ["state", "synced"]},
+            "hidden": [],
+        }),
+    )
+    .expect("the list reads");
+    let row = listed["records"][0].clone();
+    assert_eq!(
+        row["fields"]["synced"], TAKEN,
+        "a row carries the field the panel asked for, so the column can be \
+         drawn without opening every record: {listed}"
+    );
+}
+
+/// A type may not call a field by one of the envelope's own names, and the
+/// refusal says which one.
+///
+/// The failure this prevents is the quiet one. Product fields are flattened
+/// onto the envelope, so a type declaring `title` describes a record whose own
+/// member would be overwritten by it — and a package that got that far would
+/// install, publish, and then refuse the first record anybody wrote as it, with
+/// the reason three layers away from the file that caused it.
+#[test]
+fn a_type_naming_an_envelope_member_as_its_own_field_is_refused_by_name() {
+    if !common::sidecar_is_available() {
+        eprintln!("{}", common::NO_SIDECAR);
+        return;
+    }
+    let project = repository();
+    let project_path = project.path().to_string_lossy().into_owned();
+    let (_app, webview) = app();
+
+    invoke(&webview, "memory_open", json!({"project": project_path}))
+        .expect("opening memory succeeds");
+
+    for taken in ["title", "folder", "content", "tags"] {
+        let refused = invoke(
+            &webview,
+            "memory_extension_types_publish",
+            json!({
+                "project": project_path,
+                "types": [{
+                    "kind": "example.taken",
+                    "title": "Taken",
+                    "description": "A type that would not be writable.",
+                    "icon": "inbox",
+                    "fields": {taken: {"type": "string", "required": false}},
+                }],
+            }),
+        )
+        .expect_err("a colliding declaration is refused");
+        assert!(
+            refused["message"]
+                .as_str()
+                .is_some_and(|said| said.contains(taken)),
+            "the refusal names the field rather than the type: {refused}"
+        );
+    }
+
+    let types = invoke(&webview, "memory_types", json!({"project": project_path}))
+        .expect("the corpus answers");
+    assert!(
+        !types
+            .as_array()
+            .expect("a list")
+            .iter()
+            .any(|entry| entry["kind"] == "example.taken"),
+        "and nothing of the refused type reached the project: {types}"
     );
 }
 

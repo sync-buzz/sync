@@ -480,6 +480,14 @@ mod tests {
         assert!(env_of(&claude).contains(&("ANTHROPIC_MODEL".to_owned(), Some(asked.to_owned()))));
     }
 
+    /// Raised with nothing to say, `OpenCode` reaches its own account, and
+    /// the environment carries no configuration of ours.
+    #[test]
+    fn opencode_raised_with_defaults_injects_nothing() {
+        let command = command_for(&registry::OPENCODE, &SpawnOptions::default());
+        assert!(env_of(&command).is_empty());
+    }
+
     #[test]
     fn a_resolved_program_path_replaces_the_bare_name() {
         let options = SpawnOptions {

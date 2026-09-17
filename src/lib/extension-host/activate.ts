@@ -11,6 +11,7 @@ import type {
 } from "@/lib/extension-api/contract";
 import { netFor } from "@/lib/extension-api/net";
 import { terminalFor } from "@/lib/extension-api/terminal";
+import { toolsFor } from "@/lib/extension-api/tools";
 import { vaultFor } from "@/lib/extension-api/vault";
 import { refuseIncompatible, unavailableHere } from "@/lib/extension-api/version";
 import type {
@@ -357,6 +358,7 @@ export async function activate(extension: InstalledExtension): Promise<Activatio
       net: netFor(id),
       vault: vaultFor(id),
       terminal: terminalFor(id),
+      tools: toolsFor(id),
     });
   } catch (threw) {
     throw new ActivationFailure(

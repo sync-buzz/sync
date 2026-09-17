@@ -1,0 +1,104 @@
+// What a typed line is made of.
+//
+// One grammar because there used to be four readings of one string — what a
+// line means, where its steps divide, how it is coloured, what it could
+// become — and four readings drift. The one that drifts is the one nobody is
+// testing, and a line coloured as an address but run as a refusal is a window
+// lying about what Return will do.
+//
+// It describes shape and nothing else. Whether `find` is a verb this project
+// has, whether `@review` is running, whether an address points at anything —
+// all of that is a list held at run time, and a grammar that knew any of it
+// would be the shell learning a subject.
+
+@top Line { Step? (Then Step?)* }
+
+// A process, an agent, or words. Nothing else is a step, and a line that is
+// none of them is words that resolve to no verb — refused when Return is
+// pressed rather than while somebody is still typing.
+Step { Shell | Address | Words }
+
+// Everything after the mark belongs to a shell, read by `shellText` below
+// rather than by a token: what ends it is two characters of look-ahead, which
+// is the thing regular expressions cannot do.
+Shell { Bang ShellText? }
+
+// A name is an address and the rest is what is being said to it. The mark on
+// its own is the second form because half of `@rev` is half a word rather than
+// a mistake — and written as its own alternative rather than as an optional
+// name, which would leave the first word after the mark ambiguous between the
+// address and the first thing said to it.
+Address { At Name Arg* | At }
+
+Words { Arg+ }
+
+Arg { SyncAddress | FilePath | Quoted | Word | Dashes }
+
+Name { word }
+Word { word }
+
+@skip { space }
+
+// Above `@tokens` because the order of the two decides which is asked first,
+// and this one has to win: after the mark every character belongs to a shell,
+// where the ordinary reading would find words, addresses and marks that are
+// none of the console's business.
+@external tokens shellText from "./console-tokens" { ShellText }
+
+@tokens {
+  // Spelled out rather than `@whitespace`, which also holds the vertical tab
+  // and the form feed: a word is *anything not space*, and two sets that
+  // disagree by two characters nobody types is a token conflict at build time.
+  space { $[ \t\r\n]+ }
+
+  Bang { "!" }
+  At { "@" }
+
+  // Two characters rather than one because inside `!` the line belongs to a
+  // shell, whose own `|` and `>` have to go on working.
+  Then { "->" }
+
+  // An address into the project's memory. One token rather than a mark and a
+  // path, because everything in it is one thing to point at and one thing to
+  // complete.
+  SyncAddress { "sync://" addressChar* }
+  addressChar { ![ \t\r\n] }
+
+  // An absolute path. What a relative one means depends on where the tab is
+  // working, which is the host's answer rather than the grammar's, so only the
+  // form that is unambiguous on its own is a path here.
+  FilePath { "/" pathChar* }
+  pathChar { ![ \t\r\n] }
+
+  Quoted {
+    '"' (![\\"] | "\\" _)* '"'? |
+    "'" (![\\'] | "\\" _)* "'"?
+  }
+
+  // Anything else that is not space. The dash is set apart from the rest so
+  // that `->` can never be read as part of a word — `plan-console` is one word
+  // and `a->b` is two steps, and the difference is a single character of
+  // look-ahead that a character class cannot express on its own.
+  word { (plain | "-"+ afterDash)+ }
+  plain { ![ \t\r\n"'\-] }
+  afterDash { ![ \t\r\n"'>\-] }
+
+  // A run of dashes that is not the mark: what `plan-` is while somebody is
+  // still typing it. Without this the commonest half-written word in this
+  // project — a key, which is words joined by dashes — parses as an error.
+  Dashes { "-"+ }
+
+  // Earlier wins where two could match from the same character. Every line of
+  // this is a mark that a word would otherwise swallow whole: without it
+  // `@review` is one word and the console has no agents.
+  // A dash run is the mark, then a word, then what is left: `->` is never part
+  // of a word, `-v` is a word, and `plan-` on its own is what a key looks like
+  // halfway through being typed.
+  @precedence { Then, word, Dashes }
+  @precedence { SyncAddress, word }
+  @precedence { Bang, word }
+  @precedence { At, word }
+  @precedence { FilePath, word }
+}
+
+@detectDelim

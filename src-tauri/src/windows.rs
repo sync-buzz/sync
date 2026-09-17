@@ -439,7 +439,7 @@ mod tests {
     fn the_settings_window_is_not_a_project_window() {
         let app = tauri::test::mock_app();
         let handle = app.handle();
-        crate::settings::settings_open(handle.clone()).expect("the settings window");
+        crate::settings::settings_open(handle.clone(), None).expect("the settings window");
 
         assert!(
             project_windows(handle).is_empty(),

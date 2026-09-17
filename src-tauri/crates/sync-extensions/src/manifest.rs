@@ -97,6 +97,27 @@ pub const AGENT_TOOLS_CAPABILITY: &str = "agent.tools";
 /// inside its built JavaScript, and there is nothing in the file to answer for.
 pub const TERMINAL_CAPABILITY: &str = "terminal";
 
+/// Asking one tool of one server the person has already configured.
+///
+/// Deliberately not a reading of [`NET_CAPABILITY`], and the difference is what
+/// a person is agreeing to. `net` is this package reaching a host it named in
+/// its own file; this is this package asking something that person already set
+/// up and authorised elsewhere, through the agent this installation works
+/// through. A package holding this one reaches no host it did not declare, and
+/// a package holding `net` cannot ask a tool anything.
+///
+/// It is the narrowest agreement on this list in what it can *do* and not in
+/// what it can cost: every ask is a turn of somebody's agent, which is tokens
+/// and a wait. That is why it is named at all rather than folded into
+/// `records` — a package that only reads and writes the project's own memory
+/// spends nothing.
+///
+/// Checked when the ask is made rather than when the manifest is read, like
+/// `terminal` and `work.agent`: whether a package ever asks, and what it asks
+/// for, is inside its built JavaScript, and there is nothing in the file to
+/// answer for.
+pub const TOOLS_CAPABILITY: &str = "tools.call";
+
 /// The manifest format this build reads.
 ///
 /// Bumped when the *shape* changes incompatibly, which is a different question

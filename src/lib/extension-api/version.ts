@@ -42,6 +42,81 @@ import { device } from "@/lib/device";
  * point of the number is that a manifest can state a range and be believed. The
  * cost is honest major bumps, which is the cost of meaning it.
  *
+ * **3.19.0** is a column that reads in two levels and in several runs.
+ * `SourceListItem` gains `band` and `children`, and `SourceListChild` is the
+ * name of what the second holds — additions, so a minor, and every package
+ * stating `^3.0` goes on installing.
+ *
+ * Both answer the same failure, which is a column that has grown past what a
+ * person takes in at a glance. A flat run of nine is nine things held at once;
+ * a row whose screen is three screenfuls stacked can only be read by scrolling
+ * past the parts nobody came for. The window hit both in its own settings
+ * before any package did, and the fix belongs in the control rather than beside
+ * it: a package that solved this for itself would have built a second column
+ * next to the one it was given, and the two would have disagreed about what a
+ * selected row looks like.
+ *
+ * A row that declares children stops being a place itself: choosing it chooses
+ * the first of them, and it shows that by lighting rather than by taking the
+ * selected surface. That is the part to copy rather than work around. A row
+ * that were also a screen would be a screen holding every part sitting three
+ * inches above those parts, each of which is the same screen with the rest
+ * removed — two kinds of destination drawn identically, in the one column whose
+ * whole job is saying where you are. Nothing is drawn for a list that declares
+ * neither member, so a column that was right as one flat run is untouched,
+ * byte for byte.
+ *
+ * **3.18.0** is a package able to say how old what it is showing is. `elapsed`
+ * is added — one function, so a minor, and every package stating `^3.0` goes on
+ * installing.
+ *
+ * The window has always had exactly one ladder of sentences for this — *Just
+ * now*, *4 min ago*, *Yesterday* — and a package had none, while carrying two
+ * kinds of moment it might want to draw: the engine's, since 3.13, and any it
+ * wrote into a field of its own. So the choice was never between one wording
+ * and none; it was between one wording and one per package, arrived at
+ * separately by authors who never see each other's column. That is the same
+ * argument the component surface rests on, applied to a sentence instead of to
+ * markup.
+ *
+ * It takes both spellings of a moment, and that is the part worth defending
+ * rather than an accommodation. The engine answers in seconds; a package's own
+ * field holds ISO 8601 text, because there is no moment among the field types
+ * and a type recording when something was copied records a string. Leaving the
+ * conversion to each package leaves two failures that report nothing:
+ * milliseconds handed over as seconds read as the far future and say *Just now*
+ * about everything, and text that will not parse arrives as `NaN` and reads as
+ * *NaN days ago*. A door that accepts what its callers actually hold has
+ * neither.
+ *
+ * A date is still not on the surface. *How current is this* and *which one did
+ * I set up at the office* are different questions, and the second one is looked
+ * up rather than scanned.
+ *
+ * **3.17.0** is a package asking one of the person's own tools something.
+ * `ExtensionHost` gains `tools`, and `ExtensionTools` and `ToolAsk` join the
+ * surface beside it — additions, so a minor, and every package stating `^3.0`
+ * goes on installing. The capability `tools.call` arrives with them.
+ *
+ * What it opens is deliberately not the network. A package holding it reaches
+ * the servers that person already configured in their own agent, through that
+ * agent, and cannot add one or find out what the list holds; a package holding
+ * `net` still cannot ask a tool anything. The two are separate agreements
+ * because they are separate questions — *where may this reach* and *may this
+ * spend a turn of my agent* — and a card that folded them would be asking one
+ * and answering both.
+ *
+ * The ask is spelled in the far end's words — a server, a tool, its arguments —
+ * with nothing in it about the carrier. That is the one part of the shape worth
+ * defending: what carries an ask today is a turn of a chosen agent, and a
+ * request naming a session and a prompt would make replacing that carrier a
+ * rebuild of every package ever written against this.
+ *
+ * It is not a render path, and the surface says so where an author reads it. A
+ * panel draws what is in the project's memory; this is how what a tool returned
+ * gets there. A section that asked on every render would cost tokens to open
+ * and be blank on a train.
+ *
  * **3.16.0** is a list cut by tag. `MemorySelection` gains `tags`, one optional
  * member, so a minor and every package stating `^3.0` goes on installing.
  *
@@ -724,7 +799,7 @@ import { device } from "@/lib/device";
  * `AreaModule`, `ActivationResult` — arrived in the same commit, which on its
  * own would have been a minor.
  */
-export const SYNC_API_VERSION = "3.16.0" as const;
+export const SYNC_API_VERSION = "3.19.0" as const;
 
 /**
  * What this build can do, as opposed to what its surface looks like.
@@ -897,6 +972,28 @@ export const SYNC_CAPABILITIES = [
    * raised it, which is as strong and costs a string comparison.
    */
   "terminal",
+  /**
+   * Asking one tool of one server the person has already configured.
+   *
+   * The narrowest agreement on this list in what it can reach, and it is
+   * deliberately not a wider reading of `net`. `net` is a package dialling a
+   * host it named in its own file, checked against that list; this is a package
+   * asking something the person set up and authorised somewhere else entirely,
+   * carried by the agent this installation works through. A package holding
+   * this one reaches no host it did not declare, and cannot add a server, name
+   * one that is not there, or learn what the list holds.
+   *
+   * It is named separately from `records` because of what it costs rather than
+   * what it opens. A package that only reads and writes the project's own
+   * memory spends nothing; every ask here is a turn of somebody's agent, which
+   * is tokens and a wait, and the card a person installs from should say so
+   * before the first one.
+   *
+   * Checked when the ask is made rather than when the manifest is read, like
+   * `vault` and `work.agent`: whether a package ever asks, and what it asks
+   * for, is inside its built JavaScript.
+   */
+  "tools.call",
 ] as const;
 
 export type SyncCapability = (typeof SYNC_CAPABILITIES)[number];
@@ -924,6 +1021,13 @@ const NOT_ON_A_PHONE: readonly SyncCapability[] = [
   "vault",
   "terminal",
   "native-menu",
+  // The fifth, and the one that does not follow from *the screen is here*. It
+  // is `agents.acp` read at one remove: what carries an ask is a turn of an
+  // agent, an agent is a process, and a phone raises none. A handler's reach is
+  // held across the connection because the computer performs it; this is not,
+  // because the command that performs it is one the phone's application does
+  // not register.
+  "tools.call",
 ];
 
 /**

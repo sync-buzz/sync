@@ -69,7 +69,11 @@ export {
   PanelPlaceholder,
 } from "@/components/shell/panel";
 
-export { SourceList, type SourceListItem } from "@/components/shell/source-list";
+export {
+  SourceList,
+  type SourceListChild,
+  type SourceListItem,
+} from "@/components/shell/source-list";
 
 /**
  * The list for the one case the others cannot answer: a list with no bound.
@@ -279,6 +283,22 @@ export {
   type SaveState,
 } from "@/lib/memory/use-document";
 
+/**
+ * How long ago a moment was, in the words this window already uses for it.
+ *
+ * A record carries two moments a package may want to draw — the ones the engine
+ * keeps, in seconds, and whatever the package itself wrote into a field, which
+ * is text — and until now it could word neither. The cost of leaving that to
+ * each package is not the code, which is a dozen lines: it is that a column
+ * saying *4 min ago* and the column beside it saying *4 minutes ago* stop
+ * reading as one application, and neither author ever sees the other's screen.
+ *
+ * It is the answer to *how current is this*, and only that. A moment somebody
+ * looks up rather than scans — the day a thing was made — is a date, which is a
+ * different question and deliberately not offered here.
+ */
+export { elapsed } from "@/lib/elapsed";
+
 // ---------------------------------------------------------------------------
 // The confirmations that write to the corpus.
 //
@@ -364,6 +384,7 @@ export type {
   ExtensionHost,
   ExtensionNet,
   ExtensionTerminal,
+  ExtensionTools,
   ExtensionVault,
   NetMethod,
   NetPart,
@@ -373,6 +394,7 @@ export type {
   TerminalOpening,
   TerminalRow,
   TerminalSize,
+  ToolAsk,
 } from "@/lib/extension-api/contract";
 
 // ---------------------------------------------------------------------------

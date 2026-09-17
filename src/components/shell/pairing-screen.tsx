@@ -36,8 +36,8 @@ export function PairingScreen({ pairing }: { pairing: Pairing }) {
       // the screen and the *text* stops short of them, which is the whole
       // point of covering the safe area in the first place.
       style={{
-        paddingTop: "max(0px, env(safe-area-inset-top))",
-        paddingBottom: "max(var(--header-height), env(safe-area-inset-bottom))",
+        paddingTop: "max(0px, var(--safe-top))",
+        paddingBottom: "max(var(--header-height), var(--safe-bottom))",
       }}
     >
       <span

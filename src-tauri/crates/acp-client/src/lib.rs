@@ -46,6 +46,7 @@
 
 pub mod capabilities;
 pub mod connection;
+pub mod errand;
 pub mod error;
 pub mod handler;
 pub mod launch;
@@ -63,11 +64,13 @@ pub use agent_client_protocol_schema::ProtocolVersion;
 
 pub use capabilities::{AgentProfile, SUPPORTED_PROTOCOL_VERSION};
 pub use connection::{AgentConnection, DEFAULT_REQUEST_TIMEOUT};
+pub use errand::{Consent, Errand, ErrandError, Refusal};
 pub use error::{Error, Result, RpcError};
 pub use handler::ClientHandler;
 pub use launch::{AgentProcess, SpawnOptions};
 pub use registry::{AcpMode, AgentLaunchSpec, ModelPin, Verification};
 pub use tool_names::{McpToolName, McpToolNaming};
 pub use update::{
-    decode_session_update, SessionUpdateEvent, SessionUpdatePayload, UnrecognizedUpdate,
+    decode_session_update, SessionUpdateEvent, SessionUpdatePayload, ToolCallReport,
+    UnrecognizedUpdate,
 };

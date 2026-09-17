@@ -43,13 +43,15 @@ use sync_memory::Subscription;
 use tauri::State;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager as _, Runtime};
+use tokio::sync::oneshot;
 
 use crate::project::{ProjectError, configuration_file};
 use adapters::AdapterState;
 use catalog::AgentDescriptor;
 use event::{PastedImage, SessionEvent, Status};
 use live::{
-    About, HISTORY_PAGE, HeldImage, HistoryPage, Place, Session, SessionHandler, Sessions, Source,
+    About, HISTORY_PAGE, HeldImage, HistoryPage, Origin, Place, Session, SessionHandler, Sessions,
+    Source,
 };
 use remembered::{Remembered, Store};
 
@@ -231,7 +233,18 @@ pub fn session_catalog() -> Vec<AgentDescriptor> {
 /// None.
 #[tauri::command(async)]
 pub fn session_live(sessions: State<'_, Sessions>) -> Vec<SessionRow> {
-    let mut rows: Vec<SessionRow> = sessions.all().iter().map(row).collect();
+    let mut rows: Vec<SessionRow> = sessions
+        .all()
+        .iter()
+        // What the console raised is left out, and that is what makes the
+        // console usable without spoiling this list. A person asks it for a
+        // dozen small things in an afternoon; a list of conversations that
+        // carried all twelve would bury the three somebody actually meant to
+        // have. They are not hidden — [`crate::console::console_works`] is the
+        // list they are in, and they are ordinary sessions in every other way.
+        .filter(|session| !session.console)
+        .map(row)
+        .collect();
     rows.sort_by_key(|row| row.opened_at_ms);
     rows
 }
@@ -275,7 +288,16 @@ pub async fn session_open<R: Runtime>(
         project: project.clone(),
         worktree: made.clone(),
     };
-    let opened = open(&app, &sessions, &agent_id, place, model, None, under).await;
+    let opened = open(
+        &app,
+        &sessions,
+        &agent_id,
+        place,
+        model,
+        Origin::Person,
+        under,
+    )
+    .await;
 
     // A tree made for a conversation that never opened is a directory nobody
     // will ever look at: the agent did not start, so nothing was written in it
@@ -305,11 +327,10 @@ async fn open<R: Runtime>(
     agent_id: &str,
     place: Place,
     model: Option<String>,
-    // Who asked. `None` is the window, where a person is the answer by
-    // construction. It is taken here rather than set on the session afterwards
-    // so that a poll landing between the insert and the raise cannot see a row
-    // that is briefly nobody's.
-    source: Option<Source>,
+    // Who asked. Taken here rather than set on the session afterwards so that a
+    // poll landing between the insert and the raise cannot see a row that is
+    // briefly nobody's.
+    origin: Origin,
     // What this one stands under, set with the same timing and for the same
     // reason: a row that appeared in the list before it knew where it belonged
     // would be a row that changes group under somebody reading it.
@@ -323,9 +344,16 @@ async fn open<R: Runtime>(
     // an agent through a package's tool — cannot put a conversation under a
     // record it does not belong to, because it is not asked.
     let Under { about, parent } = under;
-    let (source, about) = match parent.as_deref() {
-        None => (source, about),
-        Some(parent) => descent(app, sessions, &place.project, parent)?,
+    // What descends from a piece of console work is not itself console work: an
+    // agent reached this through a package's tool, the conversation carries
+    // that package's source, and it belongs in the list of conversations where
+    // the rest of that package's work is.
+    let (origin, about) = match parent.as_deref() {
+        None => (origin, about),
+        Some(parent) => {
+            let (source, inherited) = descent(app, sessions, &place.project, parent)?;
+            (source.map_or(Origin::Person, Origin::Ordered), inherited)
+        }
     };
     let program = catalog::resolve(spec.program).ok_or_else(|| {
         ProjectError::new(
@@ -339,7 +367,7 @@ async fn open<R: Runtime>(
         agent_id.to_owned(),
         spec.display_name.replace('`', ""),
         place,
-        source,
+        origin,
         about,
         parent,
     );
@@ -518,25 +546,68 @@ pub(crate) async fn raise_for_work<R: Runtime>(
         agent_id,
         Place::project(cwd.to_path_buf()),
         None,
-        Some(source),
+        Origin::Ordered(source),
         under,
     )
     .await
     .map(|(session, _)| session)
 }
 
-/// The part of opening that can fail, so the caller has one place to record why.
-async fn raise<R: Runtime>(
+/// Raises an agent for a line somebody typed into the console.
+///
+/// The same path again, and the same point as [`raise_for_work`]: what the
+/// console asks for is an ordinary session — it is in the registry, it writes
+/// the same pointer, and `open` in the console hands it to the area that draws
+/// conversations without converting anything.
+///
+/// In the project's own tree, for the reason ordered work is: a tree is a
+/// decision somebody makes about a piece of work, and nothing typed so far
+/// says to make one.
+///
+/// # Errors
+///
+/// [`ProjectError`] when the agent is unknown or not installed, when its
+/// process will not start, or when it refuses `initialize` or `session/new`.
+pub(crate) async fn raise_for_console<R: Runtime>(
+    app: &AppHandle<R>,
+    agent_id: &str,
+    project: &std::path::Path,
+) -> Result<Arc<Session>, ProjectError> {
+    let sessions = app.state::<Sessions>();
+    open(
+        app,
+        &sessions,
+        agent_id,
+        Place::project(project.to_path_buf()),
+        None,
+        Origin::Console,
+        Under::default(),
+    )
+    .await
+    .map(|(session, _)| session)
+}
+
+/// How this build starts an agent of this machine's, whoever is asking.
+///
+/// Its own function because there are two askers: a conversation, and an errand
+/// run for a window with nobody watching ([`crate::flagship`]). Every line of it
+/// is a fact about *this installation* rather than about either caller — where
+/// the adapter went, what PATH a bundled application has to be given back, what
+/// this machine reaches for a model, that Sync answers permission requests
+/// itself — and a second copy would be a second answer to each, drifting
+/// quietly while both kept compiling.
+///
+/// # Errors
+///
+/// [`ProjectError`] when the machine cannot say where application data lives,
+/// and when an adapter this row needs is not there and cannot be fetched.
+pub(crate) fn launched<R: Runtime>(
     app: &AppHandle<R>,
     spec: &'static acp_client::AgentLaunchSpec,
     program: PathBuf,
     model: Option<String>,
-    // The agent's own id for a session it already holds, when this is a
-    // conversation being continued rather than a new one.
-    resume: Option<String>,
-    session: &Arc<Session>,
     cwd: &std::path::Path,
-) -> Result<OpenedSession, ProjectError> {
+) -> Result<launch::SpawnOptions, ProjectError> {
     // An adapter is fetched at install, not here — but "not here" cannot mean
     // "assume it is there": the directory belongs to the machine and the install
     // belonged to one project, so another project may have dropped it. Checking
@@ -548,7 +619,7 @@ async fn raise<R: Runtime>(
     // The model only rides in on the launch when this agent takes one that way.
     // The others advertise theirs in protocol, and the session's configuration
     // is where that choice is made — see `session_set_model`.
-    let options = launch::SpawnOptions {
+    Ok(launch::SpawnOptions {
         // The adapter's own executable when there is one, so nothing asks the
         // npm registry what the package name means on the way to every turn.
         program: Some(adapter.clone().unwrap_or(program)),
@@ -565,7 +636,22 @@ async fn raise<R: Runtime>(
         // to agree: an agent launched with approvals disabled would show
         // questions about things it can already do.
         full_access: false,
-    };
+    })
+}
+
+/// The part of opening that can fail, so the caller has one place to record why.
+async fn raise<R: Runtime>(
+    app: &AppHandle<R>,
+    spec: &'static acp_client::AgentLaunchSpec,
+    program: PathBuf,
+    model: Option<String>,
+    // The agent's own id for a session it already holds, when this is a
+    // conversation being continued rather than a new one.
+    resume: Option<String>,
+    session: &Arc<Session>,
+    cwd: &std::path::Path,
+) -> Result<OpenedSession, ProjectError> {
+    let options = launched(app, spec, program, model, cwd)?;
 
     let handler = SessionHandler::new(session);
     let command = launch::command_for(spec, &options);
@@ -728,6 +814,17 @@ fn remember<R: Runtime>(app: &AppHandle<R>, session: &Arc<Session>) {
     // a pointer to one is a row that can be neither read nor reopened — which
     // is exactly what filled the list the first time this shipped.
     if !session.spoke() {
+        return;
+    }
+    // And the console's work is not pointed at either, for the reason it is
+    // kept out of [`session_live`]: a pointer is what puts a conversation in
+    // the list of conversations, and a dozen small pieces of work an afternoon
+    // would fill that list with rows nobody meant to have a conversation with.
+    //
+    // Nothing is lost that this build had. Console work ends with the
+    // application — quitting Sync ends every agent — so a pointer to it would
+    // outlive the only thing it could be used for.
+    if session.console {
         return;
     }
     let Some(acp_session) = session.acp_session() else {
@@ -903,7 +1000,11 @@ pub async fn session_resume<R: Runtime>(
         // that memory ended with the process. The record it is under travels
         // the same way and for the same reason — a conversation that came back
         // out of a different group is one somebody has to look for twice.
-        held.source.clone(),
+        //
+        // Never the console's, and that is the pointer's shape rather than an
+        // omission: what it holds is a conversation this machine can ask an
+        // agent to hand back, and what somebody resumes is a conversation.
+        held.source.clone().map_or(Origin::Person, Origin::Ordered),
         held.about.clone(),
         // And what it came out of, for the third time and the same reason: a
         // conversation resumed out from under its parent would leave the row
@@ -1132,7 +1233,7 @@ pub async fn session_prompt<R: Runtime>(
         })
         .collect();
 
-    send(
+    let started = send(
         &app,
         &session,
         Turn {
@@ -1141,7 +1242,12 @@ pub async fn session_prompt<R: Runtime>(
             sent,
             kept,
         },
-    )
+    )?;
+    // Wait for the turn to start: the session's turn lock is acquired and
+    // `Working` has been emitted. The window subscribes after this resolves,
+    // so the backlog belongs to this turn — not the previous one.
+    let _ = started.await;
+    Ok(())
 }
 
 /// One turn, in the two spellings its images need.
@@ -1194,7 +1300,7 @@ pub(crate) fn send<R: Runtime>(
     app: &AppHandle<R>,
     session: &Arc<Session>,
     turn: Turn,
-) -> Result<(), ProjectError> {
+) -> Result<oneshot::Receiver<()>, ProjectError> {
     let (connection, acp_session) = ready(session)?;
     // Whether this is the turn a delegated conversation was opened to run, and
     // taken here because two things below branch on it: what the agent is told,
@@ -1218,11 +1324,6 @@ pub(crate) fn send<R: Runtime>(
     // here rather than only at open: a conversation the list could only call
     // "Untitled" is one nobody can pick out of it after a restart.
     remember(app, session);
-    // Set here rather than inside the task below, so a conversation is working
-    // from the moment the turn is accepted rather than from whenever the
-    // runtime gets to it. A delegated turn is no different: it waits for
-    // nothing ([`crate::work::delegated`]).
-    session.set_status(Status::Working, None);
     let request =
         schema::PromptRequest::new(acp_session, blocks(text, &turn.attachments, turn.sent));
 
@@ -1231,7 +1332,17 @@ pub(crate) fn send<R: Runtime>(
     let watching = Arc::clone(session);
     let afterwards = app.clone();
     let project = session.project.to_string_lossy().into_owned();
+    // Signal when the lock is acquired and `Working` has been emitted, so the
+    // command does not return until the previous turn is finished and this one
+    // has started. The window subscribes after this resolves, which means the
+    // backlog it receives belongs to this turn — not the previous one — and a
+    // stale `ready` or `agent_message_chunk` from the earlier turn cannot
+    // settle it with the wrong answer.
+    let (started, started_rx) = oneshot::channel::<()>();
     tauri::async_runtime::spawn(async move {
+        let _held = watching.turn.lock().await;
+        watching.set_status(Status::Working, None);
+        let _ = started.send(());
         let ending = match connection.prompt(request).await {
             Ok(response) => {
                 let reason = serde_json::to_value(response.stop_reason)
@@ -1259,7 +1370,9 @@ pub(crate) fn send<R: Runtime>(
         // the whole of what an outcome waiting for this one waits for.
         crate::work::delegated::deliver(&afterwards, &project);
     });
-    Ok(())
+    // Don't return until the lock is acquired and `Working` is emitted. See
+    // the comment above `started`.
+    Ok(started_rx)
 }
 
 /// Renames a conversation.
@@ -1543,7 +1656,7 @@ pub async fn close_all(sessions: &Sessions) {
     }
 }
 
-fn row(session: &Arc<Session>) -> SessionRow {
+pub(crate) fn row(session: &Arc<Session>) -> SessionRow {
     SessionRow {
         key: session.key.clone(),
         agent_id: session.agent_id.clone(),

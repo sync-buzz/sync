@@ -100,7 +100,7 @@ flowchart LR
 | 1 | **Build** | `sync-ext build`, in the author's terminal | Imports resolve against the published contract; the module runs against a stand-in host and what it returns is compared with what the manifest declared | The CLI | A failing build |
 | 2 | **Manifest** | Reading `manifest.json` — by the packer, by CI, by Rust, by the schema | Field shapes; `engines.syncApi` against `SYNC_API_VERSION`; every capability against `SYNC_CAPABILITIES`; `net` and its hosts together; kind prefixes; a declared frame; a handler for every occasion | `sync-extensions`, before anything is unpacked | A card that says *needs a newer Sync*, or names the capability |
 | 3 | **Load** | The window activating what the project declared | The module fetched over `syncext://` under the policy; `activate` returning one entry per declared area; every slot the frame has, and no slot it has not | `extension-host/activate.ts` | The section is absent and the card carries the reason |
-| 4 | **Call** | While a handler or a panel is running | `net.write` for a verb that is not `GET` or `HEAD`; `vault` for a secret; `work.agent` for an order; a host it did not name; a redirect off the list | Rust, at the call | A refusal the code can catch, in words |
+| 4 | **Call** | While a handler or a panel is running | `net.write` for a verb that is not `GET` or `HEAD`; `vault` for a secret; `work.agent` for an order; `tools.call` for an ask; a host it did not name; a redirect off the list | Rust, at the call | A refusal the code can catch, in words |
 
 **Why call time exists at all.** Two of those questions cannot be answered from
 a file. Which HTTP verb a package uses on a given day and whether it ever
@@ -134,6 +134,7 @@ flowchart TB
 | May draw | Yes | No |
 | May reach the network | `host.net.fetch` | `net.fetch` |
 | May reach the keychain | `host.vault` | `vault` |
+| May ask one of the person's own tools | `host.tools.call` | No |
 | May order an agent | No | `work.order` |
 | Needs | Nothing beyond the area | `background`, and one capability per occasion |
 
@@ -532,18 +533,20 @@ the thing* — a platform with no bundled ACP sidecar publishes the same
 | `work.agent` | It may raise an agent, which **spends money while they sleep** | **call** | scanned by `sync-ext check` |
 | `agent.tools` | An agent is told it is there, and may act through it | manifest | required by `tools[]` |
 | `terminal` | A shell, in a folder, with a screen the package draws | **call** | one screen at a time |
+| `tools.call` | Asking one tool of one server the person already configured | **call** | plus a person's agreement, per server |
 
 **A capability this build has never heard of is refused rather than ignored.**
 It arrives in exactly one situation — a package built against a newer host — and
 treating it as satisfied would run an extension that asked for something and did
 not get it, which fails later and somewhere else.
 
-**The build is not the machine, and four of these are the Mac's.** One static
+**The build is not the machine, and five of these are the Mac's.** One static
 export is shown by two applications, and the phone registers no command behind
-`agents.acp`, `vault`, `terminal` or `native-menu`: a session is a process held
-open by the application that started it, the keychain a package writes into is
-the one where its code runs, a shell needs a folder to attach to, and a system
-menu is what a pointer's secondary button opens. Everything else on the list is
+`agents.acp`, `vault`, `terminal`, `native-menu` or `tools.call`: a session is a
+process held open by the application that started it, the keychain a package
+writes into is the one where its code runs, a shell needs a folder to attach to,
+a system menu is what a pointer's secondary button opens, and an ask is carried
+by a turn of an agent, which is a process again. Everything else on the list is
 kept there, because a handler's work — reaching a host, running on a clock,
 ordering work — is executed on the computer the phone is paired with.
 
@@ -917,6 +920,8 @@ a statement rather than a gate.
 | The row draws a neutral mark | An icon name the shared library does not have. It fails silently by design | `kindIcon` |
 | A section that never appears | An area renamed in the manifest and not in the module, or the other way round | `sync-ext check`, which runs the module against a stand-in host |
 | *This build cannot do that* at a call | `net.write` for a verb that is not `GET` or `HEAD`, `vault` without the capability, or `work.order` without `work.agent` | Rust, at the call |
+| An ask refused before an agent is raised | A package asking a tool without `tools.call`, or with it and no agent chosen to carry the ask | `src-tauri/src/flagship.rs`, at the call |
+| An ask refused as needing a permission, with no agent consulted | The person has not agreed that this package may call that server, or has withdrawn it in Settings | `src-tauri/src/consent.rs`, read before the turn |
 | A request refused before it leaves | A host the manifest does not name, on the first request or on any redirect after it | `sync-extensions/src/net.rs` |
 | A handler that fails at five seconds | The wall clock. It is not configurable, because an extension that could raise its own ceiling has none | `sync-handlers` |
 | A conversation that will not open in a tree | The folder is not a repository, has no commit yet, or the path named is not one of this project's trees | `src-tauri/src/worktree.rs`, at the call |

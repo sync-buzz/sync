@@ -13,8 +13,32 @@
 //! | `read:<path>`   | calls `fs/read_text_file` back, echoes the content, ends the turn |
 //! | `write:<path>`  | calls `fs/write_text_file` back, ends the turn |
 //! | `permission`    | calls `session/request_permission`, echoes the chosen option, ends the turn |
+//! | `tool:<marker>` | announces a tool call, completes it with `<marker>` inside `rawOutput`, ends the turn |
+//! | `` `<name>` ``  | the errand script below, driven by the backticked tool name |
 //! | `slow`          | streams one chunk, then waits for `session/cancel` |
 //! | anything else   | echoes `PONG`, ends the turn |
+//!
+//! The errand script is what an agent handed the instruction in
+//! `src/errand.rs` does with it: the first backticked token is read as the tool to
+//! call, and the tool's own name decides the ending, so one prompt shape covers
+//! every outcome that door can have.
+//!
+//! | Backticked name contains | Ending |
+//! |---|---|
+//! | `refuses` | talks, calls nothing |
+//! | `guarded` | asks `session/request_permission`; calls nothing unless allowed |
+//! | `unnamed` | calls it, but titles the call with a sentence for a person |
+//! | anything else | calls it, answers with the name and the prompt in `rawOutput` |
+//!
+//! Reading the name off the prompt rather than being told it is the point: it
+//! puts the spelling the client rendered through a round trip, so a tool named
+//! one way and asked for another fails here instead of looking like an agent
+//! that ignored its instructions.
+//!
+//! The tool turn also says something untrue in prose while it is at it. A
+//! client that reads a tool's answer off the agent's words instead of off
+//! `rawOutput` passes every test written against a stub that agrees with
+//! itself, and fails against a model.
 //!
 //! One behaviour is not driven by the prompt, because it happens before there
 //! is one: `ACP_STUB_SILENT` names a method this stub takes and never answers,
@@ -30,6 +54,14 @@ use tokio::sync::{mpsc, oneshot, Notify};
 
 /// The session id this stub hands out. One session per process is enough.
 const SESSION_ID: &str = "stub-session-1";
+
+/// The id of the one tool call the tool turn makes.
+const TOOL_CALL_ID: &str = "stub-tool-call-1";
+
+/// How the stub titles that call: the wire spelling the stub's registry row
+/// declares, so a test can read the title back into a tool name the way a
+/// client has to.
+const TOOL_CALL_TITLE: &str = "sync/sync_status";
 
 /// Names the one method this stub takes and never answers, if any.
 const SILENT_METHOD: &str = "ACP_STUB_SILENT";
@@ -58,17 +90,18 @@ impl Stub {
         self.send(&json!({ "jsonrpc": "2.0", "method": method, "params": params }));
     }
 
-    fn chunk(&self, text: &str) {
+    fn update(&self, update: &Value) {
         self.notify(
             "session/update",
-            &json!({
-                "sessionId": SESSION_ID,
-                "update": {
-                    "sessionUpdate": "agent_message_chunk",
-                    "content": { "type": "text", "text": text },
-                },
-            }),
+            &json!({ "sessionId": SESSION_ID, "update": update }),
         );
+    }
+
+    fn chunk(&self, text: &str) {
+        self.update(&json!({
+            "sessionUpdate": "agent_message_chunk",
+            "content": { "type": "text", "text": text },
+        }));
     }
 
     /// Sends a request to the client and waits for its answer.
@@ -253,6 +286,33 @@ async fn run_turn(stub: &Arc<Stub>, id: &Value, frame: &Value) {
         return;
     }
 
+    if let Some(marker) = after(&text, "tool:") {
+        // Announced first with no result, the way a real agent reports a call
+        // it has only just started.
+        stub.update(&json!({
+            "sessionUpdate": "tool_call",
+            "toolCallId": TOOL_CALL_ID,
+            "title": TOOL_CALL_TITLE,
+            "kind": "fetch",
+            "status": "pending",
+        }));
+        stub.update(&json!({
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": TOOL_CALL_ID,
+            "status": "completed",
+            "rawOutput": { "servers": [{ "name": marker }] },
+        }));
+        // The lie promised in the table at the top of this file.
+        stub.chunk("The tool ran and found nothing at all.");
+        stub.respond(id, &json!({ "stopReason": "end_turn" }));
+        return;
+    }
+
+    if let Some(name) = backticked(&text) {
+        errand(stub, id, &text, &name).await;
+        return;
+    }
+
     if text.contains("permission") {
         let answer = stub
             .ask(
@@ -283,6 +343,75 @@ async fn run_turn(stub: &Arc<Stub>, id: &Value, frame: &Value) {
 
     stub.chunk("PONG");
     stub.respond(id, &json!({ "stopReason": "end_turn" }));
+}
+
+/// The errand script: one call, or a named reason there was none.
+async fn errand(stub: &Arc<Stub>, id: &Value, text: &str, name: &str) {
+    if name.contains("refuses") {
+        // The failure the door is built against: words instead of a call.
+        stub.chunk("I looked it up for you and everything is fine.");
+        stub.respond(id, &json!({ "stopReason": "end_turn" }));
+        return;
+    }
+
+    if name.contains("guarded") {
+        let answer = stub
+            .ask(
+                "session/request_permission",
+                json!({
+                    "sessionId": SESSION_ID,
+                    "toolCall": { "toolCallId": TOOL_CALL_ID, "title": name, "kind": "fetch" },
+                    "options": [
+                        { "optionId": "reject", "name": "Deny", "kind": "reject_once" },
+                        { "optionId": "allow", "name": "Allow Once", "kind": "allow_once" },
+                    ],
+                }),
+            )
+            .await;
+        let allowed = answer
+            .as_ref()
+            .and_then(|answer| answer.pointer("/outcome/optionId"))
+            .and_then(Value::as_str)
+            == Some("allow");
+        if !allowed {
+            stub.chunk("I was not allowed to run it.");
+            stub.respond(id, &json!({ "stopReason": "end_turn" }));
+            return;
+        }
+    }
+
+    // What several measured agents put in a title: something for a person to
+    // read, carrying no name a client could resolve back to a tool.
+    let title = if name.contains("unnamed") {
+        "Checking on that for you"
+    } else {
+        name
+    };
+    stub.update(&json!({
+        "sessionUpdate": "tool_call",
+        "toolCallId": TOOL_CALL_ID,
+        "title": title,
+        "kind": "fetch",
+        "status": "pending",
+    }));
+    // The whole prompt goes back in the answer so a test can prove the
+    // arguments reached the far end rather than trusting that they were sent.
+    stub.update(&json!({
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": TOOL_CALL_ID,
+        "status": "completed",
+        "rawOutput": { "called": name, "prompt": text },
+    }));
+    // The same lie as the tool turn, for the same reason.
+    stub.chunk("The tool ran and found nothing at all.");
+    stub.respond(id, &json!({ "stopReason": "end_turn" }));
+}
+
+/// The first backtick-quoted token of `text`, if it has one.
+fn backticked(text: &str) -> Option<String> {
+    let rest = text.split_once('`')?.1;
+    let (token, _) = rest.split_once('`')?;
+    (!token.is_empty()).then(|| token.to_owned())
 }
 
 /// Concatenates the text blocks of a `session/prompt`.

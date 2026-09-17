@@ -172,6 +172,39 @@ pub fn json_read(text: &str, servers: &str, name: &str) -> Result<Option<serde_j
         .cloned())
 }
 
+/// Every server the document holds under `servers`, each with what its entry
+/// says.
+///
+/// A document with no holder at all lists nothing, which is a file somebody has
+/// never put a server in rather than a file with a problem. A holder that is
+/// there and is not an object is the problem, and it is named: something is
+/// written where servers go, and reading past it would report an empty list
+/// about a file that is full.
+///
+/// # Errors
+///
+/// [`Trouble`] when the document cannot be read, or when `servers` holds
+/// something that is not an object.
+pub fn json_list(text: &str, servers: &str) -> Result<Vec<(String, serde_json::Value)>> {
+    if text.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let held: serde_json::Value = parse_to_serde_value(text, &ParseOptions::default())
+        .map_err(|error| Trouble::Unreadable(format!("this file is not JSON: {error}")))?;
+    let Some(holder) = held.get(servers) else {
+        return Ok(Vec::new());
+    };
+    let listed = holder.as_object().ok_or_else(|| {
+        Trouble::WrongShape(format!(
+            "`{servers}` is not an object, so what it names cannot be read as servers."
+        ))
+    })?;
+    Ok(listed
+        .iter()
+        .map(|(name, entry)| (name.clone(), entry.clone()))
+        .collect())
+}
+
 fn root_object(text: &str) -> Result<jsonc_parser::ast::Object<'_>> {
     let parsed = parse_to_ast(text, &CollectOptions::default(), &ParseOptions::default())
         .map_err(|error| Trouble::Unreadable(format!("this file is not JSON: {error}")))?;
@@ -386,6 +419,35 @@ pub fn toml_read(text: &str, table: &str, name: &str) -> Result<Option<serde_jso
     // or `command` beside `args` — and a reader that knew the shapes would be a
     // third place to update whenever one of them gains a field.
     Ok(Some(as_json(entry)))
+}
+
+/// Every server under `[<table>.*]`, each with what its entry says.
+///
+/// The same two answers as [`json_list`], for the same two reasons: no table is
+/// a file nobody has put a server in, and a table that is not a table is a
+/// problem worth naming rather than reading past. `as_table_like` because both
+/// spellings occur — a header per server, or the whole lot as one inline table.
+///
+/// # Errors
+///
+/// [`Trouble`] when the document is not TOML, or when `table` holds something
+/// that is not a table.
+pub fn toml_list(text: &str, table: &str) -> Result<Vec<(String, serde_json::Value)>> {
+    let document: toml_edit::DocumentMut = text
+        .parse()
+        .map_err(|error| Trouble::Unreadable(format!("this file is not TOML: {error}")))?;
+    let Some(held) = document.get(table) else {
+        return Ok(Vec::new());
+    };
+    let listed = held.as_table_like().ok_or_else(|| {
+        Trouble::WrongShape(format!(
+            "`{table}` is not a table, so what it names cannot be read as servers."
+        ))
+    })?;
+    Ok(listed
+        .iter()
+        .map(|(name, entry)| (name.to_owned(), as_json(entry)))
+        .collect())
 }
 
 /// One TOML item, as the JSON the caller reads it with.

@@ -42,6 +42,8 @@ const CROSSES: &str = "probe-vocabulary";
 const LANDS: &str = "probe-vocabulary-lands";
 const UNASKED: &str = "probe-vocabulary-unasked";
 const READS: &str = "probe-vocabulary-reads";
+const SILENT: &str = "probe-vocabulary-silent";
+const ASKS: &str = "probe-vocabulary-asks";
 
 fn app() -> (App<MockRuntime>, WebviewWindow<MockRuntime>) {
     let app = mock_builder()
@@ -55,6 +57,7 @@ fn app() -> (App<MockRuntime>, WebviewWindow<MockRuntime>) {
             sync_lib::memory::memory_types,
             sync_lib::vault::extension_secret_read,
             sync_lib::extensions::extension_fetch,
+            sync_lib::flagship::extension_tool_call,
         ])
         .build(mock_context(noop_assets()))
         .expect("the mock application builds");
@@ -165,6 +168,22 @@ fn reaching(root: &Path, id: &str) {
             "engines": { "syncApi": "^3.0" },
             "capabilities": ["net"],
             "net": { "hosts": ["api.example.com"] },
+        })
+        .to_string(),
+    );
+}
+
+/// A package that asked to put a question to one of the person's own tools.
+fn asking(root: &Path, id: &str) {
+    write(
+        root.join("manifest.json"),
+        &json!({
+            "manifestVersion": 1,
+            "id": id,
+            "version": "1.0.0",
+            "name": "Probe vocabulary",
+            "engines": { "syncApi": "^3.17" },
+            "capabilities": ["records", "tools.call"],
         })
         .to_string(),
     );
@@ -520,4 +539,116 @@ fn a_package_that_may_read_where_it_reaches_may_not_change_anything_there() {
     );
 
     invoke(&webview, "extension_forget", json!({ "id": READS })).expect("it is forgotten");
+}
+
+/// **Reaching a host and asking one of the person's own tools are two
+/// agreements, and neither implies the other.**
+///
+/// This package asked to reach one host and gets exactly that. Asking a tool is
+/// refused in words naming the capability its author has to add and the person
+/// has to agree to, and the refusal arrives before an agent is raised — which
+/// is what the shape of this test says: it runs with nothing configured, no
+/// agent chosen and no server anywhere, and none of those is the reason given.
+///
+/// The refusal is an object rather than a sentence because every other way this
+/// door can fail is one. A panel that had to read prose to tell *this build was
+/// never allowed to ask* from *nobody has chosen an agent yet* would be
+/// branching on wording.
+#[test]
+fn a_package_that_may_reach_a_host_may_not_ask_a_tool_anything() {
+    let folder = tempfile::tempdir().expect("a directory");
+    reaching(folder.path(), SILENT);
+    let (_app, webview) = app();
+
+    installed(&webview, folder.path(), SILENT);
+
+    let refused = invoke(
+        &webview,
+        "extension_tool_call",
+        json!({
+            "id": SILENT,
+            "project": folder.path().to_string_lossy(),
+            "ask": { "server": "somewhere", "tool": "list_things" },
+        }),
+    )
+    .expect_err("it asked to reach a host, which is not this");
+
+    assert_eq!(
+        refused["kind"], "extension_refused",
+        "a panel branches on the kind, not on the sentence: {refused}"
+    );
+    let said = refused["message"].as_str().expect("a refusal in words");
+    assert!(
+        said.contains(SILENT) && said.contains("tools.call"),
+        "the refusal names the package and the capability to add: {said}"
+    );
+
+    invoke(&webview, "extension_forget", json!({ "id": SILENT })).expect("it is forgotten");
+}
+
+/// And a package this machine does not serve cannot ask under its own name.
+///
+/// The other half of the same check. The id is an argument at the invoke
+/// boundary, so what makes it mean anything is that it is resolved against what
+/// is installed here before anything is asked on its behalf.
+#[test]
+fn a_tool_asked_for_under_an_id_nothing_serves_is_refused() {
+    let (_app, webview) = app();
+
+    let refused = invoke(
+        &webview,
+        "extension_tool_call",
+        json!({
+            "id": "probe-vocabulary-absent",
+            "project": "/tmp",
+            "ask": { "server": "somewhere", "tool": "list_things" },
+        }),
+    )
+    .expect_err("nothing on this machine serves it");
+
+    assert_eq!(refused["kind"], "extension_refused");
+    assert!(
+        refused["message"]
+            .as_str()
+            .expect("a refusal in words")
+            .contains("probe-vocabulary-absent"),
+        "the refusal names what was asked for: {refused}"
+    );
+}
+
+/// A package that asked gets past the question of whether it may, and stops at
+/// the one thing this machine cannot answer for it.
+///
+/// The order is what this pins. Whether a package may ask is decided from its
+/// own manifest, on this machine, **before** anything is raised — so a package
+/// that did not ask never costs a launch, and a package that did is refused for
+/// the state of the installation rather than for its own file. Both halves
+/// reading the same way would leave an author debugging their manifest over a
+/// choice nobody has made in Settings.
+#[test]
+fn a_package_that_asked_is_refused_for_the_installation_rather_than_for_itself() {
+    let folder = tempfile::tempdir().expect("a directory");
+    asking(folder.path(), ASKS);
+    let (_app, webview) = app();
+
+    installed(&webview, folder.path(), ASKS);
+
+    let refused = invoke(
+        &webview,
+        "extension_tool_call",
+        json!({
+            "id": ASKS,
+            "project": folder.path().to_string_lossy(),
+            "ask": { "server": "somewhere", "tool": "list_things" },
+        }),
+    )
+    .expect_err("no agent is chosen in a test installation");
+
+    assert_eq!(
+        refused["kind"], "no_flagship",
+        "it passed the check about the package and stopped at the one about \
+         this installation: {refused}"
+    );
+
+    invoke(&webview, "extension_forget", json!({ "id": ASKS })).expect("it is forgotten");
 }

@@ -14,10 +14,25 @@ mod packages;
 mod window;
 
 use serde_json::{Value, json};
-use tauri::{Manager as _, State};
+use tauri::{Emitter as _, Manager as _, State};
 
-use channel::{Channel, Pairing, Trouble};
+use channel::{Channel, Pairing, Reach, Trouble, kept};
 use sync_vault::{Slot, Vault};
+
+/// Where this phone stands with its computer has moved.
+///
+/// Pushed rather than polled, and the reason is the keeper: a phone now dials
+/// on its own, so the state changes at moments the window had no reason to ask
+/// about. A screen that only asked when it was opened would show *cannot reach
+/// your computer* over a connection that had come back thirty seconds ago.
+///
+/// **It carries nothing, the way `attention://shown` carries nothing.** A
+/// payload would be a second place the state arrives from, and the window would
+/// have to decide which of the two is newer every time a command's answer and
+/// an event crossed — a question with no answer at this end, since neither
+/// carries when it was true. Told only that something moved, the window asks,
+/// and what it is holding is always one whole answer from one moment.
+const REACHED: &str = "channel://reach";
 
 /// Who the pairing belongs to, in the keychain's two-part name.
 ///
@@ -166,13 +181,30 @@ pub fn run() {
             #[cfg(target_os = "ios")]
             keep_the_screen(app.handle());
 
+            // Said before anything can change, so that the first transition is
+            // not the one nobody hears.
+            let telling = app.handle().clone();
+            app.state::<Channel>().tell(move |_: &Reach| {
+                drop(telling.emit(REACHED, ()));
+            });
+
             if let Some(pairing) = remembered() {
                 app.state::<Channel>().hold(&pairing);
-                let handle = app.handle().clone();
-                std::thread::spawn(move || {
-                    drop(handle.state::<Channel>().open(&pairing));
-                });
             }
+
+            // The keeper, and it runs whether or not this phone is paired: the
+            // pairing may arrive a minute from now from somebody's camera, and
+            // a keeper started only for a phone that already had one would
+            // leave that phone with no connection of its own after the first
+            // one dropped.
+            //
+            // It never returns, which is why the handle is moved into it rather
+            // than borrowed: the state it holds lives exactly as long as the
+            // loop reading it.
+            let keeping = app.handle().clone();
+            std::thread::spawn(move || {
+                kept(&keeping.state::<Channel>());
+            });
             Ok(())
         })
         // Two lists, because they are two different kinds of command. These
@@ -182,6 +214,7 @@ pub fn run() {
         // the computer.
         .invoke_handler(window::commands![
             channel_status,
+            channel_reach_now,
             channel_pair,
             channel_pair_by_hand,
             channel_forget,
@@ -210,13 +243,17 @@ pub fn run() {
 #[cfg(target_os = "ios")]
 fn keep_the_screen<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     fill_the_screen(app);
+    silence_the_keyboard_bar(app);
 
     // And again on the next turn of the main loop, which is the first moment
     // the window is certainly on the screen. Setup runs while it is being
     // built, and a view with no window has no bounds to be given: that call is
     // the one that quietly does nothing, and this is the one that lands.
     let soon = app.clone();
-    let _ = app.run_on_main_thread(move || fill_the_screen(&soon));
+    let _ = app.run_on_main_thread(move || {
+        fill_the_screen(&soon);
+        silence_the_keyboard_bar(&soon);
+    });
 
     let Some(window) = app.get_webview_window("main") else {
         return;
@@ -225,6 +262,7 @@ fn keep_the_screen<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     window.on_window_event(move |event| {
         if matches!(event, tauri::WindowEvent::Resized(_)) {
             fill_the_screen(&handle);
+            silence_the_keyboard_bar(&handle);
         }
     });
 }
@@ -284,7 +322,105 @@ fn fill_the_screen<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     }));
 }
 
-/// Whether this phone has a computer, and whether it is talking to it.
+/// Take away the bar iOS hangs over the keyboard.
+///
+/// Any text field inside a `WKWebView` gets a strip above the keyboard with the
+/// system's own controls on it — previous, next, and the words it is offering.
+/// It belongs to the browser it was designed for: a page of forms somebody
+/// tabs through. Here there is one field on the screen at a time, the window
+/// is not a page, and the strip covers the bottom of the conversation while
+/// somebody is typing into it.
+///
+/// It cannot be reached from the document. The strip is not part of the page —
+/// no CSS describes it and no event announces it — so it is taken away in
+/// UIKit, where it is owned.
+///
+/// **Done by giving one view a subclass rather than by patching a class.** The
+/// view that owns the strip is `WKContentView`, which is private and shared by
+/// every webview in the process; replacing its method would reach into any
+/// other webview this application ever creates. A subclass built once and
+/// given to *this* view says the same thing about this window alone, and a
+/// second call finds the class already in place and leaves it there.
+#[cfg(target_os = "ios")]
+fn silence_the_keyboard_bar<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    use objc2::runtime::{AnyClass, AnyObject, ClassBuilder, Sel};
+    use objc2::{msg_send, sel};
+    use tauri::Manager as _;
+
+    /// What the view answers when it is asked for its bar.
+    ///
+    /// The receiver is a raw pointer rather than a reference, and that is the
+    /// compiler's requirement rather than a preference: a reference carries a
+    /// lifetime, and the trait that accepts a method implementation cannot be
+    /// satisfied by a function that is generic over one.
+    extern "C" fn nothing(_this: *mut AnyObject, _cmd: Sel) -> *mut AnyObject {
+        std::ptr::null_mut()
+    }
+
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+
+    drop(window.with_webview(|platform| unsafe {
+        let webview: *mut AnyObject = platform.inner().cast();
+        let scroller: *mut AnyObject = msg_send![webview, scrollView];
+        if scroller.is_null() {
+            return;
+        }
+
+        // The content view is a subview of the scroller and is named for what
+        // it is. Found by name rather than by position, because the order of
+        // those subviews is the framework's business and has changed before;
+        // found by *substring*, because the name has carried a suffix in some
+        // releases.
+        let subviews: *mut AnyObject = msg_send![scroller, subviews];
+        let count: usize = msg_send![subviews, count];
+        let mut content: *mut AnyObject = std::ptr::null_mut();
+        for index in 0..count {
+            let view: *mut AnyObject = msg_send![subviews, objectAtIndex: index];
+            if view.is_null() {
+                continue;
+            }
+            let name = (*view).class().name().to_string_lossy();
+            if name.contains("ContentView") {
+                content = view;
+                break;
+            }
+        }
+        if content.is_null() {
+            return;
+        }
+
+        let held = (*content).class();
+        // Already ours, from an earlier call: nothing to do, and re-deriving a
+        // subclass from a subclass is how a chain of them ends up on one view.
+        if held.name().to_bytes() == QUIET_CONTENT_VIEW.to_bytes() {
+            return;
+        }
+
+        let class = match AnyClass::get(QUIET_CONTENT_VIEW) {
+            Some(existing) => existing,
+            None => {
+                let Some(mut building) = ClassBuilder::new(QUIET_CONTENT_VIEW, held) else {
+                    return;
+                };
+                building.add_method(
+                    sel!(inputAccessoryView),
+                    nothing as extern "C" fn(*mut AnyObject, Sel) -> *mut AnyObject,
+                );
+                building.register()
+            }
+        };
+
+        objc2::ffi::object_setClass(content, class);
+    }));
+}
+
+/// The name the subclass above is registered under, in both places that need it.
+#[cfg(target_os = "ios")]
+const QUIET_CONTENT_VIEW: &std::ffi::CStr = c"SyncContentViewWithoutAccessoryBar";
+
+/// Whether this phone has a computer, and where it stands with it.
 ///
 /// Two answers rather than one, because they fail differently: a phone that
 /// was never paired needs the code on somebody's screen, and a paired phone
@@ -299,12 +435,44 @@ fn fill_the_screen<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
 /// as a gesture recogniser held for 30.6 seconds.
 #[tauri::command(async)]
 fn channel_status(channel: State<'_, Channel>) -> Value {
+    standing(&channel)
+}
+
+/// Dial now rather than at the end of the wait the keeper is in.
+///
+/// Two presses, and neither of them is a person asking for a *connection* —
+/// they have one or they do not, and the keeper is already working on it. What
+/// this shortens is the wait: *Try again* is somebody saying they have fixed
+/// whatever it was, and the window says the same thing when the system hands
+/// this application back to somebody, because a phone coming out of a pocket
+/// should not spend the rest of a half-minute rest showing a screen about a
+/// network that came back while it was asleep.
+///
+/// It answers with the status rather than with nothing, so a window that
+/// pressed it is not left waiting for an event to learn that the dial has
+/// begun.
+#[tauri::command(async)]
+fn channel_reach_now(channel: State<'_, Channel>) -> Value {
+    channel.reach_soon();
+    standing(&channel)
+}
+
+/// What this phone has, and where it stands with it, as one answer.
+///
+/// The reach is spelled by [`Reach::told`] rather than here, because the same
+/// two members go out on [`REACHED`] and two spellings of one shape is how the
+/// pushed one comes to be missing a member the answered one has.
+fn standing(channel: &Channel) -> Value {
     let paired = channel.pairing().or_else(remembered);
-    json!({
-        "paired": paired.is_some(),
-        "endpoint": paired.map(|pairing| pairing.endpoint),
-        "connected": channel.open_now(),
-    })
+    let mut said = channel.reach_now().told();
+    if let Some(members) = said.as_object_mut() {
+        members.insert("paired".to_owned(), json!(paired.is_some()));
+        members.insert(
+            "endpoint".to_owned(),
+            json!(paired.map(|pairing| pairing.endpoint)),
+        );
+    }
+    said
 }
 
 /// Take what the camera read and, if it is one of ours, dial with it.

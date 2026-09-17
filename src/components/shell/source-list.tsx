@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type KeyboardEvent } from "react";
+import { Fragment, useRef, useState, type KeyboardEvent } from "react";
 import {
   DndContext,
   closestCenter,
@@ -38,8 +38,16 @@ import { cn } from "@/lib/utils";
  *
  * **Rows can be rearranged where rearranging them means something**, which is
  * the sections of a project and not the sections of the settings window: the
- * first list is a place somebody works in every day and the second is two
- * fixed screens. That is `onReorder`, and a list without it drags nowhere.
+ * first list is a place somebody works in every day and the second is a fixed
+ * set of screens. That is `onReorder`, and a list without it drags nowhere.
+ *
+ * **It reads in one level or in two, and in one run or in several.** A row may
+ * name the parts of its own screen, and a run of rows may carry a heading. Both
+ * exist for the same reason: a column of nine is nine things to hold at once,
+ * and a section whose screen is three screenfuls stacked needs a way into one
+ * of them that is not scrolling past the other two. Neither is drawn for a list
+ * that asks for neither, so the column that folds to a rail beside a project
+ * and the column beside the settings are still the one control.
  *
  * The gesture is the one macOS uses in Finder's sidebar and Mail's mailbox
  * list, and it is not the one the web usually reaches for. **The rows do not
@@ -114,6 +122,55 @@ export interface SourceListItem {
    * discovered by trying, once, and that is the whole of the feedback it needs.
    */
   readonly fixed?: boolean;
+  /**
+   * The run of the list this row is read in, or nothing for a list read in one.
+   *
+   * A heading is drawn wherever this differs from the row above, so the runs
+   * are wherever the rows say they are rather than a second structure to keep
+   * in step with the order. It is a heading and never a row: nothing selects
+   * it, and a list whose bands could be selected would have two kinds of thing
+   * answering "where am I".
+   *
+   * Bands and [`SourceList.onReorder`] are never both in play. What a band
+   * means is that the order was decided, and a list somebody rearranges is one
+   * where it was not.
+   */
+  readonly band?: string;
+  /**
+   * The parts of this row's screen that are each worth a row of their own.
+   *
+   * A row earns these only where its screen is several screenfuls stacked: the
+   * column is then how you reach one without reading past the others. A row
+   * whose parts are a line of options each has none, because a second level
+   * naming things that were never hard to find costs the column its ability to
+   * say which rows are large.
+   *
+   * **A row with parts stops being a place itself.** Selecting it selects the
+   * first of them, and the row says so by lighting rather than by taking the
+   * selected surface. A row that were both would be two kinds of destination
+   * drawn as one — a screen holding every part, three inches above the parts
+   * themselves, each of which is the same screen with two thirds removed. The
+   * parts are the places; the row is which of them you are in.
+   *
+   * They are always drawn. There is no triangle, because there is no state a
+   * folded row could be in: fold one holding the selection and the window is
+   * left showing a screen that nothing in the column points at.
+   */
+  readonly children?: readonly SourceListChild[];
+}
+
+/**
+ * One part of a row's screen, in the column.
+ *
+ * A name and nothing else. It carries no icon of its own: the mark for what
+ * this is about is already on the row above it, and a second mark indented
+ * under the first would be two things claiming to say what one row is — which
+ * is the reading that makes a two-level column feel like two lists. Position
+ * says the rest.
+ */
+export interface SourceListChild {
+  readonly id: string;
+  readonly label: string;
 }
 
 /**
@@ -162,6 +219,7 @@ function SourceListRow({
   item,
   isActive,
   rail,
+  within,
   onSelect,
   tabIndex = 0,
   rowRef,
@@ -170,6 +228,8 @@ function SourceListRow({
   item: SourceListItem;
   isActive: boolean;
   rail?: boolean;
+  /** Something inside this row is where you are, though the row is not. */
+  within?: boolean;
   onSelect: () => void;
   tabIndex?: number;
   rowRef?: (element: HTMLButtonElement | null) => void;
@@ -198,6 +258,12 @@ function SourceListRow({
       aria-keyshortcuts={move === undefined ? undefined : "Alt+ArrowUp Alt+ArrowDown"}
       type="button"
       data-active={isActive}
+      // Where you are is one row; which row holds it is another thing, and the
+      // column says both. A section whose part is selected shifts a tier
+      // towards the foreground and takes no surface: the surface is what
+      // *selected* means here, and two of them would be two answers to where
+      // somebody is standing.
+      data-within={within === true ? true : undefined}
       // Lifted rather than moved. The row stays where it was and goes quiet,
       // and the line below says where it is going.
       data-dragging={move === undefined ? undefined : move.isDragging}
@@ -228,7 +294,7 @@ function SourceListRow({
         }
       }}
       className={cn(
-        "relative flex h-(--control-height-lg) w-full items-center gap-2.5 rounded-(--radius-control) text-left text-base text-fg-secondary transition-colors duration-(--motion-duration-fast) ease-shell hover:bg-hover hover:text-fg data-[active=true]:bg-selected data-[active=true]:font-medium data-[active=true]:text-fg data-[dragging=true]:opacity-50",
+        "relative flex h-(--control-height-lg) w-full items-center gap-2.5 rounded-(--radius-control) text-left text-base text-fg-secondary transition-colors duration-(--motion-duration-fast) ease-shell hover:bg-hover hover:text-fg data-[within=true]:text-fg data-[active=true]:bg-selected data-[active=true]:font-medium data-[active=true]:text-fg data-[dragging=true]:opacity-50",
         rail ? "justify-center px-0" : "px-2",
       )}
     >
@@ -252,7 +318,12 @@ function SourceListRow({
           behind — a standing figure is attached to the word it qualifies, and
           folding this column is the words leaving. The tooltip still says it. */}
       <span className="relative shrink-0">
-        <Icon className="size-4 opacity-80" />
+        {/* No opacity on it. A mark at four fifths over a tier that is
+            already secondary is a mark at two removes from the text it
+            belongs to, and it reads as switched off rather than as quiet —
+            which on this system is what a dimmed icon means. The tier is the
+            whole of how loud it is, and it moves with the row. */}
+        <Icon className="size-4" />
         {rail && item.badge?.kind === "dot" ? (
           <span
             aria-hidden
@@ -359,6 +430,90 @@ function MovableRow({
 }
 
 /**
+ * The heading over a run of rows.
+ *
+ * Small, quiet and unselectable, with the air above it doing as much of the
+ * work as the words: a run is told from the one above it by the gap first and
+ * read by the name second. It is set heavier than anything it sits over even
+ * though it is the smallest thing here — the weight is what stops two point
+ * sizes apart from reading as a faint row, and furniture that can be mistaken
+ * for a row is worse than no heading. It starts where the rows' marks start
+ * rather than at the edge of the column, so one line runs down the whole list —
+ * which is where Finder and Mail put the same thing.
+ *
+ * On a rail it is a hairline instead. A heading under an icon with no label
+ * beside it would be the one word left in a column that has just given its
+ * words up, and the runs still have to be told apart — so what is left is the
+ * division without the name for it.
+ */
+function BandHeading({ title, rail }: { title: string; rail?: boolean }) {
+  if (rail) {
+    return (
+      <div
+        aria-hidden
+        className="mx-1.5 my-1.5 h-px bg-separator first:hidden"
+      />
+    );
+  }
+
+  return (
+    <h3 className="px-2 pt-3 pb-0.5 text-xs font-semibold text-fg-tertiary first:pt-1">
+      {title}
+    </h3>
+  );
+}
+
+/**
+ * One part of a row's screen, drawn under it.
+ *
+ * **It begins where its section's mark ends**, which is one text-gap short of
+ * where that section's own label begins. Aligning it under the label instead
+ * left a gutter the width of a mark with nothing in it — the child has no mark
+ * of its own, so the space read as something missing rather than as a level.
+ * Hung off the end of the mark it is clearly inside the section above and
+ * clearly not a section, and the eye still has one line to run down: the marks.
+ *
+ * **It is shorter than the row above it, and that carries more of the level
+ * than the type size does.** A size down is one pixel at this density and reads
+ * as an accident; four pixels of height reads as a different kind of row, which
+ * is what this is — a section is a place with a mark of its own, a part is
+ * something inside one. Height, indent, size and the missing mark all say it,
+ * and no one of them is asked to say it alone.
+ *
+ * Selection is the same surface the rows use, because it is the same kind of
+ * event — this is where you are — and a second way of showing it would be the
+ * column saying that being in a part of a section is a different sort of being
+ * somewhere.
+ */
+function ChildRow({
+  child,
+  isActive,
+  onSelect,
+  tabIndex,
+  rowRef,
+}: {
+  child: SourceListChild;
+  isActive: boolean;
+  onSelect: () => void;
+  tabIndex: number;
+  rowRef: (element: HTMLButtonElement | null) => void;
+}) {
+  return (
+    <button
+      ref={rowRef}
+      type="button"
+      data-active={isActive}
+      aria-current={isActive ? "true" : undefined}
+      tabIndex={tabIndex}
+      onClick={onSelect}
+      className="flex h-(--control-height) w-full items-center rounded-(--radius-control) pr-2 pl-6 text-left text-sm text-fg-secondary transition-colors duration-(--motion-duration-fast) ease-shell hover:bg-hover hover:text-fg data-[active=true]:bg-selected data-[active=true]:font-medium data-[active=true]:text-fg"
+    >
+      <span className="truncate">{child.label}</span>
+    </button>
+  );
+}
+
+/**
  * What a badge says, in the words it is read out as and printed with.
  *
  * A dot has no figure behind it — it is a section saying that something
@@ -399,7 +554,7 @@ export function SourceList({
    * The rows were put in this order, and the list may be rearranged at all.
    *
    * Absent means the order is not the reader's to decide, which is the honest
-   * state of a list of two fixed screens. What is handed over is every id in
+   * state of a list of fixed screens. What is handed over is every id in
    * its new order rather than the one that moved: whoever stores an
    * arrangement stores the whole of it, and a pair of indices would make them
    * re-derive what this list already worked out.
@@ -413,6 +568,36 @@ export function SourceList({
   // line, and it needs the other one's position to know which side to draw on.
   const [carrying, setCarrying] = useState<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
+  // What a row's parts are, once a rail has taken the labels away: nothing.
+  // There is no width to draw a name in and no mark to hang it from, so the
+  // section stands alone until the column is unfolded again.
+  function partsOf(item: SourceListItem): readonly SourceListChild[] {
+    return rail === true ? [] : (item.children ?? []);
+  }
+
+  function holds(item: SourceListItem): boolean {
+    return partsOf(item).some((child) => child.id === activeId);
+  }
+
+  // **A section with parts is not a place.** Choosing it means choosing the
+  // first of them, and the row shows that by lighting rather than by taking the
+  // selected surface. A section that were also a screen would be a fourth thing
+  // to be — its own parts, plus all of them at once — and the column would be
+  // selling two of the four rows as the same kind of destination.
+  function destination(item: SourceListItem): string {
+    return partsOf(item)[0]?.id ?? item.id;
+  }
+
+  // The rows the arrows walk: everything drawn, less the sections that are not
+  // places. Skipping those is what keeps the keyboard from landing somewhere it
+  // would immediately be moved off, which reads as an arrow key that jumped two
+  // rows and then as a list that cannot be trusted.
+  const walk: string[] = [];
+  for (const item of items) {
+    const parts = partsOf(item);
+    if (parts.length === 0) walk.push(item.id);
+    for (const child of parts) walk.push(child.id);
+  }
 
   // A drag has to start deliberately. Without a distance the first press on a
   // row would begin one, and a list whose rows lift when you click them is a
@@ -445,9 +630,14 @@ export function SourceList({
     onReorder?.(moved(movable, fromIndex, toIndex));
   }
 
+  function go(id: string) {
+    onSelect(id);
+    rows.current.get(id)?.focus();
+  }
+
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    const lastIndex = items.length - 1;
-    const currentIndex = items.findIndex((item) => item.id === activeId);
+    const lastIndex = walk.length - 1;
+    const currentIndex = walk.indexOf(activeId);
     // Where the selected row stands among the ones that move, and `-1` when it
     // is one that does not.
     const movableIndex = movable.indexOf(activeId);
@@ -482,9 +672,7 @@ export function SourceList({
       return;
 
     event.preventDefault();
-    const nextId = items[nextIndex].id;
-    onSelect(nextId);
-    rows.current.get(nextId)?.focus();
+    go(walk[nextIndex]);
   }
 
   const list = (
@@ -494,7 +682,8 @@ export function SourceList({
         className={cn("pt-2 pb-3", rail ? "px-1.5" : "px-2")}
       >
         <div className="flex flex-col gap-0.5" onKeyDown={handleKeyDown}>
-          {items.map((item) => {
+          {items.map((item, index) => {
+            const parts = partsOf(item);
             const isActive = item.id === activeId;
             // The list is one tab stop, as a native source list is: the
             // arrows move within it once it has focus.
@@ -503,28 +692,53 @@ export function SourceList({
               if (element) rows.current.set(item.id, element);
               else rows.current.delete(item.id);
             };
+            // A run opens wherever the band changes, which is also what makes
+            // the first row of a banded list carry one.
+            const opensBand =
+              item.band !== undefined && item.band !== items[index - 1]?.band;
 
-            return onReorder === undefined || item.fixed === true ? (
-              <SourceListRow
-                key={item.id}
-                item={item}
-                isActive={isActive}
-                rail={rail}
-                tabIndex={tabIndex}
-                onSelect={() => onSelect(item.id)}
-                rowRef={rowRef}
-              />
-            ) : (
-              <MovableRow
-                key={item.id}
-                item={item}
-                isActive={isActive}
-                rail={rail}
-                tabIndex={tabIndex}
-                onSelect={() => onSelect(item.id)}
-                rowRef={rowRef}
-                insert={insertionAt(movable.indexOf(item.id))}
-              />
+            return (
+              <Fragment key={item.id}>
+                {opensBand && item.band !== undefined ? (
+                  <BandHeading title={item.band} rail={rail} />
+                ) : null}
+
+                {onReorder === undefined || item.fixed === true ? (
+                  <SourceListRow
+                    item={item}
+                    isActive={isActive}
+                    rail={rail}
+                    within={holds(item)}
+                    tabIndex={tabIndex}
+                    onSelect={() => onSelect(destination(item))}
+                    rowRef={rowRef}
+                  />
+                ) : (
+                  <MovableRow
+                    item={item}
+                    isActive={isActive}
+                    rail={rail}
+                    tabIndex={tabIndex}
+                    onSelect={() => onSelect(item.id)}
+                    rowRef={rowRef}
+                    insert={insertionAt(movable.indexOf(item.id))}
+                  />
+                )}
+
+                {parts.map((child) => (
+                  <ChildRow
+                    key={child.id}
+                    child={child}
+                    isActive={child.id === activeId}
+                    tabIndex={child.id === activeId ? 0 : -1}
+                    onSelect={() => onSelect(child.id)}
+                    rowRef={(element) => {
+                      if (element) rows.current.set(child.id, element);
+                      else rows.current.delete(child.id);
+                    }}
+                  />
+                ))}
+              </Fragment>
             );
           })}
         </div>

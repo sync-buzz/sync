@@ -315,14 +315,24 @@ pub(crate) fn deliver<R: Runtime>(app: &AppHandle<R>, project: &str) {
         going
     };
     for (session, message) in going {
-        let _ = crate::sessions::send(
+        if let Ok(started) = crate::sessions::send(
             app,
             &session,
             Turn {
                 text: message,
                 ..Turn::default()
             },
-        );
+        ) {
+            // Spawn so `deliver` stays sync — the caller is a spawned task
+            // that must be `Send`, and `send`'s future is not.
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                let _ = started.await;
+                // `deliver` may be called again to check for more pending
+                // work now that this turn has started.
+                let _ = app;
+            });
+        }
     }
 }
 
@@ -387,7 +397,7 @@ pub struct Delegations {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sessions::live::Place;
+    use crate::sessions::live::{Origin, Place};
 
     fn outcome(parent: &str, child: &str, said: &str, at: u64) -> Outcome {
         Outcome {
@@ -409,7 +419,7 @@ mod tests {
             "claude".to_owned(),
             "Claude Code".to_owned(),
             Place::project(std::env::temp_dir()),
-            None,
+            Origin::Person,
             None,
             None,
         );

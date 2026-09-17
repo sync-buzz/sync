@@ -24,7 +24,7 @@
 //! conversation was ordered by an extension.
 
 use serde_json::Value;
-use sync_lib::sessions::live::{About, Place, Session, Sessions, Source};
+use sync_lib::sessions::live::{About, Origin, Place, Session, Sessions, Source};
 use sync_lib::worktree::Worktree;
 use tauri::test::{
     INVOKE_KEY, MockRuntime, get_ipc_response, mock_builder, mock_context, noop_assets,
@@ -34,7 +34,10 @@ use tauri::{App, WebviewWindow, WebviewWindowBuilder};
 fn app() -> (App<MockRuntime>, WebviewWindow<MockRuntime>) {
     let app = mock_builder()
         .manage(Sessions::default())
-        .invoke_handler(tauri::generate_handler![sync_lib::sessions::session_live])
+        .invoke_handler(tauri::generate_handler![
+            sync_lib::sessions::session_live,
+            sync_lib::console::console_works
+        ])
         .build(mock_context(noop_assets()))
         .expect("the mock application builds");
     let webview = WebviewWindowBuilder::new(&app, "main", tauri::WebviewUrl::default())
@@ -65,6 +68,29 @@ fn listed(webview: &WebviewWindow<MockRuntime>) -> Value {
     }
 }
 
+/// The other list, asked the same way: what the console has running here.
+fn console_works(webview: &WebviewWindow<MockRuntime>, project: &str) -> Value {
+    let response = get_ipc_response(
+        webview,
+        tauri::webview::InvokeRequest {
+            cmd: "console_works".into(),
+            callback: tauri::ipc::CallbackFn(0),
+            error: tauri::ipc::CallbackFn(1),
+            url: "tauri://localhost".parse().expect("a local origin"),
+            body: tauri::ipc::InvokeBody::Json(serde_json::json!({ "project": project })),
+            headers: tauri::http::header::HeaderMap::new(),
+            invoke_key: INVOKE_KEY.to_string(),
+        },
+    )
+    .expect("the list answers");
+    match response {
+        tauri::ipc::InvokeResponseBody::Json(text) => {
+            serde_json::from_str(&text).expect("a list of rows")
+        }
+        tauri::ipc::InvokeResponseBody::Raw(_) => panic!("the list crosses as JSON"),
+    }
+}
+
 /// The field step 5 exists for, read back the way the window reads it.
 ///
 /// `src/lib/agent-sessions/client.ts` declares `source?: SessionSource` with
@@ -79,7 +105,7 @@ fn a_conversation_an_extension_ordered_says_so_across_the_boundary() {
         "claude".to_owned(),
         "Claude Code".to_owned(),
         Place::project(std::env::temp_dir()),
-        Some(Source {
+        Origin::Ordered(Source {
             work: "w1787673512158-1".to_owned(),
             extension_id: "issues".to_owned(),
             extension_name: "Issues".to_owned(),
@@ -119,7 +145,7 @@ fn a_conversation_held_under_a_record_says_which_one() {
         "claude".to_owned(),
         "Claude Code".to_owned(),
         Place::project(std::env::temp_dir()),
-        None,
+        Origin::Person,
         Some(About {
             key: "task-4c1a".to_owned(),
             kind: "tasks.task".to_owned(),
@@ -164,7 +190,7 @@ fn a_conversation_a_person_started_says_nothing_about_a_source() {
         "claude".to_owned(),
         "Claude Code".to_owned(),
         Place::project(std::env::temp_dir()),
-        None,
+        Origin::Person,
         None,
         None,
     ));
@@ -209,7 +235,7 @@ fn a_conversation_in_a_working_tree_says_where_it_is() {
                 head: "1111111111111111111111111111111111111111".to_owned(),
             }),
         },
-        None,
+        Origin::Person,
         None,
         None,
     ));
@@ -247,7 +273,7 @@ fn a_conversation_in_the_project_carries_no_tree() {
         "claude".to_owned(),
         "Claude Code".to_owned(),
         Place::project(std::env::temp_dir()),
-        None,
+        Origin::Person,
         None,
         None,
     ));
@@ -266,16 +292,16 @@ fn a_conversation_in_the_project_carries_no_tree() {
 fn one_list_carries_both_and_they_can_be_told_apart() {
     let (app, webview) = app();
     let sessions = tauri::Manager::state::<Sessions>(&app);
-    for source in [
-        None,
-        Some(Source {
+    for origin in [
+        Origin::Person,
+        Origin::Ordered(Source {
             work: "w1-0".to_owned(),
             extension_id: "issues".to_owned(),
             extension_name: "Issues".to_owned(),
             handler: "issues.poll".to_owned(),
             about: None,
         }),
-        Some(Source {
+        Origin::Ordered(Source {
             work: "w1-1".to_owned(),
             extension_id: "digest".to_owned(),
             extension_name: "Digest".to_owned(),
@@ -288,7 +314,7 @@ fn one_list_carries_both_and_they_can_be_told_apart() {
             "claude".to_owned(),
             "Claude Code".to_owned(),
             Place::project(std::env::temp_dir()),
-            source,
+            origin,
             None,
             None,
         ));
@@ -313,5 +339,56 @@ fn one_list_carries_both_and_they_can_be_told_apart() {
             .count(),
         1,
         "and what a person started is still there beside them"
+    );
+}
+
+/// The console's work is kept out of the list of conversations, and is in its
+/// own.
+///
+/// Driven through `invoke` for the reason everything else here is: both lists
+/// are read by the window, and a filter that worked in Rust and not across the
+/// boundary would show as a list of conversations quietly filling with work
+/// nobody meant to have a conversation with.
+#[test]
+fn console_work_is_listed_by_the_console_and_not_beside_conversations() {
+    let (app, webview) = app();
+    let sessions = tauri::Manager::state::<Sessions>(&app);
+    let project = std::env::temp_dir().join("console-project");
+    let elsewhere = std::env::temp_dir().join("another-project");
+
+    for (place, origin) in [
+        (Place::project(project.clone()), Origin::Console),
+        (Place::project(project.clone()), Origin::Person),
+        (Place::project(elsewhere), Origin::Console),
+    ] {
+        sessions.insert(Session::new(
+            sessions.mint_key(),
+            "claude".to_owned(),
+            "Claude Code".to_owned(),
+            place,
+            origin,
+            None,
+            None,
+        ));
+    }
+
+    let conversations = listed(&webview);
+    let conversations = conversations.as_array().expect("a list");
+    assert_eq!(
+        conversations.len(),
+        1,
+        "only the one somebody meant to have: {conversations:?}"
+    );
+
+    let works = console_works(&webview, &project.to_string_lossy());
+    let works = works.as_array().expect("a list");
+    assert_eq!(
+        works.len(),
+        1,
+        "this project's work, and not the work of the project next door: {works:?}"
+    );
+    assert_eq!(
+        works[0]["project"],
+        Value::String(project.to_string_lossy().into_owned())
     );
 }

@@ -475,7 +475,7 @@ ceiling has no ceiling.
 ### 5.1 Where a person sees it, and turns it off
 
 **On the extension's own page**, in the area that already exists for exactly
-this. Selecting `Extensions` turns all three columns over to them, and an
+this. Selecting `Marketplace` turns all three columns over to them, and an
 extension's page is already *what it does, what it adds to this window, the
 types it would publish, what it tells an agent*. What it does on a clock belongs
 in that list, and so does the switch that stops it.

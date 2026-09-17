@@ -34,6 +34,7 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use serde::{Deserialize, Serialize};
 use sync_memory::Subscription;
 use tauri::ipc::Channel;
+use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 
 use super::event::{PastedImage, SessionEvent, Status, now_ms};
@@ -256,6 +257,22 @@ pub struct Session {
     /// cannot change does not belong behind a lock that exists for fields that
     /// do.
     pub source: Option<Source>,
+    /// Whether the console raised this one.
+    ///
+    /// Beside [`Self::source`] rather than inside it, because it is the other
+    /// answer to *who asked*: a source names the package whose handler ordered
+    /// work, and the console is a person — [`Self::source`] stays `None` here
+    /// for exactly the reason it is `None` for a conversation somebody opened
+    /// by hand. What this says is narrower: the person was not talking, they
+    /// were asking for one answer and expect it back in a block.
+    ///
+    /// It is what keeps a dozen small pieces of work out of the list of
+    /// conversations, which is a list of things somebody meant to have a
+    /// conversation with.
+    ///
+    /// Immutable, beside the fields around it: what raised a session cannot
+    /// change under whoever is reading it.
+    pub console: bool,
     /// The record this conversation is being held under, when it is being held
     /// under one. Beside [`Self::source`] and immutable for the same reason.
     ///
@@ -281,6 +298,12 @@ pub struct Session {
     /// Held apart from the rest of the state because ending a process is async
     /// and takes `&mut`, and nothing else about a session needs to wait.
     process: tokio::sync::Mutex<Option<AgentProcess>>,
+    /// One turn at a time. A second prompt sent while the first is still
+    /// running would race on `set_status`: the second `Working` does not emit
+    /// (status already `Working`), and the first `Ready` is mistaken for the
+    /// second turn's end. The lock serialises turns so each gets its own
+    /// `Working` → `Ready` transition.
+    pub(crate) turn: tokio::sync::Mutex<()>,
 }
 
 /// Something being shown a conversation as it happens, from off this machine.
@@ -326,6 +349,23 @@ struct State {
     next_seq: u64,
     next_request_id: u64,
     sink: Option<Channel<SessionEvent>>,
+    /// Where live events are sent, one at a time, on a single task.
+    ///
+    /// `emit()` is called from whatever thread the event arrived on — the
+    /// delivery loop for `session/update`, a spawned task for `set_status`.
+    /// Each call to `Channel::send` evaluates JavaScript on the webview, and
+    /// `WKWebView.evaluateJavaScript` does not guarantee cross-thread ordering.
+    /// Without a serialiser, a `ready` status emitted on the spawned task's
+    /// thread can reach the window before an `agent_message_chunk` emitted on
+    /// the delivery loop's thread, and the console prints the previous turn's
+    /// answer for the current one.
+    ///
+    /// The forwarder is an mpsc channel whose receiver task calls `sink.send`:
+    /// every live event goes through it, so every `Channel::send` happens on the
+    /// same thread. The backlog in [`Session::subscribe`] is sent directly — it
+    /// runs on the subscription's own thread, before any live event can be
+    /// emitted, and the window's `live` flag is what keeps the two apart.
+    forward: Option<mpsc::UnboundedSender<SessionEvent>>,
     /// Everybody off this machine watching this conversation, by the number
     /// the engine's door minted for each watch.
     ///
@@ -466,16 +506,41 @@ pub struct HeldImage {
 /// the same conversation a person can.
 pub const IMAGE_LIMIT_BYTES: usize = 64 * 1024 * 1024;
 
+/// Who asked for a session, in the one shape every entrance states it.
+///
+/// One value rather than a source beside a flag, because two of the four
+/// combinations those would allow do not exist: work ordered by a package is
+/// never the console's, and the console never signs as a package. A shape that
+/// can only spell what is real is a shape nothing downstream has to check.
+///
+/// Read once, when the session is made, into the two immutable fields above.
+pub enum Origin {
+    /// A person, in a conversation they are watching. The window's own
+    /// `New conversation`, and what a webview asks for by construction.
+    Person,
+    /// A person, from the console: work with one answer, which goes back into a
+    /// block rather than into a conversation somebody reads down.
+    Console,
+    /// A package's handler, and the order it wrote before any of this was
+    /// raised.
+    Ordered(Source),
+}
+
 impl Session {
     pub fn new(
         key: String,
         agent_id: String,
         agent_name: String,
         place: Place,
-        source: Option<Source>,
+        origin: Origin,
         about: Option<About>,
         parent: Option<String>,
     ) -> Arc<Self> {
+        let (source, console) = match origin {
+            Origin::Person => (None, false),
+            Origin::Console => (None, true),
+            Origin::Ordered(source) => (Some(source), false),
+        };
         let cwd = place.cwd();
         Arc::new(Self {
             key,
@@ -486,10 +551,12 @@ impl Session {
             worktree: place.worktree,
             opened_at_ms: now_ms(),
             source,
+            console,
             about,
             parent,
             state: Mutex::new(State::default()),
             process: tokio::sync::Mutex::new(None),
+            turn: tokio::sync::Mutex::new(()),
         })
     }
 
@@ -589,9 +656,61 @@ impl Session {
             // A send failure means the window went away between subscribing and
             // replaying. The session is unaffected — that is the point of it
             // living here — so there is nothing to do but stop replaying.
+            //
+            // Status events are marked `replayed` so the window can tell a
+            // backlog `ready` (the previous turn's end) from a live one (this
+            // turn's). Without it, a stale `ready` that arrives after
+            // `live = true` settles the turn with the previous answer.
+            let event = match event {
+                SessionEvent::Status {
+                    seq,
+                    at_ms,
+                    status,
+                    detail,
+                    ..
+                } => SessionEvent::Status {
+                    seq,
+                    at_ms,
+                    status,
+                    detail,
+                    replayed: true,
+                },
+                SessionEvent::Update {
+                    seq,
+                    at_ms,
+                    update,
+                    recognized,
+                    payload,
+                    ..
+                } => SessionEvent::Update {
+                    seq,
+                    at_ms,
+                    update,
+                    recognized,
+                    payload,
+                    replayed: true,
+                },
+                other => other,
+            };
             if sink.send(event).is_err() {
                 break;
             }
+        }
+        // Spawn a forwarder that drains live events to the sink one at a time
+        // on a single task. See `State::forward` for why. Outside a tokio
+        // runtime — in tests — the forwarder is left unset and `emit` falls
+        // back to sending directly, which is the behaviour the tests were
+        // written against.
+        if tokio::runtime::Handle::try_current().is_ok() {
+            let (tx, mut rx) = mpsc::unbounded_channel::<SessionEvent>();
+            tokio::spawn(async move {
+                while let Some(event) = rx.recv().await {
+                    if sink.send(event).is_err() {
+                        break;
+                    }
+                }
+            });
+            self.locked().forward = Some(tx);
         }
         answer
     }
@@ -621,7 +740,12 @@ impl Session {
     }
 
     pub fn unsubscribe(&self) {
-        self.locked().sink = None;
+        let mut state = self.locked();
+        state.sink = None;
+        // Dropping the sender closes the channel, which ends the forwarder
+        // task. Events still in the channel are lost — but unsubscribe means
+        // nobody is watching, so there is nowhere to send them.
+        state.forward = None;
     }
 
     /// The same, for somebody watching from off this machine.
@@ -713,7 +837,7 @@ impl Session {
 
     /// Records an event and forwards it to everybody watching.
     fn emit(&self, build: impl FnOnce(u64, u64) -> SessionEvent) {
-        let (event, sink, watchers, announcer) = {
+        let (event, forward, sink, watchers, announcer) = {
             let mut state = self.locked();
             let seq = state.next_seq;
             state.next_seq += 1;
@@ -729,9 +853,20 @@ impl Session {
                 .iter()
                 .map(|(at, watcher)| (*at, Arc::clone(watcher)))
                 .collect();
-            (event, state.sink.clone(), watchers, state.announcer.clone())
+            (
+                event,
+                state.forward.clone(),
+                state.sink.clone(),
+                watchers,
+                state.announcer.clone(),
+            )
         };
-        if let Some(sink) = sink {
+        // The forwarder is the live path: one task, one thread, ordered
+        // `Channel::send` calls. When it is absent — no tokio runtime, as in
+        // tests — `sink` is the fallback, and the ordering is the caller's.
+        if let Some(forward) = forward {
+            let _ = forward.send(event.clone());
+        } else if let Some(sink) = sink {
             let _ = sink.send(event.clone());
         }
         // Outside the lock, because a watcher writes into a socket and holding
@@ -763,6 +898,7 @@ impl Session {
             at_ms,
             status,
             detail,
+            replayed: false,
         });
     }
 
@@ -1163,42 +1299,12 @@ impl SessionHandler {
     /// Resolves a path the agent named, refusing anything outside the session's
     /// own directory.
     ///
-    /// The agent is a separate program and its requests are input, not
-    /// instructions: a session opened on one project must not be a way to read
-    /// a file in another. Resolved against the real directory so that a
-    /// symlink or a `..` cannot step out of it.
+    /// The rule itself is `acp_client`'s, because every turn this build raises
+    /// answers the same question and none of them may answer it differently.
+    /// What is decided here is only which directory a conversation's answer is
+    /// measured against, which is the one it was opened on.
     fn within_cwd(&self, path: &str) -> Result<PathBuf, RpcError> {
-        let requested = PathBuf::from(path);
-        let absolute = if requested.is_absolute() {
-            requested
-        } else {
-            self.cwd.join(requested)
-        };
-        let outside =
-            || RpcError::invalid_params(format!("{path} is outside this session's directory"));
-
-        let root = self.cwd.canonicalize().map_err(|_| outside())?;
-        // The file may not exist yet — a write is allowed to create one — so the
-        // parent is what has to resolve. A path whose parent does not resolve
-        // either is refused rather than taken as it was written: it still holds
-        // whatever `..` the agent put in it, and a directory prefix compared
-        // against a path with those in it matches for exactly the paths that
-        // walk back out of the directory.
-        let anchor = match absolute.canonicalize() {
-            Ok(resolved) => resolved,
-            Err(_) => {
-                let parent = absolute.parent().ok_or_else(outside)?;
-                // `None` for a path ending in `..`, which names a directory
-                // above rather than a file to write.
-                let name = absolute.file_name().ok_or_else(outside)?;
-                parent.canonicalize().map_err(|_| outside())?.join(name)
-            }
-        };
-        if anchor.starts_with(&root) {
-            Ok(anchor)
-        } else {
-            Err(outside())
-        }
+        acp_client::handler::contained(&self.cwd, path)
     }
 }
 
@@ -1363,7 +1469,7 @@ mod tests {
             "opencode".to_owned(),
             "OpenCode".to_owned(),
             Place::project(std::env::temp_dir()),
-            None,
+            Origin::Person,
             None,
             None,
         )
@@ -1471,6 +1577,7 @@ mod tests {
                 at_ms,
                 status: Status::Working,
                 detail: None,
+                replayed: false,
             });
         }
 
@@ -1506,6 +1613,7 @@ mod tests {
                 at_ms,
                 status: Status::Working,
                 detail: None,
+                replayed: false,
             });
         }
 
@@ -1544,6 +1652,7 @@ mod tests {
                 at_ms,
                 status: Status::Working,
                 detail: None,
+                replayed: false,
             });
         }
 

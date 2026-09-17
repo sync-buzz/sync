@@ -98,6 +98,15 @@ pub enum SessionEvent {
         status: Status,
         /// Why, for the states where a word is not enough.
         detail: Option<String>,
+        /// Whether this arrived as part of the backlog handed back on
+        /// subscription, rather than from a live turn.
+        ///
+        /// The window's console holds one turn at a time, and a `ready` from
+        /// the backlog is the previous turn's end — not this one's. Without
+        /// this flag, a stale `ready` that reaches `onmessage` after
+        /// `live = true` (the ordering of `evaluateJavaScript` is not
+        /// guaranteed) settles the turn with the previous answer.
+        replayed: bool,
     },
     /// What a person said.
     ///
@@ -245,11 +254,12 @@ mod tests {
             at_ms: 1234,
             status: Status::Working,
             detail: None,
+            replayed: false,
         })
         .expect("a status serialises");
         assert_eq!(
             status,
-            r#"{"kind":"status","seq":1,"atMs":1234,"status":"working","detail":null}"#
+            r#"{"kind":"status","seq":1,"atMs":1234,"status":"working","detail":null,"replayed":false}"#
         );
 
         let question = serde_json::to_string(&SessionEvent::Permission {

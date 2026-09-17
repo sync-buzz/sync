@@ -23,7 +23,12 @@ import { Blocks, History } from "lucide-react";
  */
 export const EXTENSIONS_AREA = {
   id: "extensions",
-  label: "Extensions",
+  // Named for the screen it opens on, which is the name that was already
+  // inside it: the row a person pressed to get to the catalogue said
+  // Marketplace from the beginning, so the section and its way in were two
+  // names for one place. The id is untouched — it is what the layout is
+  // remembered against, and moving it would move somebody's column.
+  label: "Marketplace",
   description: "What this project can do, and what it could.",
   icon: Blocks,
   frame: "browse",
@@ -31,7 +36,7 @@ export const EXTENSIONS_AREA = {
 
 /**
  * The other row that is the window's rather than a project's, and it is at the
- * top for the reason `Extensions` is at the foot: it is not a section.
+ * top for the reason `Marketplace` is at the foot: it is not a section.
  *
  * A section shows what a project holds of one kind. This shows what has
  * happened across every kind at once, which is a view of the corpus rather than

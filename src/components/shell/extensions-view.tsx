@@ -5,6 +5,7 @@ import type { LucideIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { KindGlyph, KindMark } from "@/components/shell/entity-marks";
+import { ServersItMayCall } from "@/components/shell/extension-servers";
 import {
   PackageTags,
   describePackage,
@@ -81,17 +82,23 @@ export function ExtensionNavigator({
 
   return (
     <PanelSurface className="bg-panel">
-      <PanelHeader title="Extensions" />
+      <PanelHeader title="Marketplace" />
       <ScrollArea className="min-h-0 flex-1">
         <div className="flex flex-col gap-3 px-2 pt-2 pb-3">
-          {/* First and ungrouped, because it is not one of the things the
-              groups below are counting. It is where every one of them came
-              from, and on a project that has installed nothing it is the only
-              row there is — which is the right first screen rather than an
-              empty column apologising for itself. */}
+          {/* First and ungrouped, for the reason `All Inboxes` is in Mail: it
+              is not one of the things the groups below are counting, it is
+              everything they are counted out of. On a project that has
+              installed nothing it is the only row there is — which is the
+              right first screen rather than an empty column apologising for
+              itself.
+
+              It is named for what it shows rather than for the section it is
+              in. The section is called Marketplace, in the sidebar and in the
+              header above this, and a row repeating that would be the same word
+              three times down one column. */}
           <div className="flex flex-col gap-0.5">
             <Row
-              label="Marketplace"
+              label="Everything"
               icon={Store}
               isActive={selectedId === null}
               onSelect={() => onSelect(null)}
@@ -226,7 +233,7 @@ function Row({
 /**
  * Every extension there is, as cards.
  *
- * This is the screen the area opens on, and the one that makes `Extensions` an
+ * This is the screen the area opens on, and the one that makes `Marketplace` an
  * area at all rather than a list: what a person arrives to decide is *what
  * could this project do*, and the answer to that is a set of things to compare,
  * not a column of names to click one at a time.
@@ -281,7 +288,7 @@ export function ExtensionMarketplace({
           column would claim to search the project. */}
       <div className="flex h-(--panel-header-height) shrink-0 items-center gap-3 border-b border-separator px-3">
         <h2 className="min-w-0 shrink-0 truncate text-sm font-semibold text-fg">
-          Marketplace
+          Everything
         </h2>
         <input
           type="search"
@@ -801,6 +808,19 @@ export function ExtensionPage({
                 </Section>
               )}
 
+              {/* Beside what it reaches, because a person reading one is
+                  deciding the other: those are hosts this package named in its
+                  own file, and these are servers of the person's own that it
+                  asks through their agent. Two agreements, and neither implies
+                  the other — a package holding one of them cannot do the other
+                  thing at all. Drawn only for a package that asked to ask, by
+                  the same rule as the section above. */}
+              {packaged.manifest.capabilities.includes("tools.call") ? (
+                <Section title="Servers it may call">
+                  <ServersItMayCall id={entry.id} />
+                </Section>
+              ) : null}
+
               {/* Only for a package that has handlers. A section drawn empty
                   would name a state instead of showing one, which is the rule
                   the navigator's groups already follow. */}
@@ -1012,6 +1032,23 @@ function ListedElsewhere({ listed }: { listed: ListedExtension }) {
           </p>
         </Section>
       )}
+
+      {/* Said and not offered. Which servers it may call is a decision about
+          this person's own account, and there is nothing yet for it to be a
+          decision about: the rows appear on this page once the package is
+          here. What matters before that is the cost, because it is the half
+          nobody expects — a package that asks spends turns of somebody's
+          agent. */}
+      {listed.capabilities.includes("tools.call") ? (
+        <Section title="Servers it may call">
+          <p className="text-sm leading-5 text-fg-tertiary">
+            It asks tools of servers you already have, through the agent Sync
+            works through, so every ask costs a turn of yours. Which of your
+            servers it may call is agreed here once it is installed, and until
+            then it can call none of them.
+          </p>
+        </Section>
+      ) : null}
 
       <Section title="What it tells an agent">
         <p className="text-sm leading-5 text-fg-tertiary">

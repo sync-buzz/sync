@@ -58,6 +58,8 @@ export function AppShell() {
   const isPhone = useDevice() === "phone";
 
   const [project, setProject] = useState<OpenProject | null>(null);
+  /** The last project this phone was in, for the list it comes back to. */
+  const [leftFrom, setLeftFrom] = useState<string | null>(null);
   // Where this phone was before the system reloaded its webview, and where it
   // is now. Only a phone has either: on a Mac a reload is something a person
   // did, and the window they did it in is the one they get back.
@@ -67,6 +69,12 @@ export function AppShell() {
   // without the second half, which reads as working until the next reload.
   const enter = useCallback(
     (opened: OpenProject | null) => {
+      // Which project the wheel is turned to when the list is next drawn.
+      // Written on the way *in* rather than on the way out, and that is what
+      // keeps it out of the closing path: the last project entered is the same
+      // answer as the last project left, and asking for it here needs no
+      // knowledge of what is standing open.
+      if (opened !== null) setLeftFrom(opened.path);
       setProject(opened);
       place.hold(opened);
     },
@@ -128,9 +136,30 @@ export function AppShell() {
         {/* A phone that does not yet know whether it has a computer is a
             window that is still starting, and says the one thing it can say.
             Nothing is held back to show it: on a Mac the second half of this
-            is always false. */}
+            is always false.
+
+            A phone that has a computer and is not reaching it is the same
+            window for the same reason — everything it draws is read from that
+            computer — so it stands here rather than in an element of its own,
+            saying which of the two is true. `pairing.standing` has already
+            waited out the drops that mend themselves; by the time it is not
+            `null` there is something a person needs to know. */}
         <LaunchScreen
-          isLoading={isLoading || pairing.isAsking || place.holding}
+          isLoading={
+            isLoading ||
+            pairing.isAsking ||
+            place.holding ||
+            pairing.standing !== null
+          }
+          saying={
+            pairing.standing === null
+              ? "Starting"
+              : pairing.standing.reaching
+                ? "Connecting"
+                : "Not connected"
+          }
+          trouble={pairing.standing?.trouble ?? null}
+          onRetry={() => void pairing.reachNow()}
         />
 
         {pairing.needed ? (
@@ -157,6 +186,7 @@ export function AppShell() {
           // the computer's projects, and the toolbar goes with the folder
           // picker rather than being drawn empty above a list.
           <ProjectsScreen
+            startAt={leftFrom}
             onOpened={enter}
             onOpenSettings={() => setSettingsOpen(true)}
           />

@@ -64,6 +64,11 @@ enum Wire {
     /// registry the HTTP server serves, so the only thing it does differently
     /// is talk over a pipe.
     Stdio { holder: &'static str },
+    /// `{"<holder>": {"<name>": {"type": "remote", "url": …, "enabled": true,
+    /// "headers": {…}}}}` — OpenCode. The `type` it reads is `remote` rather
+    /// than `http`, and it is the one client here that asks for `enabled`
+    /// beside the address; without it the entry is read but never started.
+    Remote { holder: &'static str },
 }
 
 /// Which heading a client is listed under.
@@ -94,6 +99,17 @@ struct Client {
     group: Group,
     location: Location,
     wire: Wire,
+    /// The `acp_client::registry` row that raises this same program, when Sync
+    /// can raise it at all.
+    ///
+    /// The two catalogues describe one program from opposite sides — a row
+    /// there is a command that can be launched, a row here is a file that can
+    /// be written — and neither id can be derived from the other. Stating the
+    /// pairing here rather than beside the launch rows is deliberate: this is
+    /// the catalogue of configuration files, and what somebody wants to know is
+    /// whose file this is. `None` is the ordinary answer, and it is a fact
+    /// rather than a gap: an application Sync has no way to raise.
+    acp: Option<&'static str>,
 }
 
 /// The clients, and the whole of what Sync will write.
@@ -111,6 +127,7 @@ const CLIENTS: &[Client] = &[
             holder: "mcpServers",
             typed: true,
         },
+        acp: Some("claude"),
     },
     Client {
         id: "codex-cli",
@@ -120,6 +137,7 @@ const CLIENTS: &[Client] = &[
         wire: Wire::CodexToml {
             table: "mcp_servers",
         },
+        acp: Some("codex"),
     },
     Client {
         id: "grok-cli",
@@ -129,6 +147,17 @@ const CLIENTS: &[Client] = &[
         wire: Wire::GrokToml {
             table: "mcp_servers",
         },
+        acp: Some("grok"),
+    },
+    Client {
+        id: "opencode",
+        name: "OpenCode",
+        group: Group::CommandLine,
+        // `~/.config` on macOS too, like Zed: the program looks there first and
+        // never at `~/Library/Application Support`.
+        location: Location::Home(".config/opencode/opencode.json"),
+        wire: Wire::Remote { holder: "mcp" },
+        acp: Some("opencode"),
     },
     Client {
         id: "claude-desktop",
@@ -141,6 +170,7 @@ const CLIENTS: &[Client] = &[
         wire: Wire::Stdio {
             holder: "mcpServers",
         },
+        acp: None,
     },
     Client {
         id: "cursor",
@@ -151,6 +181,7 @@ const CLIENTS: &[Client] = &[
             holder: "mcpServers",
             typed: false,
         },
+        acp: None,
     },
     Client {
         id: "vscode",
@@ -161,6 +192,7 @@ const CLIENTS: &[Client] = &[
             holder: "servers",
             typed: true,
         },
+        acp: None,
     },
     Client {
         id: "zed",
@@ -175,6 +207,7 @@ const CLIENTS: &[Client] = &[
             holder: "context_servers",
             typed: false,
         },
+        acp: None,
     },
 ];
 
@@ -390,7 +423,7 @@ pub fn agent_disconnect<R: Runtime>(
 
     let text = read(&file)?;
     let (written, change) = match client.wire {
-        Wire::Json { holder, .. } | Wire::Stdio { holder } => {
+        Wire::Json { holder, .. } | Wire::Stdio { holder } | Wire::Remote { holder } => {
             document::json_take(&text, holder, server)
         }
         Wire::CodexToml { table } | Wire::GrokToml { table } => {
@@ -462,6 +495,18 @@ fn splice(
             entry.insert("headers", toml_edit::Item::Table(headers));
             document::toml_put(text, table, server, entry)
         }
+        Wire::Remote { holder } => {
+            let mut entry = serde_json::Map::new();
+            entry.insert("type".to_owned(), json!("remote"));
+            entry.insert("url".to_owned(), json!(reached.url));
+            entry.insert("enabled".to_owned(), json!(true));
+            entry.insert(
+                "headers".to_owned(),
+                json!({"Authorization": reached.authorization()}),
+            );
+            let rendered = rendered(&entry)?;
+            document::json_put(text, holder, server, &rendered)
+        }
     }
     .map_err(|trouble| ProjectError::new("configuration_failed", trouble.to_string()))
 }
@@ -504,6 +549,158 @@ fn reachable<R: Runtime>(app: &AppHandle<R>) -> Option<Reachable> {
     })
 }
 
+/// The file an agent Sync raises itself keeps its own servers in, named the way
+/// a person would recognise it.
+///
+/// A path rather than a row, because the row is this module's and reaching a
+/// file is this module's job — a caller holding a `Client` would be a second
+/// place deciding what a configuration is. `None` is a fact rather than a gap:
+/// either the program is one Sync cannot raise, or it keeps its servers
+/// somewhere this catalogue has never been pointed at, and either way the
+/// answer to *which servers does it have* is that Sync cannot say.
+pub(crate) fn configuration_shown(agent: &str) -> Option<String> {
+    raised(agent).map(Client::shown)
+}
+
+/// The client row for the program `acp_client::registry` raises under `agent`.
+fn raised(agent: &str) -> Option<&'static Client> {
+    CLIENTS.iter().find(|client| client.acp == Some(agent))
+}
+
+/// How a server is reached, as its own entry spells it.
+///
+/// Two, against [`Wire`]'s four. The four are spellings of one entry and differ
+/// in where a header goes; what an entry says about reaching the server is one
+/// of two things in all of them — an address to dial, or a program to start.
+/// Everything else it carries — a header, whether it is enabled, which of its
+/// tools are approved — belongs to the client whose file it is.
+#[derive(Debug, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum Reach {
+    /// Over HTTP, at the address the entry names.
+    Http { url: String },
+    /// By starting a program, which then talks over a pipe.
+    Process { command: String },
+    /// The entry says neither, so how it is reached is not something this can
+    /// answer. Said rather than dropped: a server missing from a list reads as
+    /// a server the person does not have.
+    Unstated,
+}
+
+/// One server a client's configuration names.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerRow {
+    /// The key, exactly as that file spells it.
+    pub name: String,
+    pub reach: Reach,
+}
+
+/// Which servers the agent Sync raises itself already has.
+///
+/// Read out of that agent's own configuration rather than asked of the agent:
+/// the answer costs nothing, is the same from one call to the next, and is
+/// there before the program has been started once. It is the knowledge
+/// [`splice`] writes with, used the other way round.
+///
+/// Sync's own entry is in the list wherever a person has connected it. It is a
+/// server that agent has, and leaving it out would be this module deciding
+/// something about a list it was asked to read.
+///
+/// # Errors
+///
+/// [`ProjectError`] when Sync knows no file for `agent`, when the file is not
+/// there, and when it cannot be read as what it is meant to be. None of the
+/// three is an empty list, because an empty list is itself an answer — *this
+/// person has no servers* — and it would be the wrong one.
+pub(crate) fn servers_of<R: Runtime>(
+    app: &AppHandle<R>,
+    agent: &str,
+) -> Result<Vec<ServerRow>, ProjectError> {
+    let client = raised(agent).ok_or_else(|| {
+        ProjectError::new(
+            "unknown_agent",
+            format!("Sync does not know where `{agent}` keeps its servers."),
+        )
+    })?;
+    let file = client.file(app)?;
+    listed(client, &present(&file)?)
+}
+
+/// The servers one client's file names, read from text the caller holds.
+///
+/// Split from the file for the reason [`splice`] is: what these clients
+/// disagree about is the shape of an entry, and that disagreement is the thing
+/// worth a test.
+fn listed(client: &Client, text: &str) -> Result<Vec<ServerRow>, ProjectError> {
+    let held = match client.wire {
+        Wire::Json { holder, .. } | Wire::Stdio { holder } | Wire::Remote { holder } => {
+            document::json_list(text, holder)
+        }
+        Wire::CodexToml { table } | Wire::GrokToml { table } => document::toml_list(text, table),
+    }
+    .map_err(|trouble| ProjectError::new("configuration_failed", trouble.to_string()))?;
+
+    let mut rows: Vec<ServerRow> = held
+        .into_iter()
+        .map(|(name, entry)| ServerRow {
+            reach: reach(&entry),
+            name,
+        })
+        .collect();
+    // By name, because the two formats disagree about what order is: a TOML
+    // document keeps the one somebody typed, and a JSON one is read through a
+    // map that has already lost it. One order for both is a list that does not
+    // rearrange itself when a person changes which agent it comes from.
+    rows.sort_by(|left, right| left.name.cmp(&right.name));
+    Ok(rows)
+}
+
+/// What one entry says about how its server is reached.
+///
+/// `url` before `command`: an entry carrying both is not a shape any of these
+/// clients is written to produce, and of the two the address is the half a
+/// person can check for themselves.
+fn reach(entry: &Value) -> Reach {
+    if let Some(url) = entry.get("url").and_then(Value::as_str) {
+        return Reach::Http {
+            url: url.to_owned(),
+        };
+    }
+    if let Some(command) = entry.get("command").and_then(Value::as_str) {
+        return Reach::Process {
+            command: command.to_owned(),
+        };
+    }
+    Reach::Unstated
+}
+
+/// The file's text, or a named absence.
+///
+/// Deliberately not [`read`], which answers a missing file with empty text.
+/// That is right for a writer — writing into a file that is not there means
+/// making it — and wrong for a reader: an empty list says *this person has no
+/// servers*, when what happened is that the program has never been run, or
+/// keeps them somewhere Sync is no longer looking.
+fn present(file: &Path) -> Result<String, ProjectError> {
+    std::fs::read_to_string(file).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            ProjectError::new(
+                "configuration_missing",
+                format!(
+                    "{} is not there, so Sync cannot say which servers this agent has.",
+                    file.display()
+                ),
+            )
+        } else {
+            ProjectError::new(
+                "configuration_failed",
+                format!("could not read {}: {error}", file.display()),
+            )
+        }
+    })
+}
+
 fn client(id: &str) -> Result<&'static Client, ProjectError> {
     CLIENTS
         .iter()
@@ -540,7 +737,7 @@ fn describe(
 ) -> (State, Option<String>) {
     let server = client.server_name();
     let held = match client.wire {
-        Wire::Json { holder, .. } | Wire::Stdio { holder } => {
+        Wire::Json { holder, .. } | Wire::Stdio { holder } | Wire::Remote { holder } => {
             document::json_read(text, holder, server)
         }
         Wire::CodexToml { table } | Wire::GrokToml { table } => {
@@ -654,8 +851,24 @@ fn write(file: &Path, text: &str) -> Result<(), ProjectError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CLIENTS, Reachable, State, Wire, client, describe, splice};
+    use super::{
+        CLIENTS, Reach, Reachable, State, Wire, client, describe, listed, present, splice,
+    };
     use std::path::Path;
+
+    /// The one row of a list, or a failed assertion naming what was there
+    /// instead.
+    fn only(rows: &[super::ServerRow]) -> &super::ServerRow {
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        &rows[0]
+    }
+
+    fn address(row: &super::ServerRow) -> &str {
+        match &row.reach {
+            Reach::Http { url } => url,
+            other => panic!("`{}` is reached over HTTP, not {other:?}", row.name),
+        }
+    }
 
     fn reachable() -> Reachable {
         Reachable {
@@ -772,6 +985,20 @@ mod tests {
     }
 
     #[test]
+    fn an_opencode_entry_is_remote_enabled_and_keeps_its_header_under_mcp() {
+        let reached = reachable();
+        let (written, _) =
+            splice(client("opencode").expect("a client"), "", &reached).expect("an entry");
+        assert!(written.contains("\"mcp\""), "{written}");
+        assert!(written.contains("\"type\": \"remote\""), "{written}");
+        assert!(written.contains("\"enabled\": true"), "{written}");
+        assert!(
+            written.contains("\"Authorization\": \"Bearer a-token\""),
+            "{written}"
+        );
+    }
+
+    #[test]
     fn a_codex_entry_keeps_its_header_where_codex_looks_for_it() {
         let reached = reachable();
         let (written, _) =
@@ -780,5 +1007,168 @@ mod tests {
             written.contains("[mcp_servers.sync.http_headers]"),
             "{written}"
         );
+    }
+
+    /// The reader is the writer read backwards, and this is the test that keeps
+    /// it that way: every shape `splice` produces goes straight back through
+    /// `listed`. A client whose holder or table were spelled differently in the
+    /// two halves would leave both halves compiling and one of them blind.
+    #[test]
+    fn every_shape_this_writes_is_a_shape_this_reads_back() {
+        let reached = reachable();
+        for held in CLIENTS {
+            let (written, _) = splice(held, "", &reached).expect("an entry is written");
+            let rows = listed(held, &written).expect("what was just written is readable");
+            let row = only(&rows);
+            assert_eq!(row.name, "sync", "`{}`", held.id);
+            match held.wire {
+                Wire::Stdio { .. } => match &row.reach {
+                    Reach::Process { command } => assert_eq!(command, &reached.binary),
+                    other => panic!("`{}` starts a program, not {other:?}", held.id),
+                },
+                _ => assert_eq!(address(row), &reached.url, "`{}`", held.id),
+            }
+        }
+    }
+
+    /// The person's own servers, in the file of a client that keeps them as
+    /// JSON — one dialled, one started, and Sync's own beside them.
+    #[test]
+    fn a_json_holder_names_every_server_in_it_and_says_how_each_is_reached() {
+        let theirs = r#"{
+  "mcpServers": {
+    "weather": { "type": "http", "url": "https://weather.example/mcp" },
+    "notes": { "command": "/usr/local/bin/notes-mcp", "args": ["--serve"] },
+    "sync": { "url": "http://127.0.0.1:41847/mcp" }
+  }
+}
+"#;
+        let rows = listed(client("cursor").expect("a client"), theirs).expect("a readable file");
+        let named: Vec<&str> = rows.iter().map(|row| row.name.as_str()).collect();
+        // Sync's own entry is one of that agent's servers like any other. What
+        // is worth building on top of which is not a judgement this makes.
+        assert_eq!(named, ["notes", "sync", "weather"]);
+        assert_eq!(address(&rows[2]), "https://weather.example/mcp");
+        match &rows[0].reach {
+            Reach::Process { command } => assert_eq!(command, "/usr/local/bin/notes-mcp"),
+            other => panic!("`notes` starts a program, not {other:?}"),
+        }
+    }
+
+    /// The shape `~/.codex/config.toml` has: settings above, a server, and the
+    /// per-tool blocks that hang off it.
+    #[test]
+    fn a_codex_file_names_its_servers_past_everything_else_in_it() {
+        let theirs = r#"model = "gpt-5.6-sol"
+
+[mcp_servers.git-sync]
+url = "https://git.example/mcp"
+
+[mcp_servers.git-sync.http_headers]
+Authorization = "Bearer theirs"
+
+[mcp_servers.git-sync.tools.sync_search]
+approval_mode = "approve"
+"#;
+        let rows = listed(client("codex-cli").expect("a client"), theirs).expect("a readable file");
+        let row = only(&rows);
+        assert_eq!(row.name, "git-sync");
+        assert_eq!(address(row), "https://git.example/mcp");
+    }
+
+    /// Grok's spelling of the same three facts, which is the one with `enabled`
+    /// in it and the headers in a table of its own name.
+    #[test]
+    fn a_grok_file_names_its_servers_whatever_else_the_entry_carries() {
+        let theirs = r#"[mcp_servers.tickets]
+url = "https://tickets.example/mcp"
+enabled = true
+
+[mcp_servers.tickets.headers]
+Authorization = "Bearer theirs"
+"#;
+        let rows = listed(client("grok-cli").expect("a client"), theirs).expect("a readable file");
+        assert_eq!(address(only(&rows)), "https://tickets.example/mcp");
+    }
+
+    /// The client that speaks no HTTP: its servers are programs to start, and
+    /// the command is what a person recognises one by.
+    #[test]
+    fn a_started_server_is_read_back_as_the_program_it_starts() {
+        let theirs = r#"{
+  "coworkUserFilesPath": "/Users/someone/files",
+  "mcpServers": {
+    "filesystem": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem"] }
+  }
+}
+"#;
+        let rows =
+            listed(client("claude-desktop").expect("a client"), theirs).expect("a readable file");
+        let row = only(&rows);
+        assert_eq!(row.name, "filesystem");
+        match &row.reach {
+            Reach::Process { command } => assert_eq!(command, "npx"),
+            other => panic!("`filesystem` starts a program, not {other:?}"),
+        }
+    }
+
+    /// A file somebody has never put a server in is not a file with a problem.
+    #[test]
+    fn a_file_that_names_no_servers_is_an_empty_list() {
+        let cursor = client("cursor").expect("a client");
+        for text in [
+            "",
+            "{}",
+            r#"{"preferences": {"theme": "dark"}}"#,
+            r#"{"mcpServers": {}}"#,
+        ] {
+            let rows = listed(cursor, text).expect("a file with no servers is readable");
+            assert!(rows.is_empty(), "`{text}` names no servers: {rows:?}");
+        }
+        let codex = client("codex-cli").expect("a client");
+        for text in ["", "model = \"gpt-5.6-sol\"\n"] {
+            assert!(listed(codex, text).expect("readable").is_empty(), "{text}");
+        }
+    }
+
+    /// The failure this reader exists to not have: a file that cannot be read
+    /// answering the same way a file with nothing in it does. *You have no
+    /// servers* is a sentence about the person, and it would be false.
+    #[test]
+    fn a_file_that_cannot_be_read_is_named_rather_than_reported_as_no_servers() {
+        for (id, broken) in [
+            ("cursor", "this is not json"),
+            ("cursor", r#"{"mcpServers": "over there"}"#),
+            ("codex-cli", "[mcp_servers.unclosed"),
+            ("codex-cli", "mcp_servers = 7\n"),
+        ] {
+            let trouble = listed(client(id).expect("a client"), broken)
+                .expect_err("a file that cannot be read is not a list of servers");
+            assert_eq!(trouble.kind, "configuration_failed", "{trouble:?}");
+            assert!(!trouble.message.is_empty(), "{trouble:?}");
+        }
+    }
+
+    /// A file that is not there yet is its own answer, and a different one from
+    /// a file that is there and empty: the program may never have been run.
+    #[test]
+    fn a_missing_file_is_named_rather_than_reported_as_no_servers() {
+        let nowhere = std::env::temp_dir().join("sync-has-never-written-this/config.toml");
+        let trouble = present(&nowhere).expect_err("there is no such file");
+        assert_eq!(trouble.kind, "configuration_missing");
+        assert!(
+            trouble.message.contains("config.toml"),
+            "a person is told which file: {trouble:?}"
+        );
+    }
+
+    /// An entry Sync cannot classify is still one of that agent's servers.
+    #[test]
+    fn an_entry_naming_neither_an_address_nor_a_program_is_still_listed() {
+        let theirs = r#"{"mcpServers": {"puzzling": {"source": "custom"}}}"#;
+        let rows = listed(client("cursor").expect("a client"), theirs).expect("a readable file");
+        let row = only(&rows);
+        assert_eq!(row.name, "puzzling");
+        assert!(matches!(row.reach, Reach::Unstated), "{:?}", row.reach);
     }
 }

@@ -38,8 +38,9 @@
 //! why — the one thing the door deliberately does not say.
 
 use std::io;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Sender, channel};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 use iroh::endpoint::{Connection as Quic, RecvStream, SendStream, presets};
@@ -79,11 +80,91 @@ const PATIENCE: Duration = Duration::from_secs(30);
 /// replace it with one of ours saying nothing.
 const ANSWERING: Duration = Duration::from_secs(75);
 
+/// How long to wait before dialling again, the first time.
+///
+/// Short, because the ordinary reason to be here is the one iOS causes on
+/// purpose: the system suspends the application seconds after it goes into the
+/// background and takes the connection with it, so *coming back* is the common
+/// case rather than *the network is gone*. A person who has just looked at
+/// their phone again should not be able to read the wait.
+const FIRST_REST: Duration = Duration::from_millis(400);
+
+/// The longest this phone will wait between dials.
+///
+/// Doubling from the first rest reaches it in seven tries, about a minute in.
+/// Past that there is nothing left to learn by asking more often: a phone in a
+/// pocket with no network stays that way for as long as it stays there, and
+/// what a shorter ceiling buys is heat rather than a connection. The waits are
+/// cut short from the outside anyway — the keeper is woken the moment a
+/// connection drops or somebody presses *Try again* — so this is the interval
+/// for a phone nobody is looking at.
+const LONGEST_REST: Duration = Duration::from_secs(30);
+
 /// The pairing this phone is holding: where to dial, and what to say.
 #[derive(Clone)]
 pub struct Pairing {
     pub endpoint: String,
     pub secret: String,
+}
+
+/// Where this phone stands with its computer.
+///
+/// **Three states and not one boolean, because a person was being shown the
+/// same nothing for two different situations.** *Not connected* was the answer
+/// while the first dial of a launch was still in flight and the answer after a
+/// dial had failed, and the two ask opposite things of somebody reading it:
+/// one is *wait*, and the other is *this is not going to happen by itself,
+/// look at the computer*. And the second carried no reason at all, though the
+/// reason had been in hand — the door's refusal, the address that names
+/// nothing reachable, the two builds that cannot speak to each other — and was
+/// being thrown away one line after it arrived.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum Reach {
+    /// No computer to dial. The pairing screen is what answers this, and it is
+    /// the only one of these that is not about a network.
+    #[default]
+    Unpaired,
+    /// Dialling now. Nothing has failed; nothing has been established either.
+    Reaching,
+    /// There is a connection and calls go out on it.
+    Talking,
+    /// The last dial failed, in the words of whoever refused it.
+    ///
+    /// Not the end of trying: the keeper goes on dialling behind this, and the
+    /// sentence is what is true *now* rather than a verdict. Which is why it
+    /// carries words rather than a code — nothing branches on this, somebody
+    /// reads it.
+    Away(String),
+}
+
+impl Reach {
+    /// The one word the window matches on.
+    const fn word(&self) -> &'static str {
+        match self {
+            Self::Unpaired => "unpaired",
+            Self::Reaching => "reaching",
+            Self::Talking => "talking",
+            Self::Away(_) => "away",
+        }
+    }
+
+    /// What the window is handed: the word, and the sentence where there is
+    /// one.
+    ///
+    /// The sentence belongs to [`Self::Away`] alone. A reason attached to
+    /// *reaching* would be a reason for something that has not failed, and a
+    /// window drawing whatever it was given would report a dial in flight as a
+    /// dial that went wrong.
+    #[must_use]
+    pub fn told(&self) -> Value {
+        json!({
+            "reach": self.word(),
+            "trouble": match self {
+                Self::Away(said) => json!(said),
+                _ => Value::Null,
+            },
+        })
+    }
 }
 
 /// What went wrong, in the words the person is shown.
@@ -105,6 +186,56 @@ impl std::error::Error for Trouble {}
 impl Trouble {
     fn saying(what: impl std::fmt::Display) -> Self {
         Self(what.to_string())
+    }
+}
+
+/// What cuts a wait short.
+///
+/// The keeper below spends its life asleep, and the two things worth waking it
+/// for both happen somewhere else: a connection ends on the thread that was
+/// reading it, and a person presses *Try again* on a Tauri command's thread. A
+/// plain `sleep` would make both of them wait out a rest that is no longer
+/// about anything — up to half a minute of a phone showing *cannot reach your
+/// computer* after the reason it could not had gone away.
+#[derive(Default)]
+struct Waker {
+    rung: Mutex<bool>,
+    bell: Condvar,
+}
+
+impl Waker {
+    /// Wake the keeper, whether or not it is listening yet.
+    ///
+    /// The flag is what makes the second half true. A bell rung while the
+    /// keeper is dialling rather than sleeping is a bell nobody hears, and the
+    /// keeper would then sleep through the very event that rang it — so the
+    /// ringing is remembered and the next wait returns at once.
+    fn ring(&self) {
+        if let Ok(mut rung) = self.rung.lock() {
+            *rung = true;
+        }
+        self.bell.notify_all();
+    }
+
+    /// Sleep for `at_most`, or until somebody rings.
+    fn waited(&self, at_most: Duration) {
+        let Ok(mut rung) = self.rung.lock() else {
+            // A poisoned lock is a keeper with no way to be woken, and a keeper
+            // that then spun would be a phone dialling as fast as it can. The
+            // wait still happens; only the shortcut is lost.
+            std::thread::sleep(at_most);
+            return;
+        };
+        if !*rung {
+            // The guard is taken back whichever way the wait ended, and the
+            // outcome is not read: rung or timed out, what follows is the same
+            // turn of the loop.
+            rung = match self.bell.wait_timeout(rung, at_most) {
+                Ok((rung, _)) => rung,
+                Err(_) => return,
+            };
+        }
+        *rung = false;
     }
 }
 
@@ -423,7 +554,7 @@ pub struct Channel {
     /// The computer this phone belongs to, whether or not it can be reached.
     holding: Mutex<Option<Pairing>>,
     /// The conversation, while there is one.
-    talking: Mutex<Option<tokio::sync::mpsc::UnboundedSender<Asked>>>,
+    talking: Mutex<Option<Live>>,
     /// Held across a dial, so that two screens asking at once make one.
     ///
     /// Without it the first call of a launch and the one beside it both find
@@ -438,6 +569,43 @@ pub struct Channel {
     /// what it does when the network comes back is ask for the same watch from
     /// where it stopped.
     watching: Arc<Watching>,
+    /// Where this phone stands, as one fact rather than as something read off
+    /// three others.
+    ///
+    /// Derived from the members above it would be a lie in the one state that
+    /// matters: *dialling* and *dialled and failed* are both "a pairing and no
+    /// connection", and telling them apart is half of what this exists for.
+    /// The other half is the sentence, which nothing above keeps.
+    reach: Mutex<Reach>,
+    /// How the window is told that changed, once there is a window.
+    ///
+    /// A callback rather than an `AppHandle`, and not for the sake of tests:
+    /// this is built by `Default` before Tauri has an application to hand out
+    /// handles of, and a member that could only be filled in later would be a
+    /// member every reader has to check.
+    told: Mutex<Option<Telling>>,
+    /// What cuts short the keeper's wait.
+    waker: Arc<Waker>,
+}
+
+/// How the window is told that the reach has moved.
+type Telling = Box<dyn Fn(&Reach) + Send + Sync>;
+
+/// A connection that is being spoken on, and whether it still is.
+///
+/// **The flag is the whole of why a dropped connection used to need the
+/// application restarted.** The sender outlives the thread that serves it:
+/// nothing on the way down sets it aside, so a phone whose computer had gone
+/// went on holding one and went on answering *yes, connected* to the only
+/// question anything asked. Every call then failed against a receiver that had
+/// been dropped, and the re-dial written for exactly this never ran, because
+/// the branch in front of it was reading a sender that was merely *present*
+/// rather than *alive*.
+struct Live {
+    asking: Talking,
+    /// Set false by the serving thread on its way out, before it rings the
+    /// keeper. Read by everything that asks whether there is a connection.
+    alive: Arc<AtomicBool>,
 }
 
 /// One question and where its answer goes.
@@ -474,9 +642,64 @@ impl Channel {
         // nothing to ask again for: pairing lands a person on the list of
         // projects, which is a screen watching nothing.
         drop(self.watching.taken());
-        self.dial(pairing)?;
+        let dialled = self.dial(pairing);
         drop(one_at_a_time);
-        Ok(())
+        dialled
+    }
+
+    /// Say where this phone stands, and tell the window if that has moved.
+    ///
+    /// Only on a change, because this is called on every turn of the keeper's
+    /// loop and most turns are a phone that is still exactly where it was. An
+    /// event per turn would be a window re-rendering every half-minute to be
+    /// told nothing.
+    ///
+    /// The window is told while the lock is held. Two transitions cannot then
+    /// reach it in the other order from the one they happened in — which is
+    /// the whole failure this is worth a lock for, since the last one to arrive
+    /// is what a person is looking at. Nothing the window does with it comes
+    /// back here.
+    fn stands(&self, now: Reach) {
+        let Ok(mut reach) = self.reach.lock() else {
+            return;
+        };
+        if *reach == now {
+            return;
+        }
+        *reach = now;
+        if let Ok(told) = self.told.lock()
+            && let Some(told) = told.as_ref()
+        {
+            told(&reach);
+        }
+    }
+
+    /// Where this phone stands, for the window to draw.
+    pub fn reach_now(&self) -> Reach {
+        self.reach
+            .lock()
+            .map_or(Reach::Unpaired, |reach| reach.clone())
+    }
+
+    /// Say how the window is to be told when that changes.
+    ///
+    /// Installed once, at setup. Before it there is nowhere to say anything to
+    /// and the state is still kept, which is what makes the window's first
+    /// question answerable rather than a second source of truth.
+    pub fn tell(&self, told: impl Fn(&Reach) + Send + Sync + 'static) {
+        if let Ok(mut held) = self.told.lock() {
+            *held = Some(Box::new(told));
+        }
+    }
+
+    /// Dial now rather than at the end of the current wait.
+    ///
+    /// What *Try again* presses, and what the window says when the system hands
+    /// it back to somebody: a phone coming out of a pocket should not spend the
+    /// rest of a half-minute rest showing a screen about a network that came
+    /// back while it was asleep.
+    pub fn reach_soon(&self) {
+        self.waker.ring();
     }
 
     /// Remember the computer this phone belongs to without dialling it.
@@ -489,6 +712,11 @@ impl Channel {
         if let Ok(mut held) = self.holding.lock() {
             *held = Some(pairing.clone());
         }
+        // Reaching rather than away: the keeper starts in the same breath as
+        // this, so a dial is genuinely in flight. Saying nothing here is what
+        // made a launch read as a failure — the window came up, found a pairing
+        // and no connection, and had only one way to draw that.
+        self.stands(Reach::Reaching);
     }
 
     /// Make sure there is something to say a call on.
@@ -502,9 +730,10 @@ impl Channel {
             if self.open_now() {
                 return Ok(());
             }
-            let pairing = self
-                .pairing()
-                .ok_or_else(|| away("this phone is not paired with a computer"))?;
+            let Some(pairing) = self.pairing() else {
+                self.stands(Reach::Unpaired);
+                return Err(away("this phone is not paired with a computer"));
+            };
             self.dial(&pairing).map_err(|trouble| away(&trouble.0))
         };
         dialled?;
@@ -520,8 +749,28 @@ impl Channel {
     /// The pairing is kept only once the computer has admitted this phone: a
     /// code that was refused is not a computer this phone has.
     fn dial(&self, pairing: &Pairing) -> Result<(), Trouble> {
-        let asking = greeted(pairing, Arc::clone(&self.watching))?;
-        *self.talking.lock().map_err(|_| poisoned())? = Some(asking);
+        self.stands(Reach::Reaching);
+        match self.dialled(pairing) {
+            Ok(()) => {
+                self.stands(Reach::Talking);
+                Ok(())
+            }
+            Err(trouble) => {
+                // The refusal is kept rather than summarised, and the keeper
+                // goes on dialling behind it. What a person is shown is the
+                // last thing that actually happened — the door's sentence, the
+                // address that names nothing reachable, the two builds that
+                // cannot speak — rather than a phone reporting its own silence.
+                self.stands(Reach::Away(trouble.0.clone()));
+                Err(trouble)
+            }
+        }
+    }
+
+    /// The dial itself, with nothing said about how it went.
+    fn dialled(&self, pairing: &Pairing) -> Result<(), Trouble> {
+        let live = greeted(pairing, Arc::clone(&self.watching), Arc::clone(&self.waker))?;
+        *self.talking.lock().map_err(|_| poisoned())? = Some(live);
         *self.holding.lock().map_err(|_| poisoned())? = Some(pairing.clone());
         Ok(())
     }
@@ -554,8 +803,9 @@ impl Channel {
             self.reach()?;
         }
         match self.asked(method, params) {
-            Err(failure) if carried(&failure) => self.again(method, params),
-            outcome => outcome,
+            Ok(answer) => Ok(answer),
+            Err(Unanswered::Gone(_)) => self.again(method, params),
+            Err(refused) => Err(refused.failure()),
         }
     }
 
@@ -565,7 +815,7 @@ impl Channel {
         self.drop_connection();
         self.reach()?;
         if effect(method) == Some(Effect::Reads) {
-            return self.asked(method, params);
+            return self.asked(method, params).map_err(Unanswered::failure);
         }
         Err(away(
             "the connection to the computer dropped while this was in flight, and has been made \
@@ -589,8 +839,18 @@ impl Channel {
     }
 
     /// Whether there is a conversation to ask on.
+    ///
+    /// **Alive rather than present, and the difference is what used to cost
+    /// somebody a restart.** The sender outlives the thread that serves it, so
+    /// a phone whose computer had gone went on holding one — and this answered
+    /// yes, which took every call past the re-dial written for exactly this
+    /// case and into a channel nothing was reading. Nothing recovered from that
+    /// but launching the application again.
     pub fn open_now(&self) -> bool {
-        self.talking.lock().is_ok_and(|held| held.is_some())
+        self.talking.lock().is_ok_and(|held| {
+            held.as_ref()
+                .is_some_and(|live| live.alive.load(Ordering::Acquire))
+        })
     }
 
     /// Let go of a conversation that has ended, keeping the computer it was
@@ -610,28 +870,44 @@ impl Channel {
             *holding = None;
         }
         drop(self.watching.taken());
+        self.stands(Reach::Unpaired);
+        // So the keeper finds out now rather than at the end of a rest it began
+        // while this phone still had a computer.
+        self.waker.ring();
     }
 
-    fn asked(&self, method: &str, params: &Value) -> sync_memory::Result<Value> {
+    fn asked(&self, method: &str, params: &Value) -> Result<Value, Unanswered> {
         let (answering, answered) = channel();
         {
-            let talking = self.talking.lock().map_err(|_| away(&poisoned().0))?;
-            talking
-                .as_ref()
-                .ok_or_else(gone)?
+            let talking = self
+                .talking
+                .lock()
+                .map_err(|_| Unanswered::Gone(away(&poisoned().0)))?;
+            let live = talking.as_ref().ok_or_else(|| Unanswered::Gone(gone()))?;
+            live.asking
                 .send((method.to_owned(), params.clone(), answering))
-                .map_err(|_| gone())?;
+                .map_err(|_| Unanswered::Gone(gone()))?;
         }
         // The deadline is the call's rather than one line's, which is what it
         // always meant and could not be while a call owned the wire. What it is
         // waiting for now is one entry in a map being filled in, and nothing
         // else can fill it.
         match answered.recv_timeout(ANSWERING) {
-            Ok(answer) => answer,
+            Ok(Ok(answer)) => Ok(answer),
+            Ok(Err(failure)) if carried(&failure) => Err(Unanswered::Gone(failure)),
+            Ok(Err(failure)) => Err(Unanswered::Refused(failure)),
+            // Counted as the connection rather than as the computer, though
+            // the socket may still believe in itself. This deadline is already
+            // longer than the computer's own ceiling for a call — so nothing
+            // answering inside it means the two ends no longer agree about
+            // what is outstanding, and the cheapest way back to agreement is a
+            // connection neither of them has any history on. What protects the
+            // person from that being a decision taken on their behalf is the
+            // rule in `again`: a read is replayed, a write is handed back.
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                Err(away("the computer did not answer"))
+                Err(Unanswered::Gone(away("the computer did not answer")))
             }
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(gone()),
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(Unanswered::Gone(gone())),
         }
     }
 
@@ -776,6 +1052,87 @@ impl Channel {
     }
 }
 
+/// Why a call did not come back, told apart by the only thing worth deciding
+/// about it: whether asking again over a fresh connection would change the
+/// answer.
+///
+/// It was decided by reading the failure's kind, and that reading was wrong in
+/// the one case it mattered. A connection that had gone away was reported with
+/// [`gone`] — a *domain* failure, because the sentence is what a person reads —
+/// and the test in front of the re-dial looked for the two transport kinds
+/// only. So the branch never ran. Saying it in the type instead means the
+/// decision is made where the failure is produced, by the code that knows which
+/// it is, rather than guessed at afterwards from a shape that was chosen for
+/// somebody's screen.
+enum Unanswered {
+    /// The connection is not there any more. A fresh one might carry this.
+    Gone(MemoryError),
+    /// The computer was reached and said no, or said something unreadable.
+    /// Reaching it again would ask the same machine the same question.
+    Refused(MemoryError),
+}
+
+impl Unanswered {
+    /// The failure as the window reads it, whichever of the two it was.
+    fn failure(self) -> MemoryError {
+        match self {
+            Self::Gone(failure) | Self::Refused(failure) => failure,
+        }
+    }
+}
+
+/// Keep a connection to the computer up, for as long as this phone is running.
+///
+/// **The half of reconnecting that nothing asks for.** [`Channel::ask`] dials
+/// again when somebody makes a call, which is enough for a screen a person is
+/// tapping at and is nothing at all for the screen this phone spends its time
+/// on: a conversation with an agent, where the words arrive unasked-for and the
+/// only call was made a minute ago. A phone that dialled only on demand sat
+/// there with an open transcript and no connection under it, and looked exactly
+/// like an agent that had gone quiet.
+///
+/// It runs against the ordinary condition of an iOS application rather than
+/// against a fault. The system suspends this process seconds after it goes into
+/// the background and the connection goes with it — `docs/design-foundation.md`
+/// §"Speaking from outside the window" says so where it explains why a phone
+/// raises no banners — so every time somebody puts their phone down, this is
+/// what puts it back.
+///
+/// The waits double from [`FIRST_REST`] to [`LONGEST_REST`] and are cut short
+/// by [`Waker`]: a connection ending rings it, and so does somebody pressing
+/// *Try again*. What is left is the cadence for a phone nobody is holding.
+pub fn kept(channel: &Channel) {
+    let waker = Arc::clone(&channel.waker);
+    let mut rest = FIRST_REST;
+    loop {
+        // Neither of these is worth a dial, and both are worth the longest
+        // wait: the keeper is woken by the bell for anything that changes
+        // them, and a phone with a working connection should be asleep.
+        let idle = if channel.pairing().is_none() {
+            channel.stands(Reach::Unpaired);
+            true
+        } else {
+            channel.open_now()
+        };
+        if idle {
+            rest = FIRST_REST;
+            waker.waited(LONGEST_REST);
+            continue;
+        }
+
+        // The outcome is not read, and it is not an omission. `reach` has
+        // already said where this leaves the phone — talking, or away in the
+        // words of whatever refused — and the only thing left to decide is how
+        // long to wait, which is the same answer either way. A computer that
+        // admits this phone and drops it a moment later is the case that makes
+        // it the same answer: rested only on failure, it would be dialled as
+        // fast as the two of them could manage.
+        drop(channel.reach());
+        waker.waited(rest);
+        rest = rest.saturating_mul(2).min(LONGEST_REST);
+    }
+}
+
 /// Something that carries one call to the computer and brings the answer back.
 ///
 /// A trait over a single method, and its whole purpose is that the thing on the
@@ -874,7 +1231,7 @@ fn poisoned() -> Trouble {
 /// speaking a channel this build cannot read are both *not paired with this*,
 /// and finding either one out later would mean finding it out in the middle of
 /// somebody's work.
-fn greeted(pairing: &Pairing, watching: Arc<Watching>) -> Result<Talking, Trouble> {
+fn greeted(pairing: &Pairing, watching: Arc<Watching>, waker: Arc<Waker>) -> Result<Live, Trouble> {
     // On a thread of its own, and it is not a preference. The runtime below is
     // built here and blocked on, and tokio refuses to build one on a thread
     // that is already driving one — *cannot start a runtime from within a
@@ -888,7 +1245,7 @@ fn greeted(pairing: &Pairing, watching: Arc<Watching>) -> Result<Talking, Troubl
     // waits for it, which is what an `async` command is allowed to do and what
     // the main thread was never allowed to do.
     let dialling = pairing.clone();
-    std::thread::spawn(move || dialled(&dialling, watching))
+    std::thread::spawn(move || dialled(&dialling, watching, waker))
         .join()
         .map_err(|_| Trouble("the connection could not be started".to_owned()))?
 }
@@ -897,7 +1254,7 @@ fn greeted(pairing: &Pairing, watching: Arc<Watching>) -> Result<Talking, Troubl
 type Talking = tokio::sync::mpsc::UnboundedSender<Asked>;
 
 /// The dial itself, on a thread that owns everything it makes.
-fn dialled(pairing: &Pairing, watching: Arc<Watching>) -> Result<Talking, Trouble> {
+fn dialled(pairing: &Pairing, watching: Arc<Watching>, waker: Arc<Waker>) -> Result<Live, Trouble> {
     let runtime = Runtime::new().map_err(Trouble::saying)?;
     let named: EndpointId = pairing
         .endpoint
@@ -962,7 +1319,7 @@ fn dialled(pairing: &Pairing, watching: Arc<Watching>) -> Result<Talking, Troubl
     }
 
     agreed(&mut wire)?;
-    Ok(serving(wire, watching))
+    Ok(serving(wire, watching, waker))
 }
 
 /// Read the computer's channel number and refuse to speak past it.
@@ -1031,7 +1388,7 @@ const GREETING: u64 = 1;
 /// takes both tasks with it — and with them the receiver the writer was
 /// waiting on, which is what makes the next call say the connection has closed
 /// rather than wait for an answer nothing will write.
-fn serving(wire: Wire, watching: Arc<Watching>) -> Talking {
+fn serving(wire: Wire, watching: Arc<Watching>, waker: Arc<Waker>) -> Live {
     let Wire {
         runtime,
         mut writing,
@@ -1040,6 +1397,8 @@ fn serving(wire: Wire, watching: Arc<Watching>) -> Talking {
         _endpoint,
     } = wire;
     let (asking, mut asked) = tokio::sync::mpsc::unbounded_channel::<Asked>();
+    let alive = Arc::new(AtomicBool::new(true));
+    let ending = Arc::clone(&alive);
     std::thread::spawn(move || {
         // Held for as long as the conversation is, and dropped with it. A
         // connection does not keep its endpoint alive: dropped, it takes the
@@ -1086,8 +1445,20 @@ fn serving(wire: Wire, watching: Arc<Watching>) -> Talking {
                 }
             }
         });
+        // Here rather than anywhere above, because here is where it becomes
+        // true: both tasks are over and the receiver the writer drained has
+        // gone with them, so from this line on a call put on the sender is a
+        // call nothing will ever read. Everything that decides whether to dial
+        // reads this, so saying it late is a phone that believes in a
+        // connection for a moment longer than there was one.
+        ending.store(false, Ordering::Release);
+        // And the keeper hears about it now, rather than at the end of a wait
+        // it started while this connection was still up. Without the bell a
+        // conversation left open on the screen would sit under a dead
+        // connection for as long as the current rest had left to run.
+        waker.ring();
     });
-    asking
+    Live { asking, alive }
 }
 
 /// Read the connection until it ends, and put each line where it belongs.
@@ -1194,11 +1565,13 @@ fn answered(said: &Value) -> sync_memory::Result<Value> {
 mod tests {
     #![allow(clippy::expect_used)]
 
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant};
 
     use serde_json::{Value, json};
 
-    use super::{Watched, Watching, answered};
+    use super::{Channel, Live, Pairing, Reach, Unanswered, Waker, Watched, Watching, answered};
 
     /// A window's sink, and everything that has been put into it.
     fn sink() -> (tauri::ipc::Channel<Value>, Arc<Mutex<Vec<Value>>>) {
@@ -1485,6 +1858,182 @@ mod tests {
         let refused = sync_memory::CommandError::from(refused);
         assert_eq!(refused.kind, "agent_session_load");
         assert!(refused.message.contains("no longer holds"));
+    }
+
+    /// A connection whose thread has ended is not one to ask on.
+    ///
+    /// **The defect this file carried, in one assertion.** The sender outlives
+    /// the thread that serves it — nothing on the way down set it aside — so
+    /// *is there a connection* answered yes for ever, every call went past the
+    /// re-dial written for exactly this case and into a channel nothing was
+    /// reading, and nothing recovered but launching the application again. It
+    /// is the ordinary condition of an iOS application rather than an edge: the
+    /// system suspends the process seconds after it goes into the background
+    /// and takes the connection with it.
+    #[test]
+    fn a_connection_whose_thread_has_ended_is_not_open() {
+        let channel = Channel::default();
+        let (asking, draining) = tokio::sync::mpsc::unbounded_channel();
+        let alive = Arc::new(AtomicBool::new(true));
+        *channel.talking.lock().expect("nothing panicked") = Some(Live {
+            asking,
+            alive: Arc::clone(&alive),
+        });
+        assert!(channel.open_now(), "the connection is being served");
+
+        // What the serving thread does on its way out, in that order.
+        drop(draining);
+        alive.store(false, Ordering::Release);
+
+        assert!(
+            !channel.open_now(),
+            "and this phone knows it has to dial again"
+        );
+    }
+
+    /// A call that found nothing to carry it blames the connection.
+    ///
+    /// Which is the only thing [`Channel::ask`] reads to decide whether
+    /// dialling again is worth anything. Told apart by the failure's *kind* it
+    /// could not be: what a lost connection answers with is a sentence
+    /// somebody reads, which makes it a domain failure, and the test in front
+    /// of the re-dial looked for the two transport kinds only.
+    #[test]
+    fn a_call_with_nothing_to_carry_it_asks_to_be_dialled_again() {
+        let channel = Channel::default();
+
+        let refused = channel
+            .asked(sync_memory::SESSION_SUBSCRIBE, &json!({}))
+            .expect_err("there is no connection to ask on");
+
+        assert!(
+            matches!(refused, Unanswered::Gone(_)),
+            "a connection that is not there is not the computer refusing"
+        );
+    }
+
+    /// The computer's own refusal is not dialled again.
+    ///
+    /// The other half of the same decision, and the half that costs something
+    /// when it is wrong: a second connection would ask the same machine the
+    /// same question, and for a write it would be the record written twice.
+    #[test]
+    fn a_refusal_from_the_computer_is_not_worth_a_second_connection() {
+        let refused = answered(&json!({
+            "jsonrpc": "2.0", "id": 4,
+            "error": {"message": "no such record", "data": {"kind": "invalid_argument"}},
+        }))
+        .expect_err("the computer refused");
+
+        assert!(!super::carried(&refused));
+    }
+
+    /// A bell rung before anybody was listening is still heard.
+    ///
+    /// The case is not a race to be tidied away, it is the common one: a
+    /// connection ends while the keeper is in the middle of dialling, not while
+    /// it is asleep. Forgotten, the keeper would then sleep through the very
+    /// event that rang it — up to half a minute of a phone showing that it
+    /// cannot reach a computer that is sitting there waiting.
+    #[test]
+    fn a_bell_rung_before_the_wait_is_still_heard() {
+        let waker = Waker::default();
+        waker.ring();
+
+        let began = Instant::now();
+        waker.waited(Duration::from_secs(30));
+
+        assert!(
+            began.elapsed() < Duration::from_secs(1),
+            "the keeper woke on the bell rather than waiting out the rest"
+        );
+    }
+
+    /// And a bell is heard once.
+    ///
+    /// Otherwise every wait after the first returns at once, which is not a
+    /// keeper that reacts quickly — it is a phone dialling as fast as it can
+    /// for as long as it has no network.
+    #[test]
+    fn a_bell_is_not_heard_twice() {
+        let waker = Waker::default();
+        waker.ring();
+        waker.waited(Duration::from_secs(30));
+
+        let began = Instant::now();
+        waker.waited(Duration::from_millis(120));
+
+        assert!(began.elapsed() >= Duration::from_millis(100));
+    }
+
+    /// What the window is handed for each state it draws.
+    ///
+    /// The word is what it matches on and the sentence is what it shows, and
+    /// only one state has a sentence: the others are this phone saying where it
+    /// is, and a reason attached to *reaching* would be a reason for something
+    /// that has not failed.
+    #[test]
+    fn the_window_is_told_the_state_and_the_reason_for_it() {
+        assert_eq!(
+            Reach::Reaching.told(),
+            json!({"reach": "reaching", "trouble": null})
+        );
+        assert_eq!(
+            Reach::Talking.told(),
+            json!({"reach": "talking", "trouble": null})
+        );
+        assert_eq!(
+            Reach::Away("the computer did not admit this phone".to_owned()).told(),
+            json!({"reach": "away", "trouble": "the computer did not admit this phone"}),
+        );
+    }
+
+    /// Where the phone stands is said once per change and not once per look.
+    ///
+    /// The keeper asks this on every turn of its loop, and most turns are a
+    /// phone exactly where it was. An event per turn would be a window
+    /// re-rendering every half-minute to be told nothing.
+    #[test]
+    fn the_window_hears_about_a_change_and_not_about_a_turn() {
+        let channel = Channel::default();
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let writing = Arc::clone(&heard);
+        channel.tell(move |reach: &Reach| {
+            writing
+                .lock()
+                .expect("nothing panicked")
+                .push(reach.clone());
+        });
+
+        channel.stands(Reach::Reaching);
+        channel.stands(Reach::Reaching);
+        channel.stands(Reach::Away("the computer could not be reached".to_owned()));
+        channel.stands(Reach::Away("the computer could not be reached".to_owned()));
+
+        let heard = heard.lock().expect("nothing panicked");
+        assert_eq!(heard.len(), 2);
+        assert_eq!(heard[0], Reach::Reaching);
+        assert_eq!(channel.reach_now(), heard[1]);
+    }
+
+    /// Forgetting the computer leaves the phone with nothing to reach.
+    ///
+    /// Said rather than left to be worked out: the keeper would otherwise go on
+    /// reporting the last thing that happened to a connection this phone is no
+    /// longer entitled to make.
+    #[test]
+    fn forgetting_the_computer_says_so() {
+        let channel = Channel::default();
+        channel.hold(&Pairing {
+            endpoint: "somewhere".to_owned(),
+            secret: "something".to_owned(),
+        });
+        assert_eq!(channel.reach_now(), Reach::Reaching);
+
+        channel.close();
+
+        assert_eq!(channel.reach_now(), Reach::Unpaired);
+        assert!(channel.pairing().is_none());
     }
 
     /// An answer is what the caller asked for, and nothing is read out of it.

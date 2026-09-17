@@ -2,8 +2,31 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 
-import { Sheet } from "@/components/shell/mobile-chrome";
-import type { Pairing } from "@/lib/pairing";
+import { Sheet } from "@/components/shell/mobile-sheet";
+import type { ChannelStatus, Pairing } from "@/lib/pairing";
+import { cn } from "@/lib/utils";
+
+/**
+ * Whether the computer is answering, in one line.
+ *
+ * Four states rather than two, and the two that are new are the two somebody
+ * was left guessing at: a dial in flight read exactly like a dial that had
+ * failed. *Not just now* is kept for the state it was always true of and is no
+ * longer said for the other three.
+ */
+function answering(computer: ChannelStatus | null): string {
+  if (computer === null) return "—";
+  switch (computer.reach) {
+    case "talking":
+      return "Yes";
+    case "reaching":
+      return "Connecting…";
+    case "away":
+      return "Not just now";
+    case "unpaired":
+      return "—";
+  }
+}
 
 /**
  * What this phone is, raised over whatever it is showing.
@@ -51,10 +74,10 @@ export function SettingsSheet({
     if (open) setConfirming(false);
   }
 
-  // Asked when it is opened rather than kept up to date. Whether the computer
-  // is answering changes with a lid and a network, and the answer is only ever
-  // read here — a subscription would be the whole application watching a fact
-  // one screen shows.
+  // Asked when it is opened, though the hook is also told as this changes.
+  // The two are not the same question: the telling covers a connection that
+  // drops while somebody is looking at this, and this covers a sheet opened
+  // after a stretch in which nothing changed and so nothing was said.
   const { refresh } = pairing;
   useEffect(() => {
     if (open) void refresh();
@@ -69,7 +92,7 @@ export function SettingsSheet({
         // The home indicator's own space, kept clear by the scroller rather
         // than by a band under it: there is no band here, and a list that ended
         // exactly at the gesture reads as a list that was cut off.
-        style={{ paddingBottom: "max(20px, env(safe-area-inset-bottom))" }}
+        style={{ paddingBottom: "max(20px, var(--safe-bottom))" }}
       >
         <Group title="Computer">
           {/* The address rather than a name. What this phone was given is
@@ -77,16 +100,17 @@ export function SettingsSheet({
               and the one moment it is most worth reading this is the moment the
               computer is not answering. */}
           <Fact label="Address" value={computer?.endpoint ?? "—"} mono />
-          <Fact
-            label="Answering"
-            value={
-              computer === null
-                ? "—"
-                : computer.connected
-                  ? "Yes"
-                  : "Not just now"
-            }
-          />
+          {/* The state and, where there is one, the reason for it. Two rows
+              rather than a sentence in one, because they are read at different
+              moments: the first is glanced at, and the second is only ever
+              looked at by somebody who has just read the first and wants to
+              know why. The reason's row is absent when there is none — an
+              empty field beside a computer that is answering reads as a fact
+              that could not be fetched. */}
+          <Fact label="Answering" value={answering(computer)} />
+          {computer?.trouble ? (
+            <Fact label="Because" value={computer.trouble} wrap />
+          ) : null}
         </Group>
 
         <p className="px-4 pt-2 pb-4 text-[13px] leading-[18px] text-fg-tertiary">
@@ -174,20 +198,32 @@ function Fact({
   label,
   value,
   mono,
+  wrap,
 }: {
   label: string;
   value: string;
   mono?: boolean;
+  /**
+   * A sentence rather than a value, so it runs onto as many lines as it needs.
+   *
+   * Every other row here holds something short enough to be read at a glance
+   * and is cut off rather than allowed to push the label around. A refusal is
+   * not one of those: the half of it past the truncation is usually the half
+   * that says what to do.
+   */
+  wrap?: boolean;
 }) {
   return (
     <div className="flex min-h-11 items-center gap-4 px-4 py-2">
       <span className="shrink-0 text-[17px] leading-[22px]">{label}</span>
       <span
-        className={
+        className={cn(
+          "min-w-0 flex-1 text-right text-fg-secondary",
           mono
-            ? "min-w-0 flex-1 truncate text-right font-mono text-[15px] leading-[20px] text-fg-secondary"
-            : "min-w-0 flex-1 truncate text-right text-[17px] leading-[22px] text-fg-secondary"
-        }
+            ? "font-mono text-[15px] leading-[20px]"
+            : "text-[17px] leading-[22px]",
+          wrap ? "text-[15px] leading-[20px]" : "truncate",
+        )}
       >
         {value}
       </span>

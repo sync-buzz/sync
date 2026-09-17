@@ -1,6 +1,11 @@
 import type { Metadata, Viewport } from "next";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import "./globals.css";
+// After the file above, never imported into it: the phone's design outranks
+// both of the desk's appearances, and `@import` is only allowed at the top of
+// a stylesheet — where it would be outranked instead. Two imports here are two
+// files in the order they are written, which is the order the cascade wants.
+import "./mobile.css";
 
 export const metadata: Metadata = {
   title: "Sync",

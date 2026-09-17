@@ -121,7 +121,7 @@ fn chosen<R: Runtime>(app: &AppHandle<R>, event: MenuEvent) {
     match event.id().as_ref() {
         "open" => crate::windows::show(app),
         "settings" => {
-            let _ = crate::settings::settings_open(app.clone());
+            let _ = crate::settings::settings_open(app.clone(), None);
         }
         "at-login" => {
             // Read back rather than remembered: the tick is the system's answer

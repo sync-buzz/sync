@@ -229,6 +229,101 @@ async fn the_process_can_ask_the_client_for_permission() {
     agent.kill().await.expect("the stub can be stopped");
 }
 
+/// What the stub is asked to put inside the tool's answer.
+///
+/// Carried in the prompt and read back out of `rawOutput`, so what the test
+/// proves is that the value crossed two pipes — not that both sides happen to
+/// know the same constant.
+const TOOL_MARKER: &str = "marker-8821";
+
+#[tokio::test]
+async fn a_tool_calls_own_answer_crosses_the_process_boundary() {
+    let (mut agent, mut observed, session) = started().await;
+
+    let answer = within_patience(
+        "the turn that calls a tool",
+        agent.connection().prompt(schema::PromptRequest::new(
+            session.session_id.clone(),
+            vec![schema::ContentBlock::Text(schema::TextContent::new(
+                format!("tool:{TOOL_MARKER} please"),
+            ))],
+        )),
+    )
+    .await
+    .expect("the turn ends");
+    assert_eq!(answer.stop_reason, schema::StopReason::EndTurn);
+
+    // Owned as they are read: a report borrows the update it came from, and
+    // the updates are drained from the queue here.
+    let mut reports = Vec::new();
+    let mut prose = Vec::new();
+    while let Ok(event) = observed.try_recv() {
+        let Observed::Update(event) = event else {
+            continue;
+        };
+        if let Some(report) = event.payload.tool_call() {
+            reports.push((
+                report.tool_call_id.0.to_string(),
+                report.title.map(ToOwned::to_owned),
+                report.status,
+                report.raw_output.cloned(),
+            ));
+            continue;
+        }
+        // Edition 2021 here, so no let chain: this crate came over whole and
+        // is kept checkable against the source it came from.
+        if let SessionUpdatePayload::Known(update) = &event.payload {
+            if let schema::SessionUpdate::AgentMessageChunk(chunk) = &**update {
+                if let schema::ContentBlock::Text(text) = &chunk.content {
+                    prose.push(text.text.clone());
+                }
+            }
+        }
+    }
+
+    let [announced, finished] = reports.as_slice() else {
+        panic!("the turn reports the call once and finishes it once, got {reports:?}");
+    };
+
+    // The announcement: no result yet, and that is an empty member rather than
+    // a frame that never arrived.
+    assert_eq!(announced.2, Some(schema::ToolCallStatus::Pending));
+    assert_eq!(announced.3, None, "nothing has been returned yet");
+    // Where a tool's name shows up on the wire differs by agent, so what is
+    // pinned here is that the title arrives unchanged and reads back through
+    // the naming its row declares.
+    assert_eq!(
+        McpToolNaming::Slash.parse(
+            announced
+                .1
+                .as_deref()
+                .expect("the call is announced by title"),
+            &["sync"],
+        ),
+        Some(acp_client::McpToolName::new("sync", "sync_status")),
+    );
+
+    // The answer, and it is the tool's own.
+    assert_eq!(finished.0, announced.0, "the same call, amended");
+    assert_eq!(finished.2, Some(schema::ToolCallStatus::Completed));
+    assert_eq!(
+        finished.3,
+        Some(serde_json::json!({ "servers": [{ "name": TOOL_MARKER }] })),
+    );
+
+    // The prose is there, it disagrees, and it was never consulted. This is
+    // the whole reason the answer is taken from `rawOutput`: a client that
+    // read the words would have reported an empty answer for a call that
+    // returned one.
+    assert!(!prose.is_empty(), "the stub also talks about the call");
+    assert!(
+        !prose.iter().any(|said| said.contains(TOOL_MARKER)),
+        "the words never carry the answer: {prose:?}"
+    );
+
+    agent.kill().await.expect("the stub can be stopped");
+}
+
 #[tokio::test]
 async fn cancel_reaches_the_process_and_ends_the_turn() {
     let (mut agent, mut observed, session) = started().await;
@@ -391,6 +486,184 @@ async fn a_program_that_does_not_exist_fails_with_the_program_named() {
         panic!("expected a spawn failure, got {error:?}");
     };
     assert_eq!(program, "/nonexistent/acp-agent-that-is-not-there");
+}
+
+/// The errand door through a real process: one turn, one tool, and the tool's
+/// own answer.
+///
+/// The stub reads the tool's name back off the prompt, so what is proven here
+/// is the round trip — the client renders `sync/…` for a Codex-spelled row, the
+/// far end reads that same string, and the answer is recognised as the one that
+/// was asked for.
+#[tokio::test]
+async fn an_errand_brings_back_what_the_tool_returned() {
+    const MARKER: &str = "marker-4041";
+
+    let errand = acp_client::Errand::new(
+        PathBuf::from("/tmp/acp-client-test"),
+        acp_client::McpToolName::new("sync", "sync_status"),
+        serde_json::json!({ "marker": MARKER }),
+    );
+
+    let answer = within_patience(
+        "the errand",
+        acp_client::errand::run(&STUB, &options(), &errand),
+    )
+    .await
+    .expect("the tool answers");
+
+    assert_eq!(
+        answer["called"], "sync/sync_status",
+        "the far end was asked for the tool this row spells that way",
+    );
+    // The arguments crossed the pipe rather than having merely been sent: the
+    // stub echoes the prompt it received, and the marker is in it.
+    assert!(
+        answer["prompt"]
+            .as_str()
+            .is_some_and(|prompt| prompt.contains(MARKER)),
+        "the arguments did not reach the agent: {answer}",
+    );
+    // And the agent's own words, which said the opposite, were never consulted.
+    assert!(
+        !answer.to_string().contains("found nothing at all"),
+        "the answer is the tool's, not the agent's: {answer}",
+    );
+}
+
+/// The other outcome: a turn that talked and called nothing is a named refusal,
+/// never the model's text.
+#[tokio::test]
+async fn a_turn_that_calls_nothing_is_refused_by_name() {
+    let errand = acp_client::Errand::new(
+        PathBuf::from("/tmp/acp-client-test"),
+        acp_client::McpToolName::new("sync", "refuses"),
+        serde_json::json!({}),
+    );
+
+    let error = within_patience(
+        "the errand",
+        acp_client::errand::run(&STUB, &options(), &errand),
+    )
+    .await
+    .expect_err("a turn with no call in it has no answer to give");
+
+    let acp_client::ErrandError::Refused(refusal) = error else {
+        panic!("expected a refusal, got {error:?}");
+    };
+    assert_eq!(refusal, acp_client::Refusal::NotCalled);
+    assert_eq!(refusal.code(), "tool_not_called");
+}
+
+/// A tool that ran and answered, under a title this client cannot read as a
+/// name, through a real process. The answer is on the wire and it is still not
+/// returned: only a call bearing the name that was asked for answers for the
+/// turn, and this door would rather refuse than attribute by elimination.
+#[tokio::test]
+async fn an_answer_under_a_title_that_is_not_a_name_is_refused() {
+    let errand = acp_client::Errand::new(
+        PathBuf::from("/tmp/acp-client-test"),
+        acp_client::McpToolName::new("sync", "unnamed_status"),
+        serde_json::json!({}),
+    );
+
+    let error = within_patience(
+        "the errand",
+        acp_client::errand::run(&STUB, &options(), &errand),
+    )
+    .await
+    .expect_err("a call this side cannot name is not this errand's answer");
+
+    let acp_client::ErrandError::Refused(refusal) = error else {
+        panic!("expected a refusal, got {error:?}");
+    };
+    assert_eq!(refusal, acp_client::Refusal::NotNamed);
+    assert_eq!(refusal.code(), "tool_never_named");
+}
+
+/// And the third: a tool behind a permission nobody can give. This is what a
+/// real flagship does today for anything it has not been told it may run, and
+/// the refusal has to name that rather than blame the agent for calling
+/// nothing.
+#[tokio::test]
+async fn a_tool_behind_a_permission_says_so_rather_than_blaming_the_agent() {
+    let errand = acp_client::Errand::new(
+        PathBuf::from("/tmp/acp-client-test"),
+        acp_client::McpToolName::new("sync", "guarded_status"),
+        serde_json::json!({}),
+    );
+
+    let error = within_patience(
+        "the errand",
+        acp_client::errand::run(&STUB, &options(), &errand),
+    )
+    .await
+    .expect_err("a tool that was never allowed to run has not answered");
+
+    let acp_client::ErrandError::Refused(refusal) = error else {
+        panic!("expected a refusal, got {error:?}");
+    };
+    assert_eq!(refusal, acp_client::Refusal::PermissionNeeded);
+}
+
+/// And the same tool, behind the same permission, once somebody has agreed to
+/// it: the request is answered inside the turn and the tool runs.
+///
+/// Through a process rather than against the handler alone, because what this
+/// has to prove is the round trip — the agreement is a fact on this side, the
+/// question comes off the wire, the answer goes back down it, and the far end
+/// acts on the option that was chosen. A handler tested in isolation says
+/// nothing about the last of those.
+#[tokio::test]
+async fn a_tool_somebody_agreed_to_runs_behind_its_permission() {
+    let mut errand = acp_client::Errand::new(
+        PathBuf::from("/tmp/acp-client-test"),
+        acp_client::McpToolName::new("sync", "guarded_status"),
+        serde_json::json!({}),
+    );
+    errand.consent = acp_client::Consent::Given;
+
+    let answer = within_patience(
+        "the errand",
+        acp_client::errand::run(&STUB, &options(), &errand),
+    )
+    .await
+    .expect("a tool that was allowed to run answers");
+
+    assert_eq!(
+        answer["called"], "sync/guarded_status",
+        "the permission was answered for the tool that was agreed to",
+    );
+}
+
+/// A turn that never ends is stopped, and the process with it.
+///
+/// The one bound an unwatched turn has. Driven with a patience of milliseconds
+/// so the test measures the deadline firing rather than sitting out the real
+/// one.
+#[tokio::test]
+async fn an_errand_that_never_ends_is_given_up_on() {
+    let mut errand = acp_client::Errand::new(
+        PathBuf::from("/tmp/acp-client-test"),
+        // `slow` in the tool's name reaches the stub's waiting script, which
+        // ends only on a cancel that an errand never sends.
+        acp_client::McpToolName::new("sync", "slow_status"),
+        serde_json::json!({}),
+    );
+    errand.patience = Duration::from_millis(500);
+
+    let error = within(
+        "the errand's own deadline",
+        Duration::from_secs(10),
+        acp_client::errand::run(&STUB, &options(), &errand),
+    )
+    .await
+    .expect_err("a turn that never ended answered nothing");
+
+    let acp_client::ErrandError::Refused(refusal) = error else {
+        panic!("expected a refusal, got {error:?}");
+    };
+    assert_eq!(refusal.code(), "tool_call_overran");
 }
 
 /// The text of an update event, for the loops above.

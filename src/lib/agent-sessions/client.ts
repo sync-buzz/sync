@@ -291,6 +291,8 @@ export type SessionEvent =
       readonly atMs: number;
       readonly status: SessionStatus;
       readonly detail: string | null;
+      /** Whether this arrived as backlog on subscription, not from a live turn. */
+      readonly replayed?: boolean;
     }
   | {
       /**
@@ -576,10 +578,7 @@ export interface Subscription {
  * what is sent is what a person is looking at — {@link historyBefore} is how
  * the rest of it is reached.
  */
-export function subscribe(
-  key: string,
-  events: Channel<SessionEvent>,
-): Promise<Subscription> {
+export function subscribe(key: string, events: Channel<SessionEvent>): Promise<Subscription> {
   return call<Subscription>("session_subscribe", { key, events });
 }
 
@@ -660,9 +659,7 @@ export interface RememberedConversation {
  * Not what is running — what is *resumable*. An entry whose `acpSession` no
  * live row carries is a conversation from a previous run of the application.
  */
-export function rememberedConversations(
-  project: string,
-): Promise<RememberedConversation[]> {
+export function rememberedConversations(project: string): Promise<RememberedConversation[]> {
   return call<RememberedConversation[]>("session_remembered", { project });
 }
 
@@ -673,10 +670,7 @@ export function rememberedConversations(
  * and one it has dropped will not come back however often it is asked. Without
  * this such a row could be neither continued nor removed.
  */
-export function forgetRememberedConversation(
-  project: string,
-  acpSession: string,
-): Promise<void> {
+export function forgetRememberedConversation(project: string, acpSession: string): Promise<void> {
   return call<void>("session_forget_remembered", { project, acpSession });
 }
 
@@ -691,10 +685,7 @@ export function forgetRememberedConversation(
  * That one cannot be known before asking, and it is the caller's cue to
  * continue from a kept transcript instead of from the agent.
  */
-export function resumeSession(
-  project: string,
-  acpSession: string,
-): Promise<OpenedSession> {
+export function resumeSession(project: string, acpSession: string): Promise<OpenedSession> {
   return call<OpenedSession>("session_resume", { project, acpSession });
 }
 
@@ -705,10 +696,7 @@ export function resumeSession(
  * Answers whether there was a pointer to say it of. `false` is not a failure: a
  * conversation kept in the same run it was opened in may have none yet.
  */
-export function conversationKeptAs(
-  key: string,
-  recordKey: string,
-): Promise<boolean> {
+export function conversationKeptAs(key: string, recordKey: string): Promise<boolean> {
   return call<boolean>("session_kept_as", { key, recordKey });
 }
 
@@ -738,9 +726,7 @@ export function conversationForRecord(
  * transcript of it to write. This is where that transcript comes from, and it
  * carries the same `dropped` count a subscription reports.
  */
-export function sessionBacklog(
-  key: string,
-): Promise<{ events: SessionEvent[]; dropped: number }> {
+export function sessionBacklog(key: string): Promise<{ events: SessionEvent[]; dropped: number }> {
   return call<{ events: SessionEvent[]; dropped: number }>("session_backlog", { key });
 }
 
@@ -840,18 +826,7 @@ export function imageFileName(mimeType: string, called?: string): string {
  * the field as text, which is what makes attaching them the point of this at
  * all.
  */
-const IMAGE_EXTENSIONS = [
-  "png",
-  "jpg",
-  "jpeg",
-  "gif",
-  "webp",
-  "heic",
-  "svg",
-  "bmp",
-  "tiff",
-  "tif",
-];
+const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp", "heic", "svg", "bmp", "tiff", "tif"];
 
 /**
  * Ask for files to attach with the system's open panel.
@@ -865,9 +840,7 @@ const IMAGE_EXTENSIONS = [
  * it is not confined to it: an agent may perfectly well be asked about a
  * screenshot on the desktop.
  */
-export async function chooseAttachments(
-  defaultPath: string,
-): Promise<readonly string[]> {
+export async function chooseAttachments(defaultPath: string): Promise<readonly string[]> {
   const chosen = await open({
     directory: false,
     multiple: true,

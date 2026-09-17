@@ -346,6 +346,9 @@ export function DropdownMenuSubTrigger(input: React_2.ComponentProps<typeof Drop
 // @public (undocumented)
 export function DropdownMenuTrigger(input: React_2.ComponentProps<typeof DropdownMenu_2.Trigger>): React_2.JSX.Element;
 
+// @public
+export function elapsed(when: number | string | null | undefined): string;
+
 // @public (undocumented)
 export const EMPTY_TRANSCRIPT: Transcript;
 
@@ -450,6 +453,8 @@ export interface ExtensionHost {
     // (undocumented)
     readonly terminal: ExtensionTerminal;
     // (undocumented)
+    readonly tools: ExtensionTools;
+    // (undocumented)
     readonly vault: ExtensionVault;
 }
 
@@ -467,6 +472,11 @@ export interface ExtensionTerminal {
     resize(terminal: string, size: TerminalSize): Promise<void>;
     watch(terminal: string, from: number, onEvent: (event: TerminalEvent) => void): Promise<void>;
     write(terminal: string, data: string): Promise<void>;
+}
+
+// @public
+export interface ExtensionTools {
+    call(project: string, ask: ToolAsk): Promise<unknown>;
 }
 
 // @public
@@ -1380,6 +1390,14 @@ export function SourceList(input: {
 }): JSX.Element;
 
 // @public
+export interface SourceListChild {
+    // (undocumented)
+    readonly id: string;
+    // (undocumented)
+    readonly label: string;
+}
+
+// @public
 export interface SourceListItem {
     readonly badge?: {
         readonly kind: "count";
@@ -1387,6 +1405,8 @@ export interface SourceListItem {
     } | {
         readonly kind: "dot";
     };
+    readonly band?: string;
+    readonly children?: readonly SourceListChild[];
     readonly fixed?: boolean;
     // (undocumented)
     readonly icon: LucideIcon;
@@ -1450,10 +1470,10 @@ export function stopSession(key: string): Promise<void>;
 export function supportsApiRange(range: string): boolean;
 
 // @public
-export const SYNC_API_VERSION: "3.16.0";
+export const SYNC_API_VERSION: "3.19.0";
 
 // @public
-export const SYNC_CAPABILITIES: readonly ["records", "agents.acp", "markdown.plugins", "native-menu", "folders", "sheets", "net", "net.write", "vault", "background", "schedule", "work.agent", "agent.tools", "terminal"];
+export const SYNC_CAPABILITIES: readonly ["records", "agents.acp", "markdown.plugins", "native-menu", "folders", "sheets", "net", "net.write", "vault", "background", "schedule", "work.agent", "agent.tools", "terminal", "tools.call"];
 
 // @public (undocumented)
 export type SyncCapability = (typeof SYNC_CAPABILITIES)[number];
@@ -1520,6 +1540,13 @@ export interface TerminalSize {
     readonly cols: number;
     // (undocumented)
     readonly rows: number;
+}
+
+// @public
+export interface ToolAsk {
+    readonly arguments?: unknown;
+    readonly server: string;
+    readonly tool: string;
 }
 
 // @public

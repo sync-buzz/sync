@@ -74,7 +74,7 @@ fn every_client_is_listed_with_the_file_it_keeps_sync_in() {
 
     let rows = invoke(&webview, "agents_list", json!({})).expect("the rows are read");
     let rows = rows.as_array().expect("a list of rows");
-    assert_eq!(rows.len(), 7, "every client Sync knows: {rows:?}");
+    assert_eq!(rows.len(), 8, "every client Sync knows: {rows:?}");
 
     for row in rows {
         assert_eq!(
@@ -96,6 +96,7 @@ fn every_client_is_listed_with_the_file_it_keeps_sync_in() {
         "codex-cli",
         "cursor",
         "grok-cli",
+        "opencode",
         "vscode",
         "claude-desktop",
         "zed",

@@ -2314,6 +2314,72 @@ mod tests {
         assert_eq!(envelope["links"][0]["relation"], "decided_by");
     }
 
+    /// Every name this build writes into an envelope is one a type may not
+    /// declare as a product field.
+    ///
+    /// The rule that stops the two colliding is a list, and a list is only as
+    /// good as its agreement with what it describes. `to_envelope` flattens
+    /// product fields over the top of the envelope, so a member added there
+    /// without being added to [`ENVELOPE_FIELDS`] is not an error anywhere: the
+    /// type publishes, the record writes, and the engine's own member is
+    /// silently overwritten by whatever the package put in that field.
+    ///
+    /// The reverse does not hold, and the ones it does not hold for are named
+    /// here rather than counted. They are the members the engine states beside
+    /// a record instead of taking from one — when it was written, where its
+    /// body is, whose it is — and reserving them is what stops them being drawn
+    /// as fields of every type under names nobody declared.
+    #[test]
+    fn every_member_an_envelope_carries_is_a_name_no_type_may_declare() {
+        let entity = Entity {
+            key: "s-sidecar".to_owned(),
+            kind: EntityKind::Spec.as_str().to_owned(),
+            title: "Drive memory-hub as a sidecar".to_owned(),
+            content: "# Body".to_owned(),
+            tags: vec!["memory".to_owned()],
+            links: Vec::new(),
+            paths_observed: Vec::new(),
+            scope_paths: vec!["src-tauri/".to_owned()],
+            extensions: Map::new(),
+            // Both of the members written only when they say something, so that
+            // what is compared is the widest envelope this build produces
+            // rather than the plainest.
+            folder: Some("Engine".to_owned()),
+            is_folder: true,
+            archived: true,
+            verified: true,
+        };
+
+        let envelope = entity.to_envelope();
+        let object = envelope.as_object().unwrap();
+        for member in object.keys() {
+            assert!(
+                is_envelope_member(member),
+                "`{member}` is written into every envelope and is not reserved, \
+                 so a type declaring a product field of that name would overwrite it"
+            );
+        }
+
+        let stated_by_the_engine: Vec<&&str> = ENVELOPE_FIELDS
+            .iter()
+            .filter(|name| !object.contains_key(**name))
+            .collect();
+        assert_eq!(
+            stated_by_the_engine,
+            [
+                "content_ref",
+                "profile",
+                "created_at_epoch_seconds",
+                "updated_at_epoch_seconds"
+            ]
+            .iter()
+            .collect::<Vec<_>>(),
+            "a reserved name this build never writes is one somebody has to \
+             account for: either the engine states it beside a record, or it \
+             stopped being the envelope's and is now a name a type may have"
+        );
+    }
+
     #[test]
     fn rewriting_a_document_keeps_everything_it_was_not_asked_to_change() {
         let stored = json!({

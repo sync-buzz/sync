@@ -328,6 +328,85 @@ export interface ExtensionTerminal {
 }
 
 /**
+ * What a package asks one of the person's own tools for.
+ *
+ * Three members, and none of them about how the asking is done. The vocabulary
+ * is the far end's — an MCP server as that person's own configuration keys it,
+ * a tool as that server publishes it, and whatever arguments the tool takes.
+ *
+ * That is deliberate rather than terse. Something has to carry the ask, and
+ * what carries it today is a turn of the agent this installation works
+ * through — the only route to those tools that needs no credential of anybody's
+ * and opens no second connection. It costs a turn's worth of tokens and a wait
+ * on every call. Spelling the request in the carrier's words instead, with a
+ * session and a prompt in it, would make replacing the carrier a change to
+ * every package ever built against this. Spelled in the far end's words, it
+ * survives the carrier being replaced without a single package being rebuilt.
+ */
+export interface ToolAsk {
+  /** The MCP server, keyed as the person's own configuration keys it. */
+  readonly server: string;
+  /**
+   * The tool, as that server publishes it.
+   *
+   * Not the spelling any particular agent uses for it: one tool of one server
+   * is written several different ways across the agents this build can raise,
+   * and rendering it for whichever one is carrying the ask happens below this
+   * line, where the choice is known.
+   */
+  readonly tool: string;
+  /**
+   * Passed through untouched. What a tool takes is the tool's business, and a
+   * copy of its schema kept here would be an older one.
+   *
+   * Left out means a tool that takes nothing, which MCP spells `{}`.
+   */
+  readonly arguments?: unknown;
+}
+
+/**
+ * The tools the person already has, asked one at a time.
+ *
+ * **This is not a way onto the network.** It reaches exactly the servers that
+ * person configured in their own agent, through that agent, and a package
+ * cannot add one, name one that is not there, or learn what the list holds.
+ * Where `net` is a package reaching somewhere its own manifest names, this is a
+ * package asking something the person has already set up and authorised — which
+ * is why it is a separate agreement and why a package that has this one still
+ * reaches no host it did not declare.
+ *
+ * Handed over already attributed, as `net`, `vault` and `terminal` are: whether
+ * a package may do this is read off the manifest on this machine, so the call
+ * carries which package is making it rather than stating it.
+ *
+ * **The answer is the tool's own, never an account of it.** A turn in which the
+ * carrier talked about the tool instead of calling it rejects by name; it does
+ * not resolve with prose. That distinction is the whole reason this exists
+ * rather than a prompt: a panel filled from a summary looks like a working
+ * panel, which makes it worse than an empty one.
+ *
+ * **It is not a render path.** Every call costs tokens and seconds, and it can
+ * only answer while the agent carrying it is running and signed in. What a
+ * panel draws is what is in the project's memory; this is how that gets there.
+ * A section that called this to paint itself would be a section that is blank
+ * on a train.
+ */
+export interface ExtensionTools {
+  /**
+   * Ask one tool, and answer with the JSON it returned.
+   *
+   * Rejects with a named refusal rather than a sentence, so a panel can tell
+   * *nobody has chosen an agent to work through* from *the tool asked for
+   * permission and nobody was there to give it* and say something different
+   * about each.
+   *
+   * @param project The project the ask is made in. A tool that reads a
+   *   repository reads this one.
+   */
+  call(project: string, ask: ToolAsk): Promise<unknown>;
+}
+
+/**
  * What an extension's module is handed when it starts.
  *
  * Its own id, and what its own manifest let it reach. An earlier draft also
@@ -357,12 +436,19 @@ export interface ExtensionTerminal {
  * a person types in the folder they opened it in. It is attributed for the same
  * reason as the other two — the capability is read off the manifest on this
  * machine when a terminal is opened, and a package cannot state its own.
+ *
+ * `tools` is the fourth and the narrowest, and it is attributed for a reason
+ * the other three do not have as sharply: the agreement it is checked against
+ * is about *this package* asking, and the answer to whether it may is going to
+ * get narrower rather than wider. An id in the argument list would be a package
+ * asking under somebody else's name.
  */
 export interface ExtensionHost {
   readonly id: string;
   readonly net: ExtensionNet;
   readonly vault: ExtensionVault;
   readonly terminal: ExtensionTerminal;
+  readonly tools: ExtensionTools;
 }
 
 /**

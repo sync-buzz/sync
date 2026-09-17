@@ -1,0 +1,403 @@
+/* ================================================================ *
+ * The phone
+ * ================================================================ *
+ *
+ * Everything that is true of this interface only on a phone, in one file.
+ *
+ * It is a second file rather than a third block inside `globals.css` because
+ * the two appearances there are one design read twice, and this is not that
+ * design. The desk is a window among windows: greys that sit close together,
+ * a frame catching the desktop behind it, structure carried by hairlines. A
+ * phone has no desktop behind it and no neighbouring window to be quiet
+ * beside — the screen *is* the application — so the structure that a hairline
+ * carries there is carried here by depth: a black field, and surfaces that
+ * rise out of it or sink into it.
+ *
+ * **Only values, and only under the attribute.** Nothing here names a new
+ * token that `@theme inline` publishes, because that block is copied verbatim
+ * into what every package compiles against: a name added to it moves
+ * `SYNC_API_VERSION` and every installed package has to be rebuilt to see it.
+ * Values are not published — a package is built against `var(--surface-panel)`
+ * and reads whatever the document says it is at the moment it draws. So a
+ * phone can be a different design for nothing, and a package written for the
+ * desk arrives on it already wearing this.
+ *
+ * The variables this file *does* invent are prefixed `--phone-`, and they are
+ * the shell's own: the bar, the sunken row, the lift and the glow exist
+ * nowhere else and are read by nothing that is not in this repository.
+ *
+ * Loaded after `globals.css` from `layout.tsx` rather than imported into it.
+ * CSS puts `@import` at the top of a file, which would place these rules
+ * *before* the appearances they have to outrank; two imports in the layout are
+ * two files in the order they are written.
+ */
+
+/* ---------------------------------------------------------------- *
+ * There is no frame
+ * ---------------------------------------------------------------- *
+ *
+ * This document's own reasoning rather than a concession to the platform. The
+ * frame is the window's edge catching what is behind it, and an application
+ * filling a phone has nothing behind it: no desktop, no second window, no
+ * material to be muted. What is left is the slab, and a slab that is the whole
+ * screen has no inset to sit in, no corner of its own — the corners are the
+ * device's — and nothing to cast a shadow onto.
+ */
+[data-device="phone"] {
+  --window-inset: 0px;
+  --radius-window: 0px;
+  --shadow-content: none;
+
+  /*
+   * What the hardware claims at the top and the foot of the screen, behind one
+   * name each.
+   *
+   * Nothing here computes anything `env()` does not already say. What the
+   * indirection buys is that the number can be *set* — by the stand beside
+   * this window, which runs in a browser where `env()` is zero and therefore
+   * cannot show what a notch and a home indicator do to a layout. Every
+   * arrangement in this design ends against one of these two edges, so the
+   * case that is hardest to get right is the one that was impossible to look
+   * at.
+   *
+   * It is also the one place to correct them if the webview turns out to be
+   * inset already — which is the open question about this phone, and the
+   * reason these are two names rather than ten call sites.
+   */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* ---------------------------------------------------------------- *
+ * Light: paper, and what is pressed into it
+ * ---------------------------------------------------------------- *
+ *
+ * The field is white rather than the desk's near-white, for the same reason
+ * the dark field below is black: a screen held at a foot with nothing around
+ * it has no second surface to be compared against, so the small separations
+ * the desk uses to rank its panels have nothing left to say. What ranks a
+ * surface here is whether it stands above the field or is pressed into it.
+ *
+ * Every value below is stated rather than inherited even where it matches the
+ * desk's, because this is one design: reading it means reading this block, not
+ * this block against another file.
+ */
+[data-device="phone"] {
+  --surface-window: hsl(0 0% 100%);
+  --surface-workspace: hsl(0 0% 100%);
+  --surface-panel: hsl(0 0% 100%);
+  /* The one raised surface, and the only place a phone shows a second value:
+     a sheet has to be distinguishable from the screen it was raised over. */
+  --surface-sidebar: hsl(var(--tint-h) calc(4% * var(--tint-s)) 97%);
+  --surface-raised: hsl(0 0% 100%);
+
+  --text-primary: hsl(var(--tint-h) calc(10% * var(--tint-s)) 9%);
+  --text-secondary: hsl(var(--tint-h) calc(5% * var(--tint-s)) 38%);
+  /* 46% rather than the desk's 47%: over white this reaches 4.6:1, and a
+     phone is held to 4.5 where a Mac at arm's length is held to 4.4. */
+  --text-tertiary: hsl(var(--tint-h) calc(4% * var(--tint-s)) 46%);
+
+  --separator: hsl(var(--tint-h) calc(8% * var(--tint-s)) 12% / 0.08);
+  --separator-strong: hsl(var(--tint-h) calc(8% * var(--tint-s)) 12% / 0.14);
+
+  --state-hover: hsl(var(--tint-h) calc(8% * var(--tint-s)) 12% / 0.04);
+  --state-selected: hsl(var(--tint-h) calc(8% * var(--tint-s)) 12% / 0.07);
+  --scrim: hsl(var(--tint-h) calc(8% * var(--tint-s)) 12% / 0.32);
+
+  /*
+   * The band a phone rests its thumb on: the sections, and the shade over
+   * them. It stands *above* the field, which is what makes the row a person
+   * has chosen able to sink below it — on a field that is already the
+   * brightest thing on the screen there is nothing left to press into.
+   */
+  --phone-bar: hsl(0 0% 100%);
+  --phone-bar-edge: hsl(var(--tint-h) calc(8% * var(--tint-s)) 12% / 0.10);
+  --phone-lift:
+    0 -1px 0 hsl(var(--tint-h) calc(8% * var(--tint-s)) 12% / 0.06),
+    0 -12px 28px -12px hsl(var(--tint-h) calc(8% * var(--tint-s)) 12% / 0.22);
+
+  /* Chosen, and pressed in. Colour says nothing here — the shadow does. */
+  --phone-sunken: hsl(var(--tint-h) calc(6% * var(--tint-s)) 92%);
+  --phone-sunken-shadow:
+    inset 0 1px 2px hsl(var(--tint-h) calc(8% * var(--tint-s)) 12% / 0.20),
+    inset 0 0 0 0.5px hsl(var(--tint-h) calc(8% * var(--tint-s)) 12% / 0.06);
+
+  /*
+   * No glow in this appearance, and the name is kept so that nothing has to
+   * ask which appearance it is in. Light behind an object is how a dark screen
+   * says *this one*; on white it is a smudge, and the same emphasis is carried
+   * by the sinking above.
+   */
+  --phone-glow: none;
+  --phone-title-glow: none;
+
+  /*
+   * How far content fades as it goes under the furniture, and it is shorter
+   * here than on black — measured rather than matched. Dark text at half
+   * strength over white comes to 3.6:1, under the 4.5 a phone is held to, so a
+   * long fade in this appearance would leave a readable-looking line that is
+   * not readable. A short steep one spends the illegible part of the gradient
+   * in the few points nobody reads from.
+   */
+  --phone-fade: 22px;
+
+  /* The light that crosses the band when a section changes. On paper there is
+     no light to add, so it is the same gesture made of shadow — a quarter of
+     the strength, because a dark sweep over white is seen far more readily
+     than a pale one over black. */
+  --phone-sweep: hsl(var(--tint-h) calc(8% * var(--tint-s)) 12% / 0.05);
+
+  /*
+   * Nothing above the field. The horizon is light at the top of a black
+   * screen, which is how the dark appearance stops being a flat void; over
+   * paper the same gradient is a grey smudge under the first line of the page.
+   */
+  --phone-horizon: none;
+
+  /*
+   * The shade pulled down from the top, which is the one surface in this
+   * design that covers work rather than standing beside it — so it is the one
+   * that is a material: what it hides stays faintly present underneath it
+   * instead of being replaced by a slab.
+   *
+   * Its bottom edge is where the design is decided. Here it is a shadow, the
+   * way anything held above paper is; in the dark appearance it is a line of
+   * light, because that is what a raised surface is made of there.
+   */
+  --phone-shade: hsl(0 0% 100% / 0.86);
+  --phone-shade-lift:
+    0 1px 0 hsl(var(--tint-h) calc(8% * var(--tint-s)) 12% / 0.10),
+    0 20px 40px -20px hsl(var(--tint-h) calc(8% * var(--tint-s)) 12% / 0.35);
+
+  /*
+   * A finger is about 44 points across at any density, so that is the floor
+   * under every control — and these names are the desk's, which means a
+   * package that asked for a control height gets a touchable one without
+   * knowing a phone exists.
+   */
+  --control-height-sm: 36px;
+  --control-height: 44px;
+  --control-height-lg: 52px;
+  --radius-control: 10px;
+  --radius-surface: 14px;
+  --header-height: 52px;
+  --panel-header-height: 44px;
+
+  /* Read at a foot rather than at arm's length, and the scale moves with it. */
+  --type-xs: 12px;
+  --type-xs--line-height: 16px;
+  --type-sm: 13px;
+  --type-sm--line-height: 18px;
+  --type-base: 15px;
+  --type-base--line-height: 20px;
+  --type-lg: 17px;
+  --type-lg--line-height: 22px;
+  --type-display: 34px;
+  --type-display--line-height: 40px;
+
+  /*
+   * Slower than the desk, and that is not indulgence. A pointer arrives
+   * instantly and a transition it can outrun feels like lag; a finger drags a
+   * screen and lets go, and the screen has to be seen to finish the movement
+   * the hand started. Everything here is either following a finger or
+   * completing what one began.
+   */
+  --motion-duration-fast: 140ms;
+  --motion-duration: 260ms;
+  --motion-ease: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/* ---------------------------------------------------------------- *
+ * Dark: the field is off
+ * ---------------------------------------------------------------- *
+ *
+ * Black rather than the desk's near-black. On this hardware black is a pixel
+ * that is not lit, so the field stops being a surface at all and the interface
+ * reads as the only thing present — which is the whole claim of this design,
+ * and it is unavailable on a desk at any value.
+ *
+ * Two selectors for the two ways an appearance is decided, matching what
+ * `globals.css` does: the system's preference, overridable by a person's
+ * choice, and the choice itself. Both carry the device attribute so they
+ * outrank the desk's appearance blocks whichever file is read first.
+ */
+@media (prefers-color-scheme: dark) {
+  [data-device="phone"]:not([data-appearance="light"]) {
+    --surface-window: hsl(0 0% 0%);
+    --surface-workspace: hsl(0 0% 0%);
+    --surface-panel: hsl(0 0% 0%);
+    --surface-sidebar: hsl(var(--tint-h) calc(6% * var(--tint-s)) 7%);
+    --surface-raised: hsl(var(--tint-h) calc(6% * var(--tint-s)) 9%);
+
+    --text-primary: hsl(var(--tint-h) calc(8% * var(--tint-s)) 97%);
+    --text-secondary: hsl(var(--tint-h) calc(5% * var(--tint-s)) 68%);
+    /*
+     * Measured against the *raised* surface rather than the field, which is
+     * the trap this tier fell into first. At 48% it reaches 4.8:1 over black
+     * and 4.18:1 over the shade — and the shade is where most of the tertiary
+     * text in this design actually is. 52% passes both: 5.7:1 over the field,
+     * 4.9:1 over anything raised out of it.
+     */
+    --text-tertiary: hsl(var(--tint-h) calc(5% * var(--tint-s)) 52%);
+
+    --separator: hsl(0 0% 100% / 0.10);
+    --separator-strong: hsl(0 0% 100% / 0.16);
+
+    --state-hover: hsl(0 0% 100% / 0.06);
+    --state-selected: hsl(0 0% 100% / 0.10);
+    --scrim: hsl(0 0% 0% / 0.6);
+
+    --phone-bar: hsl(0 0% 100% / 0.06);
+    --phone-bar-edge: hsl(0 0% 100% / 0.12);
+    --phone-lift:
+      0 -1px 0 hsl(0 0% 100% / 0.06),
+      0 -16px 32px -16px hsl(0 0% 0% / 0.9);
+
+    /* Sunk back to the field: the row a person chose is the one place the
+       band stops being lit. Nothing is added to say it is chosen — something
+       is taken away, which is the only emphasis a black screen has that does
+       not cost brightness. */
+    --phone-sunken: hsl(0 0% 0% / 0.55);
+    --phone-sunken-shadow:
+      inset 0 1px 3px hsl(0 0% 0% / 0.8),
+      inset 0 0 0 0.5px hsl(0 0% 100% / 0.06);
+
+    /* And then the one addition: the light the sunk row sits in. Colourless,
+       because colour in this shell is status and nothing else. */
+    --phone-glow: 0 0 24px -4px hsl(0 0% 100% / 0.22);
+    --phone-title-glow: 0 0 22px hsl(0 0% 100% / 0.20);
+
+    /* Twice the light appearance's, and it is the contrast that pays for it:
+       white at half strength over black is 5.3:1, so the whole length of this
+       gradient is text somebody can still read on their way out of it. */
+    --phone-fade: 36px;
+    --phone-sweep: hsl(0 0% 100% / 0.07);
+
+    /* The room the field is in. A black screen with nothing on it is a void
+       rather than a surface, and a title standing on a void has nothing to
+       stand on; three and a half per cent of light at the top edge is enough
+       to be felt and not enough to be seen as a band. */
+    --phone-horizon: linear-gradient(
+      to bottom,
+      hsl(0 0% 100% / 0.035),
+      transparent 240px
+    );
+
+    --phone-shade: hsl(var(--tint-h) calc(6% * var(--tint-s)) 8% / 0.88);
+    /* A line of light along the bottom edge, and the room it lights. The
+       shade hangs from the top of the screen, so this edge is the only one
+       it has — the other three are the device's. */
+    --phone-shade-lift:
+      0 1px 0 hsl(0 0% 100% / 0.22),
+      0 10px 30px -10px hsl(0 0% 100% / 0.05),
+      0 28px 56px -28px hsl(0 0% 0% / 0.95);
+  }
+}
+
+[data-device="phone"][data-appearance="dark"],
+[data-device="phone"].dark {
+  --surface-window: hsl(0 0% 0%);
+  --surface-workspace: hsl(0 0% 0%);
+  --surface-panel: hsl(0 0% 0%);
+  --surface-sidebar: hsl(var(--tint-h) calc(6% * var(--tint-s)) 7%);
+  --surface-raised: hsl(var(--tint-h) calc(6% * var(--tint-s)) 9%);
+
+  --text-primary: hsl(var(--tint-h) calc(8% * var(--tint-s)) 97%);
+  --text-secondary: hsl(var(--tint-h) calc(5% * var(--tint-s)) 68%);
+  --text-tertiary: hsl(var(--tint-h) calc(5% * var(--tint-s)) 52%);
+
+  --separator: hsl(0 0% 100% / 0.10);
+  --separator-strong: hsl(0 0% 100% / 0.16);
+
+  --state-hover: hsl(0 0% 100% / 0.06);
+  --state-selected: hsl(0 0% 100% / 0.10);
+  --scrim: hsl(0 0% 0% / 0.6);
+
+  --phone-bar: hsl(0 0% 100% / 0.06);
+  --phone-bar-edge: hsl(0 0% 100% / 0.12);
+  --phone-lift:
+    0 -1px 0 hsl(0 0% 100% / 0.06),
+    0 -16px 32px -16px hsl(0 0% 0% / 0.9);
+
+  --phone-sunken: hsl(0 0% 0% / 0.55);
+  --phone-sunken-shadow:
+    inset 0 1px 3px hsl(0 0% 0% / 0.8),
+    inset 0 0 0 0.5px hsl(0 0% 100% / 0.06);
+
+  --phone-glow: 0 0 24px -4px hsl(0 0% 100% / 0.22);
+  --phone-title-glow: 0 0 22px hsl(0 0% 100% / 0.20);
+
+  --phone-fade: 36px;
+  --phone-sweep: hsl(0 0% 100% / 0.07);
+  --phone-horizon: linear-gradient(
+    to bottom,
+    hsl(0 0% 100% / 0.035),
+    transparent 240px
+  );
+
+  --phone-shade: hsl(var(--tint-h) calc(6% * var(--tint-s)) 8% / 0.88);
+}
+
+/* ---------------------------------------------------------------- *
+ * What a preference takes away
+ * ---------------------------------------------------------------- *
+ *
+ * The glow is the one thing here that is light for emphasis rather than for
+ * reading, so it is the one thing a person asking for more contrast loses:
+ * a halo around a sunk row lifts the black it sits against, which is the
+ * opposite of what was asked for. The band gains an edge in its place, so
+ * nothing becomes unfindable — the emphasis moves from light to line.
+ */
+@media (prefers-contrast: more) {
+  [data-device="phone"] {
+    --phone-glow: none;
+    --phone-title-glow: none;
+    /* Shortened rather than switched off, and the distinction is the whole of
+       why it survives a preference at all: the fade is not emphasis, it is the
+       edge where a list passes under a band. Removed, the edge is a cut
+       through the middle of a row. Kept short, the cut is still soft and no
+       line is dimmed for longer than it takes to leave the screen. */
+    --phone-fade: 12px;
+    --phone-horizon: none;
+    /* Light for its own sake, which is what a preference for contrast asks to
+       be rid of: the sweep says a thing the sunk row goes on saying by itself. */
+    --phone-sweep: transparent;
+    --phone-bar-edge: hsl(0 0% 100% / 0.3);
+    /* The shade keeps its edge and loses the halo around it, for the reason
+       the band does: light that is there to be felt rather than seen is the
+       first thing somebody asking for contrast is asking to be rid of. */
+    --phone-shade-lift:
+      0 1px 0 hsl(0 0% 100% / 0.4),
+      0 28px 56px -28px hsl(0 0% 0% / 0.95);
+  }
+}
+
+/* ---------------------------------------------------------------- *
+ * Moving from one section to the next
+ * ---------------------------------------------------------------- *
+ *
+ * A line of light crossing the band, once, in the direction reading goes.
+ *
+ * It is here rather than around the section that was chosen, and that is the
+ * correction this replaces: light around a row at the foot of the screen is cut
+ * off by the hard edge a few points below it and reads as a rendering fault.
+ * Light *inside* the band has three edges of its own and loses none of them —
+ * so the band says the change, and the row it happened to goes on saying it by
+ * sitting lower than the rest.
+ *
+ * Six per cent, once, over a quarter of a second: felt at the edge of the eye
+ * while a thumb is still moving, and gone before anybody looks at it directly.
+ */
+@keyframes phone-sweep {
+  from {
+    transform: translateX(-60%);
+    opacity: 0;
+  }
+  40% {
+    opacity: 1;
+  }
+  to {
+    transform: translateX(160%);
+    opacity: 0;
+  }
+}

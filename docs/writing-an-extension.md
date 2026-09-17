@@ -248,11 +248,25 @@ knowing you exist.
 4. **`guidance` is written for whoever writes a record without a screen in front
    of them.** It travels with the type, so any client of the engine reads it.
 
-**The trap: a record already has an envelope.** `key`, `kind`, `title`,
-`content`, `tags`, `links`, `scope`, `observed`, `archived` and `folder` belong
-to every record whatever its type. Declaring one of those as a product field
-gives you a field nothing can write, and the collision is silent until somebody
-tries it. This is why `notes` above is not called `content`.
+**The trap: a record already has an envelope.** Product fields are written into
+the envelope beside its own members rather than under it, so the two share one
+namespace and a type declaring `title` describes a record whose title would be
+overwritten by it. `envelope_version`, `key`, `kind`, `title`, `content`,
+`content_hash`, `content_ref`, `tags`, `links`, `source_paths`, `archive`,
+`freshness`, `folder`, `is_folder`, `profile`, `created_at_epoch_seconds` and
+`updated_at_epoch_seconds` belong to every record whatever its type. This is why
+`notes` above is not called `content`.
+
+Publishing such a type is refused, and the refusal names the field, so you find
+out when the package installs rather than when somebody writes the first record.
+
+The list is the envelope's own spellings and not the window's, which is the part
+that surprises people. `archived`, `scope` and `observed` are three names the
+window uses; what the envelope stores is `archive`, and `source_paths` holding
+both path lists. So those three are not reserved and a type may declare them —
+and a field called `archived` sitting beside the flag that decides whether a
+record is put away is two answers to one question for whoever reads the panel.
+The store will let you; that is the whole of its opinion.
 
 ---
 
@@ -316,19 +330,20 @@ export default function activate(host: ExtensionHost) {
     return (
       <PanelSurface>
         <PanelHeader title="Watching" />
-        <PanelBody>
-          <SourceList
-            label="Watching"
-            activeId={selected ?? ""}
-            onSelect={select}
-            items={watches.map((watch) => ({
-              id: watch.key,
-              label: watch.title,
-              icon: kindIcon("eye"),
-              note: String(watch.fields?.pinned ?? ""),
-            }))}
-          />
-        </PanelBody>
+        {/* Straight under the header, with no body around it. A source list
+            scrolls itself and carries its own padding, so a body would inset it
+            by both and leave it scrolling inside a scroller. */}
+        <SourceList
+          label="Watching"
+          activeId={selected ?? ""}
+          onSelect={select}
+          items={watches.map((watch) => ({
+            id: watch.key,
+            label: watch.title,
+            icon: kindIcon("eye"),
+            note: String(watch.fields?.pinned ?? ""),
+          }))}
+        />
       </PanelSurface>
     )
   }
@@ -361,22 +376,29 @@ export default function activate(host: ExtensionHost) {
     // returns null, and is replaced only when there is something it alone knows.
     useBadge(releases && releases.length > 0 ? "some" : null)
 
-    if (!watch) return <PanelPlaceholder headline="Nothing selected" detail="Choose something you are watching." />
-    if (trouble) return <PanelPlaceholder headline="The API said no" detail={trouble} />
-    if (!releases) return <PanelPlaceholder headline="Asking…" />
-
     return (
       <PanelSurface>
-        <PanelHeader title={watch.title}>
-          <Button variant="ghost" size="sm" onClick={() => void keepToken(host)}>Token…</Button>
+        <PanelHeader title={watch?.title ?? "Releases"}>
+          {watch ? <Button variant="ghost" size="sm" onClick={() => void keepToken(host)}>Token…</Button> : null}
         </PanelHeader>
+        {/* One body, and the four states differ only in what stands in it. A
+            placeholder brings no padding of its own, so it is put in the body
+            like anything else rather than returned as a column. */}
         <PanelBody>
-          {releases.map((release) => (
-            <article key={release.id} className="radar-release">
-              <h3>{release.tag_name}</h3>
-              <p>{release.published_at}</p>
-            </article>
-          ))}
+          {!watch ? (
+            <PanelPlaceholder headline="Nothing selected" detail="Choose something you are watching." />
+          ) : trouble ? (
+            <PanelPlaceholder headline="The API said no" detail={trouble} />
+          ) : !releases ? (
+            <PanelPlaceholder headline="Asking…" />
+          ) : (
+            releases.map((release) => (
+              <article key={release.id} className="radar-release">
+                <h3>{release.tag_name}</h3>
+                <p>{release.published_at}</p>
+              </article>
+            ))
+          )}
         </PanelBody>
       </PanelSurface>
     )
@@ -392,8 +414,16 @@ async function keepToken(host: ExtensionHost) {
 }
 ```
 
-**Five things about that module.**
+**Six things about that module.**
 
+- **A component that fills a column brings its own scrolling and its own
+  padding; one that does not is placed in a body.** `SourceList` and
+  `DocumentView` are whole columns and stand on their own. `PanelPlaceholder`,
+  `SourceTree` and `RecordMetadata` carry no spacing at all and go inside
+  `PanelBody`, which is where the distance from the column's edge is stated
+  once. Both halves of that are silent when they are got wrong: padding written
+  twice is added rather than replaced, and the columns stop lining up across
+  the window.
 - **`activate` is handed `{ id, net, vault }` and nothing else.** React and the
   surface arrive by import, resolved against objects the host publishes on the
   global *before* it fetches your module. That ordering is the whole mechanism:

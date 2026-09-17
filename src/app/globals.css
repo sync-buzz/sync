@@ -175,6 +175,74 @@
   --titlebar-inset: 84px;
 
   /*
+   * The console shade: the one translucent surface *inside* the slab, and the
+   * only exception to the rule that glass here is the edge of the window.
+   *
+   * Not `--surface-raised`. That one is opaque because a menu or a popover
+   * covers what is beneath it for good. The shade is the opposite gesture — it
+   * is pulled down over work somebody is in the middle of, and still seeing
+   * where you are is the whole reason it is a surface inside the window rather
+   * than a window of its own.
+   *
+   * Mixed over `--surface-workspace` and never over `--surface-window-material`:
+   * when the material is applied the frame is already translucent, and a second
+   * translucent layer inside the slab would stack with it and put console text
+   * over somebody's desktop. Behind the shade there is always the content of
+   * the window.
+   */
+  --surface-console: hsl(0 0% 100% / 0.86);
+  --console-backdrop: blur(24px) saturate(1.6);
+
+  /*
+   * One cell of the console grid, stated here and measured at runtime.
+   *
+   * These two are the only metrics in this file that are a starting guess
+   * rather than a decision: the monospace stack ends in whatever face the
+   * machine actually has, and its advance width is not ours to know. The
+   * console measures the face that resolved and writes the result back over
+   * these, so everything derived from them — column widths, the gutter, the
+   * height of a control inside a block — follows the face rather than this
+   * number. They are declared all the same, so the first frame is drawn on a
+   * grid instead of on nothing.
+   */
+  --console-cell-w: 7.2px;
+  --console-cell-h: 17.4px;
+
+  /*
+   * The sixteen colours a program writes in.
+   *
+   * They are here rather than in whatever draws a terminal because they are a
+   * property of the appearance, like every other colour in this layer: a red
+   * taken from an emulator's own defaults has agreed with neither of our two
+   * appearances, and it shows up first in the place a person is most likely to
+   * be reading carefully — a failure.
+   *
+   * Two of the sixteen are deliberately not what their name says. On a light
+   * appearance ANSI white and bright white are the background's own colour, so
+   * a program that sets them would be writing in invisible ink; they are read
+   * here as the two greys this layer already uses for quiet and for emphatic
+   * text. Black gets the same treatment on the dark appearance. The rule is
+   * that the *rank* of the colour survives — quiet stays quieter than loud —
+   * and legibility wins over the literal name.
+   */
+  --ansi-0: hsl(var(--tint-h) calc(6% * var(--tint-s)) 11%);
+  --ansi-1: hsl(0 68% 42%);
+  --ansi-2: hsl(145 63% 27%);
+  --ansi-3: hsl(32 90% 32%);
+  --ansi-4: hsl(211 100% 38%);
+  --ansi-5: hsl(291 52% 42%);
+  --ansi-6: hsl(187 80% 27%);
+  --ansi-7: hsl(var(--tint-h) calc(4% * var(--tint-s)) 47%);
+  --ansi-8: hsl(var(--tint-h) calc(4% * var(--tint-s)) 36%);
+  --ansi-9: hsl(0 72% 48%);
+  --ansi-10: hsl(145 58% 32%);
+  --ansi-11: hsl(32 88% 38%);
+  --ansi-12: hsl(211 96% 44%);
+  --ansi-13: hsl(291 56% 48%);
+  --ansi-14: hsl(187 74% 32%);
+  --ansi-15: hsl(var(--tint-h) calc(6% * var(--tint-s)) 11%);
+
+  /*
    * The lift that separates the slab from the frame: a hairline ring and one
    * soft shadow. It is the only shadow in the shell, and it expresses nesting
    * rather than decorating a card.
@@ -208,20 +276,6 @@
   --input: var(--separator-strong);
   --ring: var(--focus-ring);
   --radius: var(--radius-surface);
-}
-
-/*
- * The one value the phone is held to more strictly than the Mac.
- *
- * The tertiary tier at 47% lightness comes to 4.38:1 over the panel surface,
- * under the 4.5:1 a phone is held to; 46% reaches 4.51:1 and is otherwise the
- * same grey. It sits here, above the dark appearance rather than below it,
- * because it corrects a light value only — the dark tier already passes at
- * 5.13:1, and restating its number here to protect this one from it would put
- * that number in two places.
- */
-[data-device="phone"] {
-  --text-tertiary: hsl(var(--tint-h) calc(4% * var(--tint-s)) 46%);
 }
 
 /* ---------------------------------------------------------------- *
@@ -259,6 +313,25 @@
     --status-success: hsl(145 50% 58%);
     --status-warning: hsl(38 88% 60%);
     --status-danger: hsl(0 78% 66%);
+
+    --surface-console: hsl(var(--tint-h) calc(6% * var(--tint-s)) 9.5% / 0.82);
+
+    --ansi-0: hsl(var(--tint-h) calc(5% * var(--tint-s)) 28%);
+    --ansi-1: hsl(0 78% 66%);
+    --ansi-2: hsl(145 50% 58%);
+    --ansi-3: hsl(38 88% 60%);
+    --ansi-4: hsl(211 100% 70%);
+    --ansi-5: hsl(291 68% 74%);
+    --ansi-6: hsl(187 60% 58%);
+    --ansi-7: hsl(var(--tint-h) calc(5% * var(--tint-s)) 70%);
+    --ansi-8: hsl(var(--tint-h) calc(5% * var(--tint-s)) 48%);
+    --ansi-9: hsl(0 84% 74%);
+    --ansi-10: hsl(145 56% 66%);
+    --ansi-11: hsl(38 92% 68%);
+    --ansi-12: hsl(211 100% 78%);
+    --ansi-13: hsl(291 74% 80%);
+    --ansi-14: hsl(187 66% 66%);
+    --ansi-15: hsl(var(--tint-h) calc(10% * var(--tint-s)) 95%);
   }
 }
 
@@ -290,6 +363,25 @@
   --status-success: hsl(145 50% 58%);
   --status-warning: hsl(38 88% 60%);
   --status-danger: hsl(0 78% 66%);
+
+  --surface-console: hsl(var(--tint-h) calc(6% * var(--tint-s)) 9.5% / 0.82);
+
+  --ansi-0: hsl(var(--tint-h) calc(5% * var(--tint-s)) 28%);
+  --ansi-1: hsl(0 78% 66%);
+  --ansi-2: hsl(145 50% 58%);
+  --ansi-3: hsl(38 88% 60%);
+  --ansi-4: hsl(211 100% 70%);
+  --ansi-5: hsl(291 68% 74%);
+  --ansi-6: hsl(187 60% 58%);
+  --ansi-7: hsl(var(--tint-h) calc(5% * var(--tint-s)) 70%);
+  --ansi-8: hsl(var(--tint-h) calc(5% * var(--tint-s)) 48%);
+  --ansi-9: hsl(0 84% 74%);
+  --ansi-10: hsl(145 56% 66%);
+  --ansi-11: hsl(38 92% 68%);
+  --ansi-12: hsl(211 100% 78%);
+  --ansi-13: hsl(291 74% 80%);
+  --ansi-14: hsl(187 66% 66%);
+  --ansi-15: hsl(var(--tint-h) calc(10% * var(--tint-s)) 95%);
 }
 
 /* ---------------------------------------------------------------- *
@@ -366,6 +458,14 @@ html[data-vibrancy="on"] body {
     --state-hover: hsl(var(--tint-h) calc(5% * var(--tint-s)) 91%);
     --state-selected: hsl(var(--tint-h) calc(5% * var(--tint-s)) 87%);
     --scrim: hsl(var(--tint-h) calc(6% * var(--tint-s)) 62%);
+    /*
+     * Both halves, and the second is the one that is easy to forget: an opaque
+     * colour laid over a live blur satisfies the query and ignores the person
+     * who asked for it. The shade keeps its hairline and its shadow, so it is
+     * still legible as a surface over the work rather than as part of it.
+     */
+    --surface-console: hsl(var(--tint-h) calc(5% * var(--tint-s)) 97%);
+    --console-backdrop: none;
   }
 }
 
@@ -374,6 +474,20 @@ html[data-vibrancy="on"] body {
     --state-hover: hsl(var(--tint-h) calc(4% * var(--tint-s)) 19%);
     --state-selected: hsl(var(--tint-h) calc(4% * var(--tint-s)) 23%);
     --scrim: hsl(var(--tint-h) calc(7% * var(--tint-s)) 6%);
+    --surface-console: hsl(var(--tint-h) calc(5% * var(--tint-s)) 13%);
+    --console-backdrop: none;
+  }
+}
+
+/*
+ * The dark appearance when it was chosen rather than inherited, which neither
+ * block above reaches: the first matches `:root` and loses to the attribute
+ * selector that set the dark value, and the second is behind a query about the
+ * system's appearance rather than about the one a person picked.
+ */
+@media (prefers-reduced-transparency: reduce) {
+  :root[data-appearance="dark"] {
+    --surface-console: hsl(var(--tint-h) calc(5% * var(--tint-s)) 13%);
   }
 }
 
@@ -384,6 +498,27 @@ html[data-vibrancy="on"] body {
     --separator: hsl(var(--tint-h) calc(6% * var(--tint-s)) 62%);
     --separator-strong: hsl(var(--tint-h) calc(8% * var(--tint-s)) 42%);
     --state-selected: hsl(var(--tint-h) calc(8% * var(--tint-s)) 12% / 0.18);
+
+    /*
+     * The sixteen darken rather than saturate, and the two pairs that would
+     * collapse into each other are pulled apart instead: a program writes in
+     * these to make a distinction, and a contrast setting that erased the
+     * distinction would be answering one requirement by breaking another.
+     */
+    --ansi-1: hsl(0 80% 32%);
+    --ansi-2: hsl(145 72% 20%);
+    --ansi-3: hsl(32 95% 24%);
+    --ansi-4: hsl(211 100% 30%);
+    --ansi-5: hsl(291 62% 32%);
+    --ansi-6: hsl(187 90% 20%);
+    --ansi-7: hsl(var(--tint-h) calc(5% * var(--tint-s)) 34%);
+    --ansi-8: hsl(var(--tint-h) calc(5% * var(--tint-s)) 24%);
+    --ansi-9: hsl(0 84% 42%);
+    --ansi-10: hsl(145 66% 27%);
+    --ansi-11: hsl(32 92% 31%);
+    --ansi-12: hsl(211 100% 38%);
+    --ansi-13: hsl(291 66% 40%);
+    --ansi-14: hsl(187 84% 26%);
   }
 }
 
@@ -393,6 +528,22 @@ html[data-vibrancy="on"] body {
     --separator: hsl(var(--tint-h) calc(10% * var(--tint-s)) 100% / 0.32);
     --separator-strong: hsl(var(--tint-h) calc(10% * var(--tint-s)) 100% / 0.48);
     --state-selected: hsl(0 0% 100% / 0.22);
+
+    --ansi-0: hsl(var(--tint-h) calc(5% * var(--tint-s)) 44%);
+    --ansi-1: hsl(0 92% 76%);
+    --ansi-2: hsl(145 62% 70%);
+    --ansi-3: hsl(38 96% 70%);
+    --ansi-4: hsl(211 100% 80%);
+    --ansi-5: hsl(291 82% 82%);
+    --ansi-6: hsl(187 74% 70%);
+    --ansi-7: hsl(var(--tint-h) calc(5% * var(--tint-s)) 82%);
+    --ansi-8: hsl(var(--tint-h) calc(5% * var(--tint-s)) 60%);
+    --ansi-9: hsl(0 96% 84%);
+    --ansi-10: hsl(145 70% 80%);
+    --ansi-11: hsl(38 100% 80%);
+    --ansi-12: hsl(211 100% 88%);
+    --ansi-13: hsl(291 90% 88%);
+    --ansi-14: hsl(187 82% 80%);
   }
 }
 
@@ -416,25 +567,15 @@ html[data-vibrancy="on"] body {
  * The phone
  * ---------------------------------------------------------------- *
  *
- * The attribute is set by the phone's own application, at document start,
- * and by nothing else — so its absence is a computer, exactly as the absence
- * of `data-appearance` is the system's own.
+ * Not here. `src/app/mobile.css` is the whole of it — one design rather than
+ * a set of corrections to this one, which is why it is a file and not a third
+ * block below the two appearances above. It is loaded after this one from
+ * `layout.tsx`, because `@import` would put it before what it has to outrank.
  *
- * **There is no frame, and that is this document's own reasoning rather than a
- * concession.** The frame is the window's edge catching what is behind it, and
- * an application filling a phone has nothing behind it: no desktop, no second
- * window, no material to be muted. What is left is the slab, and a slab that
- * is the whole screen has no inset to sit in, no corner of its own — the
- * corners are the device's — and nothing to cast a shadow onto.
- *
- * Below both appearances, because both of them state a shadow and this has to
- * outrank whichever one is in force.
+ * The attribute it hangs on is set by the phone's own application at document
+ * start, and by nothing else — so its absence is a computer, exactly as the
+ * absence of `data-appearance` is the system's own.
  */
-[data-device="phone"] {
-  --window-inset: 0px;
-  --radius-window: 0px;
-  --shadow-content: none;
-}
 
 
 /* ---------------------------------------------------------------- *
@@ -475,6 +616,7 @@ html[data-vibrancy="on"] body {
   --color-panel: var(--surface-panel);
   --color-workspace: var(--surface-workspace);
   --color-raised: var(--surface-raised);
+  --color-console: var(--surface-console);
 
   --color-fg: var(--text-primary);
   --color-fg-secondary: var(--text-secondary);

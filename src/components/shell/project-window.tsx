@@ -11,6 +11,7 @@ import { createPortal } from "react-dom";
 
 import { AppHeader } from "@/components/shell/app-header";
 import { ACTIVITY_AREA, EXTENSIONS_AREA } from "@/components/shell/areas";
+import { ConsoleShade } from "@/components/shell/console-shade";
 import {
   ACTIVITY_AREA_MODULE,
   ActivityProvider,
@@ -519,6 +520,28 @@ export function ProjectWindow({
         />
       ) : (
         desktopColumns
+      )}
+
+      {/* The console, over the columns and under the title bar.
+
+          Keyed by the project, which is the whole of how its tabs leave with
+          it: a tab is a working directory and a history inside one project and
+          means nothing in the next, and this window is not rebuilt when the
+          project under it changes. A key is the one arrangement that does not
+          need every part of the console to learn what a project is.
+
+          Not on a phone. It is called by a key and typed into with a keyboard,
+          and that machine has neither. */}
+      {isPhone ? null : (
+        <ConsoleShade
+          key={project.path}
+          root={project.path}
+          onOpenRecord={(kind, key) => {
+            const opening = opener(kind);
+            if (opening.outcome !== "area") return;
+            show(opening.areaKey, { show: "record", key, kind });
+          }}
+        />
       )}
 
       <SearchPalette

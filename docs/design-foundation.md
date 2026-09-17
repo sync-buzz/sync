@@ -233,7 +233,7 @@ Rules the implementation actually enforces:
    itself and nothing in it writes what the list contains: those are the two
    halves of the same convention, and the second half is why writing a record
    is `⌘N` and a control in the workspace's own header.
-10. The sidebar's foot carries one **pinned row** — `Extensions` — in the same
+10. The sidebar's foot carries one **pinned row** — `Marketplace` — in the same
     band, at the same height, as the navigator's bottom bar beside it, so the
     two read as one line across the slab. It is an area and selecting it
     deselects everything above it, but it is **not** marked with a filled
@@ -267,9 +267,11 @@ Rules the implementation actually enforces:
     a tooltip even in a column wide enough to have needed none, because it is
     the one mark here that cannot explain itself.
 
-Layout state is ephemeral: it is rebuilt from the defaults on every launch, and
-it is kept in `src/lib/shell-layout.ts`, separate from the selection state the
-shell uses to demonstrate itself.
+Layout state is what a person did with their hands — which columns are folded,
+how wide the rest were dragged — and the window opens tomorrow arranged the way
+it was closed today. It is kept in `src/lib/shell-layout.ts`, separate from the
+selection state the shell uses to demonstrate itself, and it carries nothing of
+a project.
 
 ## Selection
 
@@ -882,8 +884,8 @@ show, so the window reads as one thing rather than as a table of contents for a
 product that is not there.
 
 Everything else a project might do arrives as an extension, and the catalogue is
-the marketplace in the `Extensions` area — also shown, as a chooser, while a
-project is being opened. That is a different claim from a sidebar item. A
+the `Marketplace` area — also shown, as a chooser, while a project is being
+opened. That is a different claim from a sidebar item. A
 sidebar item says *this is a part of this window*; a marketplace card says
 *this is something a project could install*.
 
@@ -896,10 +898,17 @@ they asked in good faith. What is coming belongs in release notes.
 The rule that follows: an area is a section with a screen behind it. Anything
 else is a marketplace entry.
 
-`Extensions` is the second area, and it obeys that rule: it has a screen — the
+`Marketplace` is the second area, and it obeys that rule: it has a screen — the
 catalogue, and what each entry would install. It is pinned to the foot of the
 column because it is not a section of the project. The sections grow above it as
 extensions install them.
+
+It is named for that screen, and the name was already inside it: the row that
+opened the catalogue said `Marketplace` from the beginning, so the area and its
+way in were two names for one place. What the row says now is `Everything`,
+which is what it shows rather than where it is — the same distinction `All
+Inboxes` keeps in Mail, and the reason the word does not stand three times down
+one column.
 
 The Community relationship model is a design contract for an extension, not a
 description of anything in the window.
@@ -913,7 +922,7 @@ month, and which of those is at the top is worth a drag.
 
 So the rows are dragged, the way a favourite is dragged in Finder's sidebar and
 a mailbox in Mail. The pinned row is not: it is pinned, and being able to carry
-`Extensions` away from the foot of the column would be the interface
+`Marketplace` away from the foot of the column would be the interface
 contradicting its own rule in the one gesture that tests it.
 
 **The rows do not part.** The row being carried stays where it is and goes
@@ -1032,6 +1041,53 @@ this Mac holds, which agents reach Sync, which devices reach it from somewhere
 else, where disposable work happens, what it says out loud, when it interrupts,
 and the secrets it keeps for a package.
 
+**The column reads in four runs and in two levels**, and both are answers to the
+same thing: a list of nine is nine things to hold at once. The runs are `Window`,
+`Attention`, `Work` and `Access` — the question somebody arrived with, not how
+often a section is opened, which is an order that changes under people. A run
+carries a heading and nothing else: it is never selected and has no screen, which
+is what keeps it from reading as a tenth section. Folded to a rail the headings
+go and a hairline stands where each one was; a name under an icon that has just
+given up its own label would be the one word left in a column of none.
+
+**A section names its parts in that column when its parts are each a screenful**,
+which today is `Agents` and only `Agents`. Where models run, which servers a
+package may call and what is connected to Sync are three screens, and stacked on
+one page the only way to the third was scrolling past the other two. Only the
+large sections do this: `Text` and `Notifications` are a line of options each,
+and a column that listed every part of every section would have lost the ability
+to say which ones are large.
+
+**A section with parts is not a screen.** Choosing it chooses the first of them.
+The alternative was tried and is worse: a page holding all three, three rows
+above those same three, each of which is that page with two thirds removed —
+two kinds of destination drawn identically, in the one column whose whole job is
+saying where you are. What that costs is seeing three decisions about the same
+programs side by side, and what it buys is a column where every row means the
+same thing.
+
+**So there is no triangle and nothing folds.** A folded section holding the
+selection has nowhere to put it: the section itself is not a place, so the window
+would be left showing a screen nothing in the column points at. Parts are drawn
+under their section always, which for nine sections and three parts is twelve
+rows — a list short enough that folding was never what it needed.
+
+**The three levels are told apart by four things at once, and by no single one
+of them.** The run's heading is the smallest type in the column and the
+heaviest, because two point sizes of difference on their own read as a faint row
+rather than as furniture. A section is a full-height row with a mark; a part is a
+shorter row with none, beginning where that mark ends — one text-gap short of the
+section's own label, because a part aligned under the label left a gutter the
+width of a mark with nothing in it, which reads as something missing rather than
+as a level. And the section holding what is selected takes no selected surface:
+it shifts a tier forward instead. The surface is what *selected* means here, and
+two of them would be two answers to where somebody is standing.
+
+**A part's screen carries no heading of its own.** The window's header is already
+showing that name and the sentence under it, drawn from the same record the
+column drew the row from, so printing them again a line below would be the screen
+saying one thing in two weights.
+
 **Remote Access is its own section and not a part of Vault**, because the two
 are opposite questions. The vault holds what a package uses to reach *out*;
 this decides who may reach *in*. Somebody whose phone was stolen is looking for
@@ -1048,15 +1104,15 @@ what it depends on, so it is chosen with a project open and from that project's
 own window. Putting it here would have made what a project can do a property of
 this Mac.
 
-## Extensions are an area, and they read in three columns
+## The marketplace is an area, and it reads in three columns
 
-Selecting `Extensions` deselects whatever was selected, exactly as choosing any
+Selecting `Marketplace` deselects whatever was selected, exactly as choosing any
 other area does, and all three columns become about extensions. The window never
 shows two subjects at once — a navigator listing types of record beside a
 workspace showing a catalogue would be two answers to two questions nobody
 asked together.
 
-- **The navigator** carries `Marketplace` as its first row and then the group
+- **The navigator** carries `Everything` as its first row and then the group
   `Installed` — nothing else. A group with nothing in it is not drawn, because
   an empty heading names a state instead of showing one, so a project that has
   installed nothing shows one row and that row is the way in.
@@ -1071,6 +1127,31 @@ asked together.
   declared, and the two different things removing it can mean. It is empty while
   the marketplace is open — that column describes one thing, and the marketplace
   is about a set.
+
+**A package that asks something of your own servers says so on that page, and
+that is the one thing on the page a person changes without changing what the
+project declares.** Installing is a write to the repository that travels to
+everybody who has it; agreeing that a package may call one of your servers is
+about your machine and your account, and travels nowhere. So it is on the same
+page and it is not the same control, and nothing about it is drawn for a package
+that asks nothing — an empty heading names a state instead of showing one, which
+is the rule the navigator's groups already follow.
+
+It is a row per server with one control on it, not a switch. A switch says the
+state can be set both ways from here, and this one cannot: an agreement is given
+where somebody is reading what the package is, and every agreement they have
+ever given is listed and taken back in one place, which is Settings under
+Agents. Two places to give it from and no place that is the list would be worse
+than the asymmetry.
+
+What the row states before it is pressed is the price and the width, because
+both are wider than they look. The ask is carried by a turn of the agent the
+window works through, so every call costs that person tokens and a wait; and one
+agreement covers that server whole, including the tools that change things.
+The width is not a choice the window is making. Sync speaks none of these
+protocols and cannot ask a server what it holds, so there is no list of tools to
+agree to one at a time, and a row implying otherwise would promise a narrowness
+nobody is keeping.
 
 **A row and a card are two different claims, and that is what decides where
 something goes.** A row in the navigator says *this is a part of this window*; a
