@@ -1,21 +1,12 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-  type ReactNode,
-} from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 import { AppHeader } from "@/components/shell/app-header";
 import { ACTIVITY_AREA, EXTENSIONS_AREA } from "@/components/shell/areas";
 import { ConsoleShade } from "@/components/shell/console-shade";
-import {
-  ACTIVITY_AREA_MODULE,
-  ActivityProvider,
-} from "@/components/shell/activity-area";
+import { ACTIVITY_AREA_MODULE, ActivityProvider } from "@/components/shell/activity-area";
 import { EXTENSIONS_AREA_MODULE } from "@/components/shell/extensions-area";
 import { MobileWindow } from "@/components/shell/mobile-window";
 import { openers } from "@/components/shell/opening";
@@ -24,11 +15,7 @@ import type { ProjectSetup } from "@/components/shell/project-setup";
 import { RecordLinks } from "@/components/shell/record-links";
 import { SearchPalette } from "@/components/shell/search-palette";
 import { SyncSheet } from "@/components/shell/sync-sheet";
-import {
-  ResizableHandle,
-  ResizablePanel,
-  ResizablePanelGroup,
-} from "@/components/ui/resizable";
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { useMemoryMenu } from "@/lib/app-menu";
 import type { AreaIntent } from "@/lib/area-intent";
 import { CompositionProvider, useComposition } from "@/lib/composition";
@@ -36,17 +23,10 @@ import { useDevice } from "@/lib/device";
 import type { AreaModule } from "@/lib/extension-host/activate";
 import { useAreas, type MountedArea } from "@/lib/extension-host/areas";
 import { useSectionOrder } from "@/lib/project/use-section-order";
-import { useWatchedKinds } from "@/lib/project/use-project-view";
+import { useHiddenSections, useWatchedKinds } from "@/lib/project/use-project-view";
 import { BadgeScope } from "@/lib/extension-api/badge";
-import {
-  mergeBadges,
-  useDeclaredBadges,
-  useLiveBadges,
-} from "@/lib/extension-host/badges";
-import {
-  PackagesProvider,
-  usePackagesState,
-} from "@/lib/extension-host/packages";
+import { mergeBadges, useDeclaredBadges, useLiveBadges } from "@/lib/extension-host/badges";
+import { PackagesProvider, usePackagesState } from "@/lib/extension-host/packages";
 import { updatesFor, useCachedIndex } from "@/lib/extension-host/updates";
 import { useActivity } from "@/lib/memory/use-activity";
 import { useSyncState } from "@/lib/memory/use-sync-state";
@@ -137,22 +117,30 @@ export function ProjectWindow({
   // The sections this project has, which is what running its packages produced.
   // Nothing in this file decides what they are, and nothing in it could: the
   // catalogue at the foot of the column is the only area the window owns.
-  const {
-    sections: brought,
-    unavailable: elsewhere,
-    isLoading,
-  } = useAreas(project, packages);
+  const { sections: brought, unavailable: elsewhere, isLoading } = useAreas(project, packages);
   // And the order somebody put them in, which is this Mac's business rather
   // than the project's: the declaration decides what the sections are, and a
   // person decides where they sit. Applied here rather than in the sidebar so
   // that the section which opens by default is the one at the top of the
   // column — the first row is what a person means by "first".
-  const { sections, arrange } = useSectionOrder(project.path, brought);
+  const { sections: ordered, arrange } = useSectionOrder(project.path, brought);
+  // Which sections this person put away from the sidebar, and the rest that
+  // stay. The same kind of decision as the arrangement — per machine, per
+  // project — and applied here for the same reason: the column, the default
+  // selection and the mobile band all read from one filtered list, and the
+  // hidden sections' metadata is what the disclosure row in the sidebar lists.
+  const hidden = useHiddenSections(project.path);
+  const hiddenKeys = hidden.hidden;
+  const sections = useMemo(
+    () => ordered.filter((area) => !hiddenKeys.includes(area.key)),
+    [ordered, hiddenKeys],
+  );
+  const hiddenAreas = useMemo(
+    () => ordered.filter((area) => hiddenKeys.includes(area.key)),
+    [ordered, hiddenKeys],
+  );
   const mounted = useMemo(
-    () =>
-      new Map(
-        [ACTIVITY, ...sections, CATALOGUE].map((area) => [area.key, area]),
-      ),
+    () => new Map([ACTIVITY, ...sections, CATALOGUE].map((area) => [area.key, area])),
     [sections],
   );
 
@@ -215,9 +203,7 @@ export function ProjectWindow({
   const slotRefs = useMemo(() => {
     const attach = (column: AreaColumn) => (element: HTMLDivElement | null) =>
       setSlots((current) =>
-        current[column] === element
-          ? current
-          : { ...current, [column]: element },
+        current[column] === element ? current : { ...current, [column]: element },
       );
     return {
       Navigator: attach("Navigator"),
@@ -243,8 +229,7 @@ export function ProjectWindow({
   // belongs to whichever area is selected, and this belongs to none of them.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "k")
-        return;
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "k") return;
       // Something nearer the caret has already answered this — the editor's own
       // `⌘K` makes a link out of selected words. The window listens last, so
       // the way to defer to it is to notice that it acted: opening the palette
@@ -260,7 +245,8 @@ export function ProjectWindow({
   // What the project declares can change under the window — removing the
   // extension whose area is open is the ordinary case — so a selection that no
   // longer names anything falls back the same way the first one is decided.
-  const frame = FRAMES[(activeKey === null ? undefined : mounted.get(activeKey))?.frame ?? CATALOGUE.frame];
+  const frame =
+    FRAMES[(activeKey === null ? undefined : mounted.get(activeKey))?.frame ?? CATALOGUE.frame];
 
   // Which section opens which kind, bound to what this window is actually
   // running. Built here because it is the one place that holds all three
@@ -316,10 +302,7 @@ export function ProjectWindow({
   // column that draws them, which is here and nowhere else.
   const declared = useDeclaredBadges(project.path, sections, opener);
   const live = useLiveBadges();
-  const badges = useMemo(
-    () => mergeBadges(declared, live.reported),
-    [declared, live.reported],
-  );
+  const badges = useMemo(() => mergeBadges(declared, live.reported), [declared, live.reported]);
 
   // Whether anything this project runs has a newer version published. Read from
   // what the last fetch cached rather than fetched here: a mark on one row is
@@ -422,9 +405,7 @@ export function ProjectWindow({
           // the same edge — and the control in the title bar — can close the
           // column outright.
           collapsedSize={
-            intended.primarySidebar === "hidden"
-              ? 0
-              : PANEL_GEOMETRY.primarySidebar.railWidth
+            intended.primarySidebar === "hidden" ? 0 : PANEL_GEOMETRY.primarySidebar.railWidth
           }
           defaultSize={PANEL_GEOMETRY.primarySidebar.preferredWidth}
           minSize={PANEL_GEOMETRY.primarySidebar.minWidth}
@@ -436,6 +417,7 @@ export function ProjectWindow({
           {collapsed.primarySidebar ? null : (
             <PrimarySidebar
               sections={sections}
+              hiddenAreas={hiddenAreas}
               badges={badges}
               updates={updates}
               unseen={activity.isLoading ? null : activity.entries.length}
@@ -443,6 +425,8 @@ export function ProjectWindow({
               rail={stages.primarySidebar === "rail"}
               onSelectArea={selectArea}
               onArrange={arrange}
+              onHide={hidden.toggle}
+              onShow={hidden.toggle}
             />
           )}
         </ResizablePanel>
@@ -578,12 +562,7 @@ export function ProjectWindow({
 
     const columns = (
       <>
-        <AreaColumns
-          areaKey={key}
-          module={area.module}
-          active={key === activeKey}
-          slots={slots}
-        />
+        <AreaColumns areaKey={key} module={area.module} active={key === activeKey} slots={slots} />
         {children}
       </>
     );
@@ -711,11 +690,7 @@ const EMPTY_SLOTS: AreaSlots = {
  * It fills its panel and is positioned, which is what lets a column be laid out
  * against the column it is in and nothing else.
  */
-function AreaSlot({
-  attach,
-}: {
-  attach: (element: HTMLDivElement | null) => void;
-}) {
+function AreaSlot({ attach }: { attach: (element: HTMLDivElement | null) => void }) {
   return <div ref={attach} className="absolute inset-0" />;
 }
 

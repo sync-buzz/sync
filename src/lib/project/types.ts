@@ -227,6 +227,16 @@ export interface ProjectView {
    */
   readonly sections: readonly string[];
   /**
+   * Sections this person put away from the sidebar, by area key.
+   *
+   * The exceptions, not the selection, the way `hiddenTypes` is: a section
+   * installed since is one nobody has hidden, and a stored selection would
+   * silently keep it out of the column. Resolved against what the window
+   * actually mounted, so a key for a section that failed to run or was
+   * uninstalled costs nothing.
+   */
+  readonly hiddenSections: readonly string[];
+  /**
    * The revision whose changes this person has already seen.
    *
    * Absent means nobody has looked yet, which is not *nothing has happened*:
@@ -278,6 +288,7 @@ export interface DismissedChange {
 export interface ProjectViewChange {
   readonly hiddenTypes?: readonly string[];
   readonly sections?: readonly string[];
+  readonly hiddenSections?: readonly string[];
   readonly seenRevision?: string;
   readonly unwatchedKinds?: readonly string[];
   /**
@@ -304,14 +315,9 @@ export interface RecentProject {
  * its language tag.
  */
 export function asLanguageId(value: string): ProjectLanguageId {
-  return (
-    PROJECT_LANGUAGES.find((language) => language.id === value)?.id ??
-    DEFAULT_LANGUAGE_ID
-  );
+  return PROJECT_LANGUAGES.find((language) => language.id === value)?.id ?? DEFAULT_LANGUAGE_ID;
 }
 
 export function languageLabel(id: ProjectLanguageId): string {
-  return (
-    PROJECT_LANGUAGES.find((language) => language.id === id)?.label ?? id
-  );
+  return PROJECT_LANGUAGES.find((language) => language.id === id)?.label ?? id;
 }

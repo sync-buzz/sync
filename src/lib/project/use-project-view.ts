@@ -62,6 +62,27 @@ export function useWatchedKinds(projectPath: string): ProjectViewState {
 }
 
 /**
+ * Which sections this person put away from the sidebar.
+ *
+ * The same shape as the type filter, over a third field of the same file, so
+ * the same control draws both: what a person is deciding is the same decision —
+ * *not this section, for me, on this machine* — asked once about the
+ * navigator's list and once about the sidebar's.
+ *
+ * Held as the exceptions rather than as the selection, which is the half that
+ * matters and the reason this is a hook rather than a stored array of visible
+ * sections. A project's sections are installed after this file was written, so
+ * a stored selection would silently hide every section installed since.
+ */
+export function useHiddenSections(projectPath: string): ProjectViewState {
+  return useExceptions(
+    projectPath,
+    (view) => view.hiddenSections,
+    (hiddenSections) => ({ hiddenSections }),
+  );
+}
+
+/**
  * One list of kinds somebody excepted, read and written where those live.
  *
  * Both preferences are the same mechanism over two fields, and writing it twice
@@ -115,19 +136,14 @@ function useExceptions(
   const toggle = useCallback(
     (kind: string) =>
       remember(
-        hidden.includes(kind)
-          ? hidden.filter((entry) => entry !== kind)
-          : [...hidden, kind],
+        hidden.includes(kind) ? hidden.filter((entry) => entry !== kind) : [...hidden, kind],
       ),
     [hidden, remember],
   );
 
   const showAll = useCallback(() => remember(NOTHING_HIDDEN), [remember]);
 
-  const isHidden = useCallback(
-    (kind: string) => hidden.includes(kind),
-    [hidden],
-  );
+  const isHidden = useCallback((kind: string) => hidden.includes(kind), [hidden]);
 
   return { hidden, isHidden, toggle, showAll };
 }

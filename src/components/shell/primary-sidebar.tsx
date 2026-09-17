@@ -1,15 +1,21 @@
 "use client";
 
+import { ChevronUp } from "lucide-react";
+
 import { ACTIVITY_AREA, EXTENSIONS_AREA } from "@/components/shell/areas";
 import { PanelFooter, PanelSurface } from "@/components/shell/panel";
 import { SourceList } from "@/components/shell/source-list";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { MountedArea } from "@/lib/extension-host/areas";
 import type { Badges } from "@/lib/extension-host/badges";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import type { NativeMenuEntry } from "@/lib/native-menu";
 import { cn } from "@/lib/utils";
 
 /**
@@ -40,6 +46,7 @@ import { cn } from "@/lib/utils";
  */
 export function PrimarySidebar({
   sections,
+  hiddenAreas,
   badges,
   updates,
   unseen,
@@ -47,6 +54,8 @@ export function PrimarySidebar({
   rail,
   onSelectArea,
   onArrange,
+  onHide,
+  onShow,
 }: {
   /**
    * The sections this project has, which is what its extensions brought. An
@@ -59,6 +68,15 @@ export function PrimarySidebar({
    * column knows about a section, and nothing else it needs.
    */
   sections: readonly MountedArea[];
+  /**
+   * Sections this person put away, kept here rather than dropped so the
+   * disclosure row at the foot of the list can name them and offer them back.
+   *
+   * Empty is the ordinary state — nothing is hidden — and the row is absent
+   * rather than labelled, so the column reads the same as it did before
+   * hiding was a thing it could do.
+   */
+  hiddenAreas: readonly MountedArea[];
   /**
    * How much of what a section holds is worth a look, by area key.
    *
@@ -110,6 +128,10 @@ export function PrimarySidebar({
    * in it and never moves — it is not a section of the project.
    */
   onArrange: (keys: readonly string[]) => void;
+  /** Put a section away from the sidebar, by area key. */
+  onHide: (key: string) => void;
+  /** Bring a section back to the sidebar, by area key. */
+  onShow: (key: string) => void;
 }) {
   const isActive = activeAreaKey === EXTENSIONS_AREA.id;
 
@@ -155,6 +177,7 @@ export function PrimarySidebar({
             label: area.label,
             icon: area.icon,
             badge: badges.get(area.key),
+            menu: hideMenuFor(area, onHide),
           })),
         ]}
         activeId={activeAreaKey ?? ""}
@@ -162,6 +185,21 @@ export function PrimarySidebar({
         onSelect={onSelectArea}
         onReorder={onArrange}
       />
+
+      {/* The quiet line that says something is hidden and offers it back. It
+          exists only while there is something to offer — the column is exactly
+          as it was before hiding was a thing it could do when there is not —
+          and it sits between the list and the pinned row rather than inside
+          either: the list is the places a person works and the pinned row is
+          the window's own, and this is neither.
+
+          A popover rather than an expansion, so the list above does not shift:
+          the rows keep their places, the popover floats over them, and a
+          person who put three sections away and wants one back does not find
+          the other two have moved under their pointer. */}
+      {hiddenAreas.length > 0 ? (
+        <HiddenSectionsDisclosure areas={hiddenAreas} rail={rail} onShow={onShow} />
+      ) : null}
 
       {/* The band is the one the navigator's bottom bar sits in, so the two
           line up across the slab. What is in it is therefore shorter than a
@@ -259,9 +297,93 @@ function ExtensionsRow({
 function spokenUpdates(updates: number): string {
   return updates === 1 ? "an update is available" : "updates are available";
 }
-
 function spoken(news: string | null): string {
-  return news === null
-    ? EXTENSIONS_AREA.label
-    : `${EXTENSIONS_AREA.label} — ${news}`;
+  return news === null ? EXTENSIONS_AREA.label : `${EXTENSIONS_AREA.label} — ${news}`;
+}
+
+/**
+ * What the secondary button offers over a section row.
+ *
+ * One command — *Hide* — and it names the section under the pointer, which is
+ * the one place in the window where the label is the thing being acted on
+ * rather than a word the header already said. The same shape [`SourceTree`]
+ * gives its own rows, because a secondary click means one thing in this window
+ * whichever control drew it.
+ */
+function hideMenuFor(
+  area: MountedArea,
+  onHide: (key: string) => void,
+): () => readonly NativeMenuEntry[] {
+  return () => [{ label: `Hide ${area.label}`, onSelect: () => onHide(area.key) }];
+}
+
+/**
+ * The quiet line between the list and the pinned row, and the popover that
+ * floats over the list when it is pressed.
+ *
+ * It is the one piece of furniture this column carries besides the pinned row,
+ * and it is held to the same visual tier: tertiary text, no icon, no surface
+ * fill — weight and colour alone, the half of the selection rule that survives
+ * greyscale. A person who has never hidden anything never sees it, and a
+ * person who has is told it is there without being stopped by it.
+ *
+ * The popover opens upward, because the row is at the foot of the list and the
+ * space above is where the hidden sections can be listed without running past
+ * the bottom edge. It closes after each restore: restoring is a one-at-a-time
+ * gesture, and a menu that stayed open after the last section it listed was
+ * taken would be a menu pointing at a trigger that had just vanished.
+ */
+function HiddenSectionsDisclosure({
+  areas,
+  rail,
+  onShow,
+}: {
+  areas: readonly MountedArea[];
+  rail?: boolean;
+  onShow: (key: string) => void;
+}) {
+  const trigger = (
+    <button
+      type="button"
+      aria-label={rail ? `${areas.length} hidden` : undefined}
+      className={cn(
+        "flex h-(--control-height) min-w-0 items-center gap-1.5 rounded-(--radius-control) text-left text-xs text-fg-tertiary transition-colors duration-(--motion-duration-fast) ease-shell hover:text-fg-secondary",
+        rail ? "justify-center px-0 w-full" : "px-4",
+      )}
+    >
+      {rail ? (
+        <ChevronUp className="size-3" />
+      ) : (
+        <>
+          <span>{areas.length} hidden</span>
+          <ChevronUp className="size-3 shrink-0" />
+        </>
+      )}
+    </button>
+  );
+
+  return (
+    <DropdownMenu>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="right">
+          {areas.length === 1 ? "1 hidden section" : `${areas.length} hidden sections`}
+        </TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent side="top" align="start" className="w-52">
+        <DropdownMenuLabel>Hidden</DropdownMenuLabel>
+        {areas.map((area) => {
+          const Icon = area.icon;
+          return (
+            <DropdownMenuItem key={area.key} onSelect={() => onShow(area.key)} className="gap-2">
+              <Icon aria-hidden className="size-4 text-fg-tertiary" />
+              <span className="truncate">{area.label}</span>
+            </DropdownMenuItem>
+          );
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 }

@@ -281,6 +281,15 @@ pub struct ProjectView {
     /// missing from the list still appears.
     #[serde(default)]
     pub sections: Vec<String>,
+    /// Sections this person put away from the sidebar, by area key.
+    ///
+    /// The exceptions, not the selection, the way `hidden_types` is: a section
+    /// installed since is one nobody has hidden, and a stored selection would
+    /// silently keep it out of the column. The window resolves this against
+    /// what it actually mounted, so a key for a section that failed to run or
+    /// was uninstalled costs nothing.
+    #[serde(default)]
+    pub hidden_sections: Vec<String>,
     /// The revision this person has already seen the changes up to.
     ///
     /// Whose eyes have been on what is a fact about a person at a desk, never
@@ -350,6 +359,8 @@ pub struct ProjectViewChange {
     #[serde(default)]
     pub sections: Option<Vec<String>>,
     #[serde(default)]
+    pub hidden_sections: Option<Vec<String>>,
+    #[serde(default)]
     pub seen_revision: Option<String>,
     #[serde(default)]
     pub unwatched_kinds: Option<Vec<String>>,
@@ -398,6 +409,9 @@ fn apply(stored: &mut ProjectView, change: ProjectViewChange) {
     }
     if let Some(sections) = change.sections {
         stored.sections = sections;
+    }
+    if let Some(hidden_sections) = change.hidden_sections {
+        stored.hidden_sections = hidden_sections;
     }
     if let Some(seen_revision) = change.seen_revision {
         stored.seen_revision = Some(seen_revision);
@@ -815,6 +829,7 @@ mod tests {
         ProjectView {
             hidden_types: hidden.iter().map(|entry| (*entry).to_owned()).collect(),
             sections: sections.iter().map(|entry| (*entry).to_owned()).collect(),
+            hidden_sections: Vec::new(),
             ..ProjectView::default()
         }
     }
@@ -1043,5 +1058,63 @@ mod tests {
             .expect("a stored view should serialize");
         assert_eq!(stored["hiddenTypes"][0], "artifact");
         assert_eq!(stored["sections"][0], "records/records");
+    }
+
+    /// Hiding a section is the same kind of decision as hiding a type, over a
+    /// third field of the same file: it does not touch the arrangement, and the
+    /// arrangement does not touch it.
+    #[test]
+    fn hidden_sections_leave_the_arrangement_alone() {
+        let mut stored = view(&["artifact"], &["records/records", "chat/chat"]);
+
+        apply(
+            &mut stored,
+            ProjectViewChange {
+                hidden_sections: Some(vec!["chat/chat".to_owned()]),
+                ..ProjectViewChange::default()
+            },
+        );
+
+        assert_eq!(stored.hidden_sections, vec!["chat/chat".to_owned()]);
+        assert_eq!(
+            stored.sections,
+            vec!["records/records".to_owned(), "chat/chat".to_owned()],
+            "hiding a section must not remove it from the arrangement"
+        );
+
+        apply(
+            &mut stored,
+            ProjectViewChange {
+                sections: Some(vec!["chat/chat".to_owned(), "records/records".to_owned()]),
+                ..ProjectViewChange::default()
+            },
+        );
+
+        assert_eq!(
+            stored.hidden_sections,
+            vec!["chat/chat".to_owned()],
+            "and rearranging must not un-hide a section"
+        );
+    }
+
+    /// The field crosses the boundary under the name the window sends, which is
+    /// the failure this file has already paid for once: a spelling one side does
+    /// not recognise arrives as a default and says nothing about it.
+    #[test]
+    fn hidden_sections_are_spelled_the_same_on_both_sides() {
+        let change: ProjectViewChange = serde_json::from_value(serde_json::json!({
+            "hiddenSections": ["chat/chat"]
+        }))
+        .expect("the window's own payload should deserialize");
+        assert_eq!(change.hidden_sections, Some(vec!["chat/chat".to_owned()]));
+
+        let mut stored = view(&["artifact"], &["records/records"]);
+        apply(&mut stored, change);
+        let written = serde_json::to_value(&stored).expect("a stored view should serialize");
+        assert_eq!(written["hiddenSections"][0], "chat/chat");
+
+        let read: ProjectView =
+            serde_json::from_value(written).expect("what was written should read back");
+        assert_eq!(read.hidden_sections, stored.hidden_sections);
     }
 }
