@@ -269,7 +269,7 @@ function IconButton({
             event.stopPropagation();
             onClick();
           }}
-          className="flex size-6 items-center justify-center rounded-(--radius-control) text-fg-tertiary transition-colors duration-(--motion-duration-fast) ease-shell hover:bg-accent hover:text-fg"
+          className="flex size-6 items-center justify-center rounded-(--radius-control) text-fg-tertiary transition-colors duration-(--motion-duration-fast) ease-shell hover:text-fg"
         >
           {children}
         </button>

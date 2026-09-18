@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, ChevronRight, FilePlus2, FolderPlus, Store } from "lucide-react";
+import { Check, ChevronRight, FilePlus2, FolderPlus, Search, Store } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
@@ -23,16 +23,9 @@ import {
 import { Button } from "@/components/ui/button";
 import type { Manifest } from "@/lib/extension-host/client";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { useCompositionContext } from "@/lib/composition";
-import type {
-  ListedExtension,
-  RegistryArtefact,
-} from "@/lib/extension-host/client";
-import {
-  changelogOf,
-  useLedger,
-  type AvailableUpdate,
-} from "@/lib/extension-host/updates";
+import { useCompositionContext, type InstallProgress } from "@/lib/composition";
+import type { ListedExtension, RegistryArtefact } from "@/lib/extension-host/client";
+import { changelogOf, useLedger, type AvailableUpdate } from "@/lib/extension-host/updates";
 import type { CatalogueEntry } from "@/lib/extension-host/catalogue";
 import type { Marketplace } from "@/lib/extension-host/marketplace";
 import type { Outcome } from "@/components/shell/extension-packages";
@@ -84,18 +77,7 @@ export function ExtensionNavigator({
     <PanelSurface className="bg-panel">
       <PanelHeader title="Marketplace" />
       <ScrollArea className="min-h-0 flex-1">
-        <div className="flex flex-col gap-3 px-2 pt-2 pb-3">
-          {/* First and ungrouped, for the reason `All Inboxes` is in Mail: it
-              is not one of the things the groups below are counting, it is
-              everything they are counted out of. On a project that has
-              installed nothing it is the only row there is — which is the
-              right first screen rather than an empty column apologising for
-              itself.
-
-              It is named for what it shows rather than for the section it is
-              in. The section is called Marketplace, in the sidebar and in the
-              header above this, and a row repeating that would be the same word
-              three times down one column. */}
+        <div className="flex flex-col gap-4 px-2 pt-2 pb-3">
           <div className="flex flex-col gap-0.5">
             <Row
               label="Everything"
@@ -106,16 +88,12 @@ export function ExtensionNavigator({
           </div>
 
           {adding.failure === null ? null : (
-            <p className="px-2 font-mono text-xs leading-4 text-danger">
-              {adding.failure}
-            </p>
+            <p className="px-2 font-mono text-xs leading-4 text-danger">{adding.failure}</p>
           )}
 
-          {/* A group with nothing in it is not drawn: an empty heading names a
-              state instead of showing one. */}
           {installed.length === 0 ? null : (
             <section className="flex flex-col gap-0.5">
-              <h3 className="px-2 pb-0.5 text-xs font-semibold text-fg-tertiary">
+              <h3 className="px-2 pb-1 text-[11px] font-medium tracking-wide text-fg-tertiary uppercase">
                 Installed
               </h3>
 
@@ -126,10 +104,6 @@ export function ExtensionNavigator({
                   icon={entry.packaged?.manifest.icon}
                   trailing={entry.version}
                   isActive={entry.id === selectedId}
-                  // Still a row and still opens: what is unavailable is the
-                  // extension's sections, not the page about it, and the page
-                  // is where the reason is written out. Dropping it from the
-                  // list would take away the one place it can be read.
                   dimmed={entry.unavailable !== null}
                   onSelect={() => onSelect(entry.id)}
                 />
@@ -208,23 +182,21 @@ function Row({
       aria-current={isActive ? "true" : undefined}
       onClick={onSelect}
       className={cn(
-        "flex h-(--control-height-lg) w-full items-center gap-2.5 rounded-(--radius-control) px-2 text-left text-base text-fg-secondary transition-colors duration-(--motion-duration-fast) ease-shell hover:bg-hover hover:text-fg data-[active=true]:bg-selected data-[active=true]:font-medium data-[active=true]:text-fg",
+        "flex h-(--control-height-lg) w-full items-center gap-2.5 rounded-(--radius-control) px-2.5 text-left text-sm text-fg-secondary transition-colors duration-(--motion-duration-fast) ease-shell hover:bg-hover hover:text-fg data-[active=true]:bg-selected data-[active=true]:text-fg",
         dimmed && "text-fg-tertiary",
       )}
     >
       {Glyph === null ? (
         <KindGlyph
           icon={icon as string | null | undefined}
-          className="size-4 shrink-0 opacity-80"
+          className="size-4 shrink-0 text-fg-tertiary"
         />
       ) : (
-        <Glyph aria-hidden="true" className="size-4 shrink-0 opacity-80" />
+        <Glyph aria-hidden="true" className="size-4 shrink-0 text-fg-tertiary" />
       )}
-      <span className="truncate">{label}</span>
+      <span className={cn("truncate", isActive && "font-medium")}>{label}</span>
       {trailing === undefined ? null : (
-        <span className="ml-auto shrink-0 font-mono text-xs font-normal text-fg-tertiary">
-          {trailing}
-        </span>
+        <span className="ml-auto shrink-0 font-mono text-xs text-fg-tertiary">{trailing}</span>
       )}
     </button>
   );
@@ -277,68 +249,158 @@ export function ExtensionMarketplace({
   // no state where the field has been typed into and the list has not caught
   // up.
   const [asked, setAsked] = useState("");
-  const shown = useMemo(() => matching(entries, asked), [entries, asked]);
+  const matched = useMemo(() => matching(entries, asked), [entries, asked]);
+
+  // The categories the entries on this page carry, in the order they first
+  // appear. `null` — a package not in the registry, or one whose author did not
+  // set one — is shown under *Other* and sorted last.
+  const categories = useMemo(() => categoriesOf(matched), [matched]);
+  const [chosenCategory, setChosenCategory] = useState<string | null | "all">("all");
+  const grouped = useMemo(() => groupByCategory(matched, categories), [matched, categories]);
 
   return (
     <section className="flex h-full min-w-0 flex-col bg-workspace">
-      {/* The header names what the column is showing and carries the one
-          control that acts on it. A search field belongs here rather than in
-          the title bar for the reason the window's own search does not: this
-          one searches the marketplace, and a field in the band above every
-          column would claim to search the project. */}
-      <div className="flex h-(--panel-header-height) shrink-0 items-center gap-3 border-b border-separator px-3">
-        <h2 className="min-w-0 shrink-0 truncate text-sm font-semibold text-fg">
-          Everything
-        </h2>
-        <input
-          type="search"
-          value={asked}
-          onChange={(event) => setAsked(event.target.value)}
-          placeholder="Search extensions"
-          aria-label="Search extensions"
-          className="h-(--control-height-sm) min-w-0 flex-1 rounded-(--radius-control) border border-separator bg-raised px-2 text-sm text-fg placeholder:text-fg-tertiary"
-        />
+      {/* The header carries the search field — the one control that acts on
+          the whole page. A magnifying glass beside the field is the macOS
+          convention: System Settings, Mail and App Store all do it, and the
+          field reads as *search* before the placeholder is read. */}
+      <div className="flex h-(--panel-header-height) shrink-0 items-center gap-2 border-b border-separator px-3">
+        <div className="relative min-w-0 flex-1">
+          <Search
+            aria-hidden="true"
+            className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-fg-tertiary"
+          />
+          <input
+            type="search"
+            value={asked}
+            onChange={(event) => setAsked(event.target.value)}
+            placeholder="Search"
+            aria-label="Search extensions"
+            className="h-(--control-height-sm) w-full rounded-(--radius-control) bg-workspace pl-8 pr-2 text-sm text-fg transition-shadow duration-(--motion-duration-fast) ease-shell placeholder:text-fg-tertiary focus:outline-none focus:ring-2 focus:ring-separator-strong"
+          />
+        </div>
       </div>
 
+      {/* The pills narrow the grid to one category, or show all of them
+          grouped. macOS toolbar pills: borderless when idle, a quiet fill when
+          selected — the selection is a surface, not an outline. */}
+      {categories.length <= 1 ? null : (
+        <div className="flex shrink-0 items-center gap-1 border-b border-separator px-3 py-1.5">
+          <CategoryChip
+            label="All"
+            isActive={chosenCategory === "all"}
+            onSelect={() => setChosenCategory("all")}
+          />
+          {categories.map((category) => (
+            <CategoryChip
+              key={category ?? "__other"}
+              label={category ?? "Other"}
+              isActive={chosenCategory === category}
+              onSelect={() => setChosenCategory(category)}
+            />
+          ))}
+        </div>
+      )}
+
       <ScrollArea className="min-h-0 flex-1">
-        <div className="flex flex-col gap-4 p-4">
+        <div className="flex flex-col gap-5 p-4">
           <MarketplaceSource marketplace={marketplace} />
 
           {entries.length === 0 ? (
             <p className="max-w-[68ch] text-sm leading-5 text-fg-tertiary">
-              Nothing is unpacked, this project declares nothing, and the
-              registry lists nothing. That is a real project and not a broken
-              one: a window with no sections is what Sync is before anybody has
-              said what it should hold.
+              Nothing is unpacked, this project declares nothing, and the registry lists nothing.
+              That is a real project and not a broken one: a window with no sections is what Sync is
+              before anybody has said what it should hold.
             </p>
-          ) : shown.length === 0 ? (
-            // The one absence worth a sentence of its own, because it is the
-            // one a person caused: they typed something, and it matched none of
-            // a list they can see the size of.
+          ) : matched.length === 0 ? (
             <p className="max-w-[68ch] text-sm leading-5 text-fg-tertiary">
-              Nothing here matches “{asked}”. {entries.length} extensions are
-              listed.
+              Nothing here matches “{asked}”. {entries.length} extensions are listed.
             </p>
           ) : (
-            <ul className="grid grid-cols-[repeat(auto-fill,minmax(19rem,1fr))] gap-2">
-              {shown.map((entry) => (
-                <MarketplaceCard
-                  key={entry.id}
-                  entry={entry}
-                  update={updates.get(entry.id) ?? null}
-                  outcome={
-                    entry.packaged === null
-                      ? null
-                      : (outcomes[entry.id] ?? null)
-                  }
-                  onOpen={() => onOpen(entry.id)}
-                />
+            <div className="flex flex-col gap-6">
+              {(chosenCategory === "all"
+                ? grouped
+                : grouped.filter((group) => group.category === chosenCategory)
+              ).map((group) => (
+                <div key={group.category ?? "__other"} className="flex flex-col gap-2.5">
+                  <div className="flex items-baseline gap-2">
+                    <h3 className="text-sm font-medium text-fg-secondary">
+                      {group.category ?? "Other"}
+                    </h3>
+                    <span className="text-xs text-fg-tertiary">{group.entries.length}</span>
+                  </div>
+                  <ul className="grid grid-cols-[repeat(auto-fill,minmax(20rem,1fr))] gap-2.5">
+                    {group.entries.map((entry) => (
+                      <MarketplaceCard
+                        key={entry.id}
+                        entry={entry}
+                        update={updates.get(entry.id) ?? null}
+                        outcome={entry.packaged === null ? null : (outcomes[entry.id] ?? null)}
+                        onOpen={() => onOpen(entry.id)}
+                      />
+                    ))}
+                  </ul>
+                </div>
               ))}
-            </ul>
+            </div>
           )}
         </div>
       </ScrollArea>
     </section>
+  );
+}
+
+/**
+ * The categories on a page, in the order they first appear.
+ *
+ * `null` — the category of a package not in the registry — is kept and sorted
+ * last, so *Other* sits at the foot of the list rather than disappearing.
+ */
+function categoriesOf(entries: readonly CatalogueEntry[]): readonly (string | null)[] {
+  const seen: (string | null)[] = [];
+  for (const entry of entries) {
+    if (!seen.includes(entry.category)) seen.push(entry.category);
+  }
+  return seen.sort((one, two) => {
+    if (one === null) return 1;
+    if (two === null) return -1;
+    return one.localeCompare(two);
+  });
+}
+
+/** Entries grouped by category, in the order [`categoriesOf`] returned. */
+function groupByCategory(
+  entries: readonly CatalogueEntry[],
+  categories: readonly (string | null)[],
+): readonly { readonly category: string | null; readonly entries: readonly CatalogueEntry[] }[] {
+  return categories.map((category) => ({
+    category,
+    entries: entries.filter((entry) => entry.category === category),
+  }));
+}
+
+function CategoryChip({
+  label,
+  isActive,
+  onSelect,
+}: {
+  label: string;
+  isActive: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={cn(
+        "flex h-(--control-height-sm) items-center rounded-(--radius-control) px-2.5 text-xs transition-colors duration-(--motion-duration-fast) ease-shell",
+        isActive
+          ? "bg-selected font-medium text-fg"
+          : "text-fg-secondary hover:bg-hover hover:text-fg",
+      )}
+    >
+      {label}
+    </button>
   );
 }
 
@@ -355,10 +417,7 @@ export function ExtensionMarketplace({
  * widens. Nothing is ranked: this is a filter over a list of a dozen, and a
  * relevance order over a dozen cards would be a claim nobody can check.
  */
-function matching(
-  entries: readonly CatalogueEntry[],
-  asked: string,
-): readonly CatalogueEntry[] {
+function matching(entries: readonly CatalogueEntry[], asked: string): readonly CatalogueEntry[] {
   const words = asked.toLowerCase().split(/\s+/).filter(Boolean);
   if (words.length === 0) return entries;
 
@@ -367,9 +426,8 @@ function matching(
       entry.id,
       entry.name,
       entry.packaged?.manifest.summary ?? entry.listed?.summary ?? "",
-      ...(entry.packaged?.types.map((type) => type.kind) ??
-        entry.listed?.publishes ??
-        []),
+      entry.category ?? "",
+      ...(entry.packaged?.types.map((type) => type.kind) ?? entry.listed?.publishes ?? []),
     ]
       .join(" ")
       .toLowerCase();
@@ -380,35 +438,26 @@ function matching(
 /**
  * Where this list came from, said only when it is not the obvious answer.
  *
- * Silence is the state for a registry that answered: what is on screen is what
- * exists, and a line saying so would be the page congratulating itself. What is
- * worth saying is the two states that are not that — a list that is a day old
- * because there was no network, and no list at all — and in both the control to
- * ask again is beside the sentence, because that is the one thing a person can
- * do about either.
+ * Silence is the state for a registry that answered — whether fresh or from
+ * cache. What is on screen is what exists, and a line saying so would be the
+ * page congratulating itself. What is worth saying is the one state that is
+ * not that — no list at all — and there the control to ask again is beside
+ * the sentence, because that is the one thing a person can do about it.
  */
 function MarketplaceSource({ marketplace }: { marketplace: Marketplace }) {
-  const { cached, failure, isLoading, reload } = marketplace;
+  const { failure, isLoading, reload } = marketplace;
 
   if (isLoading) {
-    return (
-      <p className="text-sm leading-5 text-fg-tertiary">
-        Reading what extensions there are…
-      </p>
-    );
+    return <p className="text-sm leading-5 text-fg-tertiary">Reading what extensions there are…</p>;
   }
 
   if (failure !== null) {
     return (
       <div className="flex max-w-[68ch] flex-col items-start gap-2">
         <p className="text-sm leading-5 text-fg-secondary">
-          The registry could not be reached and nothing was cached, so this is
-          only what is already on this machine.
+          The registry could not be reached and nothing was cached, so this is only what is already
+          on this machine.
         </p>
-        {/* On its own line rather than inside the sentence: what comes back is
-            the network's own words, and they begin lower case and end where
-            they end. Splicing them into a sentence produces a full stop
-            followed by a small letter, every time. */}
         <p className="text-sm leading-5 text-fg-tertiary">{failure}</p>
         <Button size="sm" variant="secondary" onClick={reload}>
           Try again
@@ -417,27 +466,7 @@ function MarketplaceSource({ marketplace }: { marketplace: Marketplace }) {
     );
   }
 
-  if (cached) {
-    return (
-      <div className="flex max-w-[68ch] flex-col items-start gap-2">
-        <p className="text-sm leading-5 text-fg-secondary">
-          These are the extensions there were when this machine last reached the
-          registry.
-        </p>
-        <Button size="sm" variant="secondary" onClick={reload}>
-          Check again
-        </Button>
-      </div>
-    );
-  }
-
-  return (
-    <p className="max-w-[68ch] text-sm leading-5 text-fg-secondary">
-      Everything this project can do arrives as a package. One gets here from
-      the registry, or from a file or a folder — both are at the foot of the
-      list beside this.
-    </p>
-  );
+  return null;
 }
 
 function MarketplaceCard({
@@ -459,39 +488,34 @@ function MarketplaceCard({
         type="button"
         onClick={onOpen}
         className={cn(
-          "flex h-full w-full flex-col gap-2 rounded-(--radius-surface) border border-separator bg-panel/60 p-3 text-left transition-colors duration-(--motion-duration-fast) ease-shell hover:bg-panel",
+          "flex h-full w-full flex-col gap-3 rounded-(--radius-surface) bg-panel p-4 text-left transition-colors duration-(--motion-duration-fast) ease-shell hover:bg-hover",
           // Held back rather than crossed out. The card still opens, because
           // the page behind it is where the reason is written and where the
           // package can still be installed for the machines that do run it.
           entry.unavailable === null ? null : "opacity-60",
         )}
       >
-        <div className="flex items-start gap-2">
+        <div className="flex items-start gap-3">
+          {/* A larger mark than a row carries — a card is a thing somebody is
+              deciding about, and the icon is how it is recognised. macOS App
+              Store uses 48–60 pt icons; this is the same ratio at the density
+              the window works at. */}
           <span
             aria-hidden="true"
-            className="flex size-7 shrink-0 items-center justify-center rounded-(--radius-control) bg-hover text-fg-secondary"
+            className="flex size-9 shrink-0 items-center justify-center rounded-(--radius-control) bg-hover text-fg-secondary"
           >
-            <KindGlyph icon={packaged?.manifest.icon ?? entry.listed?.icon} className="size-4" />
+            <KindGlyph icon={packaged?.manifest.icon ?? entry.listed?.icon} className="size-5" />
           </span>
           <div className="min-w-0 flex-1">
-            <p className="flex items-baseline justify-between gap-2">
-              <span className="truncate text-base font-medium text-fg">
-                {entry.name}
-              </span>
-              <span className="shrink-0 font-mono text-xs text-fg-tertiary">
-                {entry.version}
-              </span>
-            </p>
-            <Standing entry={entry} update={update} />
+            <p className="truncate text-base font-medium text-fg">{entry.name}</p>
+            <div className="flex items-baseline justify-between gap-2">
+              <Standing entry={entry} update={update} />
+              <span className="shrink-0 font-mono text-xs text-fg-tertiary">{entry.version}</span>
+            </div>
           </div>
         </div>
 
-        {/* A package describes itself better than an index entry does — it is
-            the manifest rather than a summary of one — so where both exist the
-            package's words are the ones shown. The sentence at the end is for
-            the one entry neither answered for: a dependency this project
-            declared and nothing on this machine or in the registry has. */}
-        <p className="text-xs leading-4 text-fg-tertiary">
+        <p className="text-sm leading-5 text-fg-secondary">
           {packaged?.manifest.summary ||
             entry.listed?.summary ||
             "This project depends on it, and nothing answers to the name."}
@@ -499,26 +523,14 @@ function MarketplaceCard({
 
         {packaged === null ? null : <PackageTags extension={packaged} />}
 
-        {/* Three different things it could say, and only ever one of them. The
-            first is true of the package whether or not anybody ran it; the
-            second is true of this machine and says nothing about the package,
-            which is why it is not in the danger tier; the third is what
-            happened when somebody ran it. The second comes before the third
-            because on a phone the activation was refused for exactly this
-            reason, and printing both would be the same sentence twice, once in
-            red. */}
         {entry.unrunnable !== null ? (
           <p className="text-xs leading-4 text-danger">{entry.unrunnable}</p>
         ) : entry.unavailable !== null ? (
-          <p className="text-xs leading-4 text-fg-secondary">
-            {entry.unavailable}
-          </p>
+          <p className="text-xs leading-4 text-fg-secondary">{entry.unavailable}</p>
         ) : outcome !== null && outcome !== "" ? (
           <p className="font-mono text-xs leading-4 text-danger">{outcome}</p>
         ) : packaged !== null && outcome === "" ? (
-          <p className="text-xs leading-4 text-fg-tertiary">
-            {describePackage(packaged)}
-          </p>
+          <p className="text-xs leading-4 text-fg-tertiary">{describePackage(packaged)}</p>
         ) : null}
       </button>
     </li>
@@ -533,9 +545,26 @@ export interface ClockControl {
   readonly onChange: (on: boolean) => void;
 }
 
+/**
+ * One extension another requires, and whether this project has it.
+ *
+ * Said on the page before the install button, because what a person is agreeing
+ * to includes what else comes with it. `installed` is whether this project
+ * declares it — the same question the runtime check asks — so a dependency that
+ * is unpacked on this machine but not declared shows as missing, which is
+ * correct.
+ */
+export interface Dependency {
+  readonly id: string;
+  readonly name: string;
+  readonly installed: boolean;
+}
+
 export function ExtensionPage({
   entry,
   update,
+  dependencies,
+  installProgress,
   onInstall,
   onChange,
   onRemove,
@@ -547,6 +576,13 @@ export function ExtensionPage({
   entry: CatalogueEntry;
   /** A version the registry lists that this project is not on, or `null`. */
   update: AvailableUpdate | null;
+  /**
+   * What this extension requires, with whether each is declared. Empty when it
+   * requires nothing — which is the ordinary case and draws no section.
+   */
+  dependencies: readonly Dependency[];
+  /** Where the install plan is, or `null` when nothing is installing. */
+  installProgress: InstallProgress | null;
   onInstall: () => void;
   /** Move to another published version. The same command in both directions. */
   onChange: (artefact: RegistryArtefact) => void;
@@ -580,8 +616,7 @@ export function ExtensionPage({
   // capabilities, both of which the index carries, so a card says *needs a
   // newer Sync* about a package nobody has downloaded rather than spending
   // somebody's network to tell them no.
-  const canInstall =
-    (packaged !== null || entry.listed !== null) && entry.unrunnable === null;
+  const canInstall = (packaged !== null || entry.listed !== null) && entry.unrunnable === null;
   // What it would publish, and the whole of it or nothing. A package on this
   // machine carries its type definitions; the index carries only their names,
   // and a name is not a definition — so a registry entry says which kinds are
@@ -591,22 +626,17 @@ export function ExtensionPage({
   // to. Read here rather than twice in the markup: `occasionsOf` composes a
   // sentence, and composing it once to count it and again to draw it is how the
   // two come to disagree.
-  const occasions =
-    packaged === null ? [] : occasionsOf(packaged.manifest, clock?.isOn ?? true);
+  const occasions = packaged === null ? [] : occasionsOf(packaged.manifest, clock?.isOn ?? true);
   // What it does outside this window, and the hosts it named. Both come off the
   // package rather than off the index here, so the sentence and the list are
   // the same package's own words.
-  const reach =
-    packaged === null ? null : reachOf(packaged.manifest.capabilities);
-  const firstClockKey =
-    occasions.find((occasion) => occasion.isClock)?.key ?? null;
+  const reach = packaged === null ? null : reachOf(packaged.manifest.capabilities);
+  const firstClockKey = occasions.find((occasion) => occasion.isClock)?.key ?? null;
 
   return (
     <section className="flex h-full min-w-0 flex-col bg-workspace">
       <div className="flex h-(--panel-header-height) shrink-0 items-center justify-between gap-3 border-b border-separator px-3">
-        <h2 className="min-w-0 truncate text-sm font-semibold text-fg">
-          {entry.name}
-        </h2>
+        <h2 className="min-w-0 truncate text-sm font-semibold text-fg">{entry.name}</h2>
         {/* The one command a panel header may carry: the one that writes into
             the thing the header names. Installing an extension is a change to
             what this project is, which is exactly what the page is about. */}
@@ -619,9 +649,11 @@ export function ExtensionPage({
             disabled={isBusy || (!entry.declared && !canInstall)}
           >
             {isBusy
-              ? entry.declared
-                ? "Removing…"
-                : "Installing…"
+              ? installProgress !== null
+                ? `Installing ${installProgress.label}…`
+                : entry.declared
+                  ? "Removing…"
+                  : "Installing…"
               : entry.declared
                 ? "Remove"
                 : "Install"}
@@ -633,48 +665,62 @@ export function ExtensionPage({
           that did not happen, which is news and not a question, and it is
           dismissed by hand so that it cannot vanish before it was read. */}
       {failure === null ? null : (
-        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-separator bg-panel px-3 py-2">
-          <p className="min-w-0 font-mono text-xs leading-4 text-danger">
-            {failure}
-          </p>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="shrink-0"
-            onClick={onDismissFailure}
-          >
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-separator bg-panel px-3 py-2.5">
+          <p className="min-w-0 font-mono text-xs leading-4 text-danger">{failure}</p>
+          <Button variant="ghost" size="sm" className="shrink-0" onClick={onDismissFailure}>
             Dismiss
           </Button>
         </div>
       )}
 
+      {/* Where the install plan is, while it is running. A strip rather than a
+          sheet, for the same reason the failure above is: it is news, not a
+          question, and it leaves when the plan is done. The bar says which step
+          is running and what it is called, so a three-dependency install is
+          three steps the person can see rather than one spinner that could be
+          anything. The track is a hair rather than a channel — the bar fills
+          colour, not a trough. */}
+      {installProgress === null ? null : (
+        <div className="flex shrink-0 flex-col gap-2 border-b border-separator bg-panel px-3 py-3">
+          <div className="flex items-center justify-between gap-3">
+            <p className="min-w-0 truncate text-xs font-medium text-fg">
+              Installing {installProgress.label}
+            </p>
+            <span className="shrink-0 font-mono text-xs text-fg-tertiary">
+              {installProgress.current} of {installProgress.total}
+            </span>
+          </div>
+          <div className="h-1.5 overflow-hidden rounded-full bg-hover">
+            <div
+              className="h-full rounded-full bg-fg transition-all duration-(--motion-duration) ease-shell"
+              style={{
+                width: `${(installProgress.current / installProgress.total) * 100}%`,
+              }}
+            />
+          </div>
+        </div>
+      )}
+
       <ScrollArea className="min-h-0 flex-1">
-        <div className="flex max-w-[76ch] flex-col gap-5 p-4">
+        <div className="flex max-w-[72ch] flex-col gap-6 p-5">
           {/* The name again, two centimetres under the header that already
               carries it — and worth it: the page scrolls, and somebody who has
               read to the bottom has lost the header. The version belongs here
               rather than in the sentence, because it is a fact about the
               package and not part of what the thing is. */}
-          <div className="flex items-start gap-3">
+          <div className="flex items-start gap-3.5">
             <span
               aria-hidden="true"
-              className="flex size-8 shrink-0 items-center justify-center rounded-(--radius-control) bg-hover text-fg-secondary"
+              className="flex size-11 shrink-0 items-center justify-center rounded-(--radius-surface) bg-hover text-fg-secondary"
             >
-              <KindGlyph
-                icon={packaged?.manifest.icon ?? entry.listed?.icon}
-                className="size-4"
-              />
+              <KindGlyph icon={packaged?.manifest.icon ?? entry.listed?.icon} className="size-5" />
             </span>
             <div className="min-w-0 flex-1">
               <p className="flex items-baseline justify-between gap-3">
-                <span className="truncate text-base font-medium text-fg">
-                  {entry.name}
-                </span>
-                <span className="shrink-0 font-mono text-xs text-fg-tertiary">
-                  {entry.version}
-                </span>
+                <span className="truncate text-lg font-medium text-fg">{entry.name}</span>
+                <span className="shrink-0 font-mono text-xs text-fg-tertiary">{entry.version}</span>
               </p>
-              <p className="text-sm leading-5 text-fg-secondary">
+              <p className="mt-0.5 text-sm leading-5 text-fg-secondary">
                 {packaged?.manifest.summary ||
                   entry.listed?.summary ||
                   "This project depends on it, and nothing answers to the name."}
@@ -695,19 +741,42 @@ export function ExtensionPage({
           )}
 
           {entry.unrunnable === null ? null : (
-            <p className="rounded-(--radius-surface) border border-separator bg-panel/60 px-3 py-2 text-sm leading-5 text-danger">
+            <p className="rounded-(--radius-surface) bg-panel px-3.5 py-2.5 text-sm leading-5 text-danger">
               {entry.unrunnable}
             </p>
           )}
 
-          {/* Said in the same place and in a quieter tier, because it is not a
-              fault and nothing here is to be fixed. Every control on the page
-              stays as it was: installing this from a phone is a decision about
-              a repository, and the computer that opens it next honours it. */}
           {entry.unavailable === null ? null : (
-            <p className="rounded-(--radius-surface) border border-separator bg-panel/60 px-3 py-2 text-sm leading-5 text-fg-secondary">
+            <p className="rounded-(--radius-surface) bg-panel px-3.5 py-2.5 text-sm leading-5 text-fg-secondary">
               {entry.unavailable}
             </p>
+          )}
+
+          {/* What this extension requires, and whether each is already in this
+              project. Said before the install button, because what a person is
+              agreeing to includes what else comes with it — and the install
+              fetches and declares every missing one. */}
+          {dependencies.length === 0 ? null : (
+            <Section title="What it requires">
+              <ul className="divide-y divide-separator overflow-hidden rounded-(--radius-surface) border border-separator bg-panel">
+                {dependencies.map((dep) => (
+                  <li key={dep.id} className="flex items-center gap-2.5 px-3 py-2">
+                    <span className="min-w-0 flex-1">
+                      <span className="text-sm text-fg">{dep.name}</span>{" "}
+                      <span className="font-mono text-xs text-fg-tertiary">{dep.id}</span>
+                    </span>
+                    {dep.installed ? (
+                      <span className="shrink-0 flex items-center gap-1 text-xs text-fg-tertiary">
+                        <Check aria-hidden="true" className="size-3" />
+                        Installed
+                      </span>
+                    ) : (
+                      <span className="shrink-0 text-xs text-fg-secondary">Will be installed</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </Section>
           )}
 
           {packaged === null && entry.listed !== null ? (
@@ -719,11 +788,10 @@ export function ExtensionPage({
             <ListedElsewhere listed={entry.listed} />
           ) : packaged === null ? (
             <p className="text-sm leading-5 text-fg-secondary">
-              The project&apos;s own record names <code>{entry.id}</code> at
-              version {entry.version}. Until a package of that name is unpacked
-              here, the sections and the vocabulary it brings are simply absent —
-              nothing has been lost, and nothing about the project has been
-              changed to hide it.
+              The project&apos;s own record names <code>{entry.id}</code> at version {entry.version}
+              . Until a package of that name is unpacked here, the sections and the vocabulary it
+              brings are simply absent — nothing has been lost, and nothing about the project has
+              been changed to hide it.
             </p>
           ) : (
             <>
@@ -735,26 +803,18 @@ export function ExtensionPage({
 
               <Section title="What it adds to this window">
                 {packaged.manifest.areas.length === 0 ? (
-                  <p className="text-sm text-fg-tertiary">
-                    No section. It works through what it publishes and what it
-                    tells an agent — which is why it can have nothing to look at
-                    and still be worth installing.
+                  <p className="text-sm leading-5 text-fg-tertiary">
+                    No section. It works through what it publishes and what it tells an agent.
                   </p>
                 ) : (
-                  <ul className="flex flex-col gap-1.5">
+                  <ul className="divide-y divide-separator overflow-hidden rounded-(--radius-surface) border border-separator bg-panel">
                     {packaged.manifest.areas.map((area) => (
-                      <li
-                        key={area.id}
-                        className="flex gap-2 text-sm text-fg-secondary"
-                      >
-                        <span aria-hidden="true" className="text-fg-tertiary">
-                          —
-                        </span>
-                        <span className="min-w-0">
-                          <span className="text-fg">{area.label}</span>
-                          {area.description === ""
-                            ? null
-                            : ` — ${area.description}`}
+                      <li key={area.id} className="flex gap-2.5 px-3 py-2">
+                        <span className="min-w-0 flex-1">
+                          <span className="text-sm text-fg">{area.label}</span>
+                          {area.description === "" ? null : (
+                            <span className="text-sm text-fg-tertiary"> — {area.description}</span>
+                          )}
                         </span>
                       </li>
                     ))}
@@ -777,10 +837,7 @@ export function ExtensionPage({
                       so there is no empty case to draw. */}
                   <ul className="flex flex-col gap-1">
                     {packaged.manifest.net.hosts.map((host) => (
-                      <li
-                        key={host}
-                        className="font-mono text-xs text-fg-secondary"
-                      >
+                      <li key={host} className="font-mono text-xs text-fg-secondary">
                         {host}
                       </li>
                     ))}
@@ -797,12 +854,9 @@ export function ExtensionPage({
                       className="text-sm leading-5 text-fg-secondary"
                     >
                       It sends the secret{" "}
-                      <span className="font-mono text-xs">
-                        {sending.secret}
-                      </span>{" "}
-                      to{" "}
-                      <span className="font-mono text-xs">{sending.host}</span>,
-                      and never reads it itself.
+                      <span className="font-mono text-xs">{sending.secret}</span> to{" "}
+                      <span className="font-mono text-xs">{sending.host}</span>, and never reads it
+                      itself.
                     </p>
                   ))}
                 </Section>
@@ -826,26 +880,18 @@ export function ExtensionPage({
                   the navigator's groups already follow. */}
               {occasions.length === 0 ? null : (
                 <Section title="What it does with no screen">
-                  <ul className="flex flex-col gap-1.5">
+                  <ul className="divide-y divide-separator overflow-hidden rounded-(--radius-surface) border border-separator bg-panel">
                     {occasions.map((occasion) => (
                       <li
                         key={occasion.key}
                         className={cn(
-                          "flex items-start gap-2 text-sm",
+                          "flex items-start gap-2 px-3 py-2 text-sm",
                           occasion.isClock && clock !== null && !clock.isOn
                             ? "text-fg-tertiary"
                             : "text-fg-secondary",
                         )}
                       >
-                        <span aria-hidden="true" className="text-fg-tertiary">
-                          —
-                        </span>
                         <span className="min-w-0 flex-1">{occasion.said}</span>
-                        {/* The control sits beside the claim it governs, and on
-                            the first of the clock's rows when a package has
-                            several: it is one switch for one extension in one
-                            project, and a second copy of it further down the
-                            list would read as a second question. */}
                         {occasion.key === firstClockKey && clock !== null ? (
                           <ClockSwitch
                             isOn={clock.isOn}
@@ -878,22 +924,18 @@ export function ExtensionPage({
                   ) : (
                     // One group with hairlines between its rows, the way macOS
                     // lists settings — not a card per row. A row is not a card.
-                    <ul className="divide-y divide-separator overflow-hidden rounded-(--radius-surface) border border-separator">
+                    <ul className="divide-y divide-separator overflow-hidden rounded-(--radius-surface) border border-separator bg-panel">
                       {types.map((type) => (
-                        <li key={type.kind} className="flex gap-2.5 px-3 py-2">
+                        <li key={type.kind} className="flex gap-2.5 px-3 py-2.5">
                           <KindMark icon={type.icon} className="mt-0.5" />
                           <div className="min-w-0 flex-1">
                             <p className="flex items-baseline gap-2">
-                              <span className="text-base text-fg">
-                                {type.title}
-                              </span>
+                              <span className="text-sm text-fg">{type.title}</span>
                               <span className="truncate font-mono text-xs text-fg-tertiary">
                                 {type.kind}
                               </span>
                             </p>
-                            <p className="text-xs leading-4 text-fg-tertiary">
-                              {type.description}
-                            </p>
+                            <p className="text-xs leading-4 text-fg-tertiary">{type.description}</p>
                           </div>
                         </li>
                       ))}
@@ -907,18 +949,16 @@ export function ExtensionPage({
                 >
                   {packaged.prompt === null ? (
                     <p className="text-sm text-fg-tertiary">
-                      Nothing. An agent connected to this project reads its
-                      types like any other, and is told nothing further about
-                      how to use them.
+                      Nothing. An agent connected to this project reads its types like any other,
+                      and is told nothing further about how to use them.
                     </p>
                   ) : (
                     <div className="flex flex-col gap-1.5">
                       <p className="text-xs text-fg-tertiary">
-                        Written into the project on install, because the agent
-                        reads it through a server that has never seen this
-                        catalogue. This is the text itself:
+                        Written into the project on install, because the agent reads it through a
+                        server that has never seen this catalogue. This is the text itself:
                       </p>
-                      <pre className="max-h-80 overflow-auto rounded-(--radius-surface) border border-separator bg-panel/60 px-3 py-2 font-mono text-xs leading-4 whitespace-pre-wrap text-fg-secondary">
+                      <pre className="max-h-80 overflow-auto rounded-(--radius-control) bg-workspace px-3 py-2 font-mono text-xs leading-4 whitespace-pre-wrap text-fg-secondary">
                         {packaged.prompt}
                       </pre>
                     </div>
@@ -934,16 +974,19 @@ export function ExtensionPage({
               to act on the decision is asking them to remember where the button
               was. It is the same state and the same handler, so the two cannot
               disagree. */}
-          <div>
+          <div className="pt-1">
             <Button
               variant={entry.declared ? "outline" : "default"}
+              className="w-full"
               onClick={entry.declared ? onRemove : onInstall}
               disabled={isBusy || (!entry.declared && !canInstall)}
             >
               {isBusy
-                ? entry.declared
-                  ? "Removing…"
-                  : "Installing…"
+                ? installProgress !== null
+                  ? `Installing ${installProgress.label}…`
+                  : entry.declared
+                    ? "Removing…"
+                    : "Installing…"
                 : entry.declared
                   ? `Remove ${entry.name}`
                   : `Install ${entry.name}`}
@@ -980,24 +1023,21 @@ function ListedElsewhere({ listed }: { listed: ListedExtension }) {
   return (
     <div className="flex flex-col gap-3">
       <p className="text-sm leading-5 text-fg-secondary">
-        In the registry, and not on this machine. Installing fetches it, checks
-        the bytes against what the registry named, and publishes the types it
-        brings into this project&apos;s memory.
+        In the registry, and not on this machine. Installing fetches it, checks the bytes against
+        what the registry named, and publishes the types it brings into this project&apos;s memory.
       </p>
 
       <Section title="Sections it adds">
         {listed.areas.length === 0 ? (
           <p className="text-sm leading-5 text-fg-tertiary">
-            It draws nothing. An extension is not necessarily a screen — one that
-            publishes a vocabulary and a prompt reaches a project without a line
-            of it being run.
+            It draws nothing. An extension is not necessarily a screen.
           </p>
         ) : (
           <ul className="flex flex-wrap gap-1.5">
             {listed.areas.map((area) => (
               <li
                 key={area.id}
-                className="rounded-(--radius-control) border border-separator px-2 py-0.5 text-xs text-fg-secondary"
+                className="rounded-(--radius-control) bg-hover px-2 py-0.5 text-xs text-fg-secondary"
               >
                 {area.label}
               </li>
@@ -1008,9 +1048,7 @@ function ListedElsewhere({ listed }: { listed: ListedExtension }) {
 
       <Section title="Types it would publish">
         {listed.publishes.length === 0 ? (
-          <p className="text-sm leading-5 text-fg-tertiary">
-            It brings no vocabulary of its own.
-          </p>
+          <p className="text-sm leading-5 text-fg-tertiary">It brings no vocabulary of its own.</p>
         ) : (
           <ul className="flex flex-col gap-1">
             {listed.publishes.map((kind) => (
@@ -1026,9 +1064,9 @@ function ListedElsewhere({ listed }: { listed: ListedExtension }) {
         <Section title="What it reaches outside this window">
           <p className="text-sm leading-5 text-fg-secondary">{reach}</p>
           <p className="text-sm leading-5 text-fg-tertiary">
-            Which hosts, exactly, is a sentence in the package rather than in the
-            registry&apos;s index — it is shown here whole once the package is
-            unpacked, and it is what every request is checked against.
+            Which hosts, exactly, is a sentence in the package rather than in the registry&apos;s
+            index — it is shown here whole once the package is unpacked, and it is what every
+            request is checked against.
           </p>
         </Section>
       )}
@@ -1042,10 +1080,9 @@ function ListedElsewhere({ listed }: { listed: ListedExtension }) {
       {listed.capabilities.includes("tools.call") ? (
         <Section title="Servers it may call">
           <p className="text-sm leading-5 text-fg-tertiary">
-            It asks tools of servers you already have, through the agent Sync
-            works through, so every ask costs a turn of yours. Which of your
-            servers it may call is agreed here once it is installed, and until
-            then it can call none of them.
+            It asks tools of servers you already have, through the agent Sync works through, so
+            every ask costs a turn of yours. Which of your servers it may call is agreed here once
+            it is installed, and until then it can call none of them.
           </p>
         </Section>
       ) : null}
@@ -1091,29 +1128,21 @@ function UpdateNotice({
   const changelog = changelogOf(ledger, update.to);
 
   return (
-    <section className="flex flex-col gap-2 rounded-(--radius-surface) border border-separator bg-panel/60 p-3">
+    <section className="flex flex-col gap-2.5 rounded-(--radius-surface) border border-separator bg-panel p-3.5">
       <div className="flex items-baseline justify-between gap-3">
-        <h3 className="min-w-0 text-sm font-semibold text-fg">
-          Version {update.to} is available
-        </h3>
+        <h3 className="min-w-0 text-sm font-medium text-fg">Version {update.to} is available</h3>
         <span className="shrink-0 font-mono text-xs text-fg-tertiary">
           {update.from} → {update.to}
         </span>
       </div>
 
-      {/* Either the button or the reason there is none, never both and never
-          neither. A build below the range the new version states would download
-          an artefact and then refuse it, so what is offered instead is the
-          sentence — said here, once, rather than as a notification about an
-          application somebody may not want to update. */}
       {update.refusal === null ? (
         <div className="flex items-center gap-3">
           <Button size="sm" disabled={isBusy} onClick={onChange}>
             {isBusy ? "Updating…" : "Update"}
           </Button>
           <p className="text-xs leading-4 text-fg-tertiary">
-            It publishes this version&apos;s type definitions and writes the
-            version into the project, which is a commit.
+            Publishes type definitions and writes the version into the project — a commit.
           </p>
         </div>
       ) : (
@@ -1123,10 +1152,7 @@ function UpdateNotice({
       {changelog === null ? null : (
         <div className="flex flex-col gap-1.5">
           <p className="text-xs text-fg-tertiary">What changed:</p>
-          {/* The author's own text, whole. A summary of it would be a second
-              thing to keep true, and this is the one place a person can read
-              what they are about to agree to. */}
-          <pre className="max-h-64 overflow-auto rounded-(--radius-surface) border border-separator bg-workspace px-3 py-2 font-mono text-xs leading-4 whitespace-pre-wrap text-fg-secondary">
+          <pre className="max-h-64 overflow-auto rounded-(--radius-control) bg-workspace px-3 py-2 font-mono text-xs leading-4 whitespace-pre-wrap text-fg-secondary">
             {changelog}
           </pre>
         </div>
@@ -1157,16 +1183,12 @@ function Standing({
   // the moment somebody has moved.
   if (update !== null) {
     return update.refusal === null ? (
-      <span className="text-xs text-fg-tertiary">
-        Version {update.to} is available
-      </span>
+      <span className="text-xs text-fg-tertiary">Version {update.to} is available</span>
     ) : (
       // Named once, on the card, rather than as a notification about an
       // application somebody may not want to update. The button is not drawn
       // at all: it would download an artefact this build would then refuse.
-      <span className="text-xs text-fg-tertiary">
-        Version {update.to} needs a newer Sync
-      </span>
+      <span className="text-xs text-fg-tertiary">Version {update.to} needs a newer Sync</span>
     );
   }
   if (entry.packaged === null) {
@@ -1175,9 +1197,7 @@ function Standing({
     // the registry lists and this machine has not fetched is the ordinary state
     // of everything nobody has installed yet.
     if (entry.listed === null) {
-      return (
-        <span className="text-xs text-fg-tertiary">Declared, not available</span>
-      );
+      return <span className="text-xs text-fg-tertiary">Declared, not available</span>;
     }
     return entry.unrunnable === null ? (
       <span className="text-xs text-fg-tertiary">In the registry</span>
@@ -1192,7 +1212,7 @@ function Standing({
     <span className="flex items-center gap-1 text-xs text-fg-tertiary">
       {entry.declared ? (
         <>
-          <Check aria-hidden="true" className="size-3 shrink-0" />
+          <Check aria-hidden="true" className="size-3 shrink-0 text-success" />
           Installed
         </>
       ) : (
@@ -1215,14 +1235,11 @@ export function ExtensionInspector({
   return (
     <PanelSurface className="bg-panel">
       <PanelHeader title="Package" />
-      <PanelBody className="space-y-4">
-        <dl className="space-y-2">
+      <PanelBody className="space-y-5">
+        <dl className="space-y-2.5">
           <Fact label="Identifier" value={entry.id} mono />
           <Fact label="Version" value={entry.version} mono />
-          <Fact
-            label="Declared by"
-            value={entry.declared ? "This project" : "Nothing here"}
-          />
+          <Fact label="Declared by" value={entry.declared ? "This project" : "Nothing here"} />
           {packaged === null ? (
             <Fact label="Unpacked" value="No" />
           ) : (
@@ -1243,11 +1260,7 @@ export function ExtensionInspector({
                 value={packaged.pointer.integrity ?? "—"}
                 mono={packaged.pointer.integrity !== null}
               />
-              <Fact
-                label="Needs Sync"
-                value={packaged.manifest.engines.syncApi}
-                mono
-              />
+              <Fact label="Needs Sync" value={packaged.manifest.engines.syncApi} mono />
               <Fact
                 label="Needs"
                 value={
@@ -1267,17 +1280,12 @@ export function ExtensionInspector({
         </dl>
 
         <p className="text-xs leading-4 text-fg-tertiary">
-          A project names the extensions it depends on by id and version, and
-          records the digest each resolved to — so the same repository opened
-          elsewhere resolves the same bytes rather than the same number.
+          A project names the extensions it depends on by id and version, and records the digest
+          each resolved to — so the same repository opened elsewhere resolves the same bytes.
         </p>
 
         {packaged === null ? null : (
-          <PackageRemovals
-            id={entry.id}
-            declared={entry.declared}
-            onRemove={onRemove}
-          />
+          <PackageRemovals id={entry.id} declared={entry.declared} onRemove={onRemove} />
         )}
       </PanelBody>
     </PanelSurface>
@@ -1319,19 +1327,12 @@ function PackageRemovals({
   return (
     <div className="space-y-1.5 border-t border-separator pt-3">
       {forgetting.failure === null ? null : (
-        <p className="font-mono text-xs leading-4 text-danger">
-          {forgetting.failure}
-        </p>
+        <p className="font-mono text-xs leading-4 text-danger">{forgetting.failure}</p>
       )}
 
       <div className="flex flex-wrap items-center gap-1">
         {declared ? (
-          <Button
-            size="xs"
-            variant="ghost"
-            disabled={composition.isBusy}
-            onClick={onRemove}
-          >
+          <Button size="xs" variant="ghost" disabled={composition.isBusy} onClick={onRemove}>
             Remove from this project
           </Button>
         ) : null}
@@ -1372,12 +1373,12 @@ function Disclosure({
   const [isOpen, setIsOpen] = useState(false);
 
   return (
-    <section className="py-3">
+    <section className="py-4">
       <button
         type="button"
         aria-expanded={isOpen}
         onClick={() => setIsOpen((open) => !open)}
-        className="group flex w-full items-center gap-1.5 text-left"
+        className="group flex w-full items-center gap-2 rounded-(--radius-control) px-2 -mx-2 py-1 text-left transition-colors duration-(--motion-duration-fast) ease-shell hover:bg-hover"
       >
         <ChevronRight
           aria-hidden="true"
@@ -1386,13 +1387,9 @@ function Disclosure({
             isOpen && "rotate-90",
           )}
         />
-        <span className="text-xs font-semibold text-fg-tertiary group-hover:text-fg-secondary">
-          {title}
-        </span>
+        <span className="text-sm font-medium text-fg-secondary group-hover:text-fg">{title}</span>
         {note === undefined ? null : (
-          <span className="ml-auto shrink-0 text-xs text-fg-tertiary">
-            {note}
-          </span>
+          <span className="ml-auto shrink-0 text-xs text-fg-tertiary">{note}</span>
         )}
       </button>
 
@@ -1524,9 +1521,7 @@ function ClockSwitch({
               : "text-fg-secondary hover:bg-hover hover:text-fg",
           )}
         >
-          {isOn === option.wanted ? (
-            <Check aria-hidden="true" className="size-3 shrink-0" />
-          ) : null}
+          {isOn === option.wanted ? <Check aria-hidden="true" className="size-3 shrink-0" /> : null}
           {option.label}
         </button>
       ))}
@@ -1534,39 +1529,24 @@ function ClockSwitch({
   );
 }
 
-function Section({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="space-y-2">
-      <h3 className="text-xs font-semibold text-fg-tertiary">{title}</h3>
+    <section className="flex flex-col gap-2">
+      <h3 className="text-sm font-medium text-fg-secondary">{title}</h3>
       {children}
     </section>
   );
 }
 
-function Fact({
-  label,
-  value,
-  mono,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-}) {
+function Fact({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="flex items-baseline justify-between gap-3">
       <dt className="shrink-0 text-xs text-fg-tertiary">{label}</dt>
       <dd
-        className={
-          mono
-            ? "min-w-0 truncate font-mono text-xs text-fg-secondary"
-            : "min-w-0 truncate text-sm text-fg-secondary"
-        }
+        className={cn(
+          "min-w-0 truncate",
+          mono ? "font-mono text-xs text-fg-secondary" : "text-sm text-fg-secondary",
+        )}
       >
         {value}
       </dd>

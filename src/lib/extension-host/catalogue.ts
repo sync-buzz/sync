@@ -100,6 +100,14 @@ export interface CatalogueEntry {
    * a computer will honour.
    */
   readonly unavailable: string | null;
+  /**
+   * What kind of extension it is, for grouping in the marketplace.
+   *
+   * `null` for a package that is not in the registry — one installed from a
+   * file or a folder — and for a registry entry whose author did not set one.
+   * The marketplace puts entries with no category under *Other*.
+   */
+  readonly category: string | null;
 }
 
 /**
@@ -120,6 +128,7 @@ function undeliverable(id: string, version: string): CatalogueEntry {
     declared: true,
     unrunnable: null,
     unavailable: null,
+    category: null,
   };
 }
 
@@ -137,6 +146,7 @@ function entryOf(
     declared,
     unrunnable: refuseUnrunnable(packaged),
     unavailable: unavailableFor(packaged),
+    category: listed?.category ?? null,
   };
 }
 
@@ -168,6 +178,7 @@ function availableOf(listed: ListedExtension): CatalogueEntry {
       syncApi: listed.syncApi,
       capabilities: [...listed.capabilities],
     }),
+    category: listed.category,
   };
 }
 
@@ -214,9 +225,7 @@ export function useCatalogue(
 
     const theirs = packages.all
       .filter((packaged) => !ids.has(packaged.manifest.id))
-      .map((packaged) =>
-        entryOf(packaged, false, inRegistry.get(packaged.manifest.id) ?? null),
-      )
+      .map((packaged) => entryOf(packaged, false, inRegistry.get(packaged.manifest.id) ?? null))
       .sort((one, two) => one.name.localeCompare(two.name));
 
     // Last, and only what neither of the two lists above already answered for.
@@ -233,9 +242,7 @@ export function useCatalogue(
     return {
       entries,
       byId: (id: string) => entries.find((entry) => entry.id === id) ?? null,
-      installed: mine.filter(
-        (entry) => entry.packaged !== null && entry.unrunnable === null,
-      ),
+      installed: mine.filter((entry) => entry.packaged !== null && entry.unrunnable === null),
     };
   }, [declaredKey, listed, packages]);
 }

@@ -8,7 +8,6 @@ import { KindMark } from "@/components/shell/entity-marks";
 import type { Opener, Opening } from "@/components/shell/opening";
 import { TypeFilter } from "@/components/shell/type-filter";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import type { AreaIntent } from "@/lib/area-intent";
 import { loadRecords, memoryTypes } from "@/lib/memory/client";
 import type { MemoryType, SearchHit } from "@/lib/memory/types";
@@ -74,9 +73,10 @@ export function SearchPalette({
   // The result somebody asked for that nothing can open, and why. It replaces
   // the list rather than annotating it: the question has stopped being "which
   // of these" and become "what do I do about this one".
-  const [blocked, setBlocked] = useState<
-    { readonly hit: SearchHit; readonly opening: Opening } | null
-  >(null);
+  const [blocked, setBlocked] = useState<{
+    readonly hit: SearchHit;
+    readonly opening: Opening;
+  } | null>(null);
 
   const field = useRef<HTMLInputElement>(null);
 
@@ -90,9 +90,7 @@ export function SearchPalette({
    * the window — it is written where the recent projects are.
    */
   const view = useProjectView(project.path);
-  const searched = types
-    .filter((type) => !view.isHidden(type.kind))
-    .map((type) => type.kind);
+  const searched = types.filter((type) => !view.isHidden(type.kind)).map((type) => type.kind);
   // Nothing is narrowed until something is hidden, and an empty set is the
   // whole corpus rather than nothing — so the two states are told apart here
   // rather than by the length of a list.
@@ -150,9 +148,7 @@ export function SearchPalette({
   );
 
   const cursor =
-    cursorAt.stamp === stamp
-      ? Math.min(cursorAt.index, Math.max(walked.length - 1, 0))
-      : 0;
+    cursorAt.stamp === stamp ? Math.min(cursorAt.index, Math.max(walked.length - 1, 0)) : 0;
 
   /**
    * Closing settles the palette back to what it opens as.
@@ -245,16 +241,10 @@ export function SearchPalette({
               spellCheck={false}
               className="min-w-0 flex-1 bg-transparent text-sm text-fg outline-none placeholder:text-fg-tertiary"
             />
-            <TypeFilter
-              types={types}
-              counts={counts}
-              view={view}
-              verb="searched"
-              align="end"
-            />
+            <TypeFilter types={types} counts={counts} view={view} verb="searched" align="end" />
           </div>
 
-          <ScrollArea className="min-h-0 flex-1">
+          <div className="min-h-0 flex-1 overflow-y-auto">
             {blocked ? (
               <Blocked
                 hit={blocked.hit}
@@ -277,13 +267,9 @@ export function SearchPalette({
                 onActivate={activate}
               />
             )}
-          </ScrollArea>
+          </div>
 
-          <Footnote
-            answer={answer}
-            query={query}
-            quiet={blocked !== null || everythingHidden}
-          />
+          <Footnote answer={answer} query={query} quiet={blocked !== null || everythingHidden} />
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
@@ -339,11 +325,7 @@ function sectionsOf(hits: readonly SearchHit[]): readonly Section[] {
   const sections: Section[] = [];
   let next = 0;
 
-  const build = (
-    id: Section["id"],
-    heading: string | null,
-    subset: readonly SearchHit[],
-  ) => {
+  const build = (id: Section["id"], heading: string | null, subset: readonly SearchHit[]) => {
     if (subset.length === 0) return;
     const order: string[] = [];
     const byKind = new Map<string, SearchHit[]>();
@@ -376,9 +358,7 @@ function sectionsOf(hits: readonly SearchHit[]): readonly Section[] {
   build("words", null, byWords);
   build(
     "meaning",
-    byWords.length === 0
-      ? "No words matched. Nearest by meaning:"
-      : "Also near in meaning",
+    byWords.length === 0 ? "No words matched. Nearest by meaning:" : "Also near in meaning",
     byMeaning,
   );
 
@@ -510,24 +490,18 @@ function Hit({
       <KindMark icon={icon} />
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-2">
-          <span className="truncate text-sm text-fg">
-            {hit.title ?? hit.id}
-          </span>
+          <span className="truncate text-sm text-fg">{hit.title ?? hit.id}</span>
           {hit.archived ? (
             <span className="shrink-0 text-xs text-fg-tertiary">Archived</span>
           ) : null}
         </span>
         {snippet === null ? null : (
-          <span className="block truncate text-xs text-fg-tertiary">
-            {snippet}
-          </span>
+          <span className="block truncate text-xs text-fg-tertiary">{snippet}</span>
         )}
       </span>
       {opening.outcome === "area" ? null : (
         <span className="shrink-0 text-xs text-fg-tertiary">
-          {opening.outcome === "install"
-            ? `Needs ${opening.extension.name}`
-            : "No screen"}
+          {opening.outcome === "install" ? `Needs ${opening.extension.name}` : "No screen"}
         </span>
       )}
     </button>
@@ -564,8 +538,7 @@ function Blocked({
   return (
     <div className="flex flex-col gap-3 p-4">
       <p className="text-sm text-fg">
-        Nothing in this project opens{" "}
-        <span className="font-medium">{hit.title ?? hit.id}</span>.
+        Nothing in this project opens <span className="font-medium">{hit.title ?? hit.id}</span>.
       </p>
       <p className="text-xs text-fg-secondary">
         {opening.outcome === "install" && extension
@@ -639,9 +612,7 @@ function Quiet({ headline, detail }: { headline: string; detail?: string }) {
   return (
     <div className="flex flex-col gap-1 px-4 py-6">
       <p className="text-sm text-fg-secondary">{headline}</p>
-      {detail === undefined ? null : (
-        <p className="text-xs text-fg-tertiary">{detail}</p>
-      )}
+      {detail === undefined ? null : <p className="text-xs text-fg-tertiary">{detail}</p>}
     </div>
   );
 }

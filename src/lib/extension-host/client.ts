@@ -407,6 +407,14 @@ export interface ListedExtension {
   readonly author: { readonly name: string; readonly url?: string | null } | null;
   readonly license: string | null;
   readonly repository: string | null;
+  /**
+   * What kind of extension it is, for grouping in the marketplace.
+   *
+   * A free-form string the registry's generator writes. `null` when the
+   * registry does not carry one — which is every package that arrived from a
+   * file or a folder, and every index entry whose author did not set one.
+   */
+  readonly category: string | null;
   readonly artefact: RegistryArtefact;
 }
 

@@ -220,6 +220,7 @@ pub fn run() {
             channel_forget,
             place_held,
             place_hold,
+            haptic,
         ])
         .run(tauri::generate_context!())
         .expect("the window could not be opened");
@@ -566,6 +567,50 @@ fn place_hold(project: Option<String>) {
     match project {
         Some(project) => drop(vault.write(&slot, &project)),
         None => drop(vault.forget(&slot)),
+    }
+}
+
+/// A tap the hardware makes, for a gesture the person made.
+///
+/// Nothing on a Mac, which has no haptic engine. On the phone this is the
+/// platform's own feedback for selection — the same feel the system gives a
+/// picker landing on a row — and one kind rather than two because the
+/// difference between switching a section and moving between columns is not a
+/// difference a finger asks for.
+///
+/// `run_on_main_thread` because UIKit's feedback generators answer on the main
+/// thread, and a command's body runs on a worker.
+#[tauri::command(async)]
+fn haptic(app: tauri::AppHandle) {
+    #[cfg(target_os = "ios")]
+    {
+        let _ = app.run_on_main_thread(selection_tap);
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        let _ = app;
+    }
+}
+
+/// Fire a selection feedback generator.
+///
+/// `UISelectionFeedbackGenerator` is in UIKit, already linked, and is the one
+/// the system itself uses for tab changes and picker landings. `Retained`
+/// releases the generator when it drops, so nothing accumulates across the
+/// calls a session makes.
+#[cfg(target_os = "ios")]
+fn selection_tap() {
+    use objc2::msg_send;
+    use objc2::rc::Retained;
+    use objc2::runtime::{AnyClass, AnyObject};
+
+    let Some(cls) = AnyClass::get(c"UISelectionFeedbackGenerator") else {
+        return;
+    };
+    unsafe {
+        let generator: Retained<AnyObject> = msg_send![cls, new];
+        let _: () = msg_send![&generator, prepare];
+        let _: () = msg_send![&generator, selectionChanged];
     }
 }
 

@@ -1,12 +1,6 @@
 "use client";
 
-import {
-  createContext,
-  useContext,
-  useMemo,
-  useState,
-  type ReactNode,
-} from "react";
+import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
 
 import { ExtensionRemovalSheet } from "@/components/shell/extension-removal";
 import { PanelSurface } from "@/components/shell/panel";
@@ -15,6 +9,7 @@ import {
   ExtensionMarketplace,
   ExtensionNavigator,
   ExtensionPage,
+  type Dependency,
 } from "@/components/shell/extensions-view";
 import type { AreaIntent } from "@/lib/area-intent";
 import { useAppMenu } from "@/lib/app-menu";
@@ -89,9 +84,7 @@ const Context = createContext<ExtensionsContext | null>(null);
 function useExtensionsArea(): ExtensionsContext {
   const value = useContext(Context);
   if (value === null) {
-    throw new Error(
-      "An Extensions column was rendered outside the Extensions area.",
-    );
+    throw new Error("An Extensions column was rendered outside the Extensions area.");
   }
   return value;
 }
@@ -123,11 +116,7 @@ export function ExtensionsAreaProvider({
   // a column, because all three read the same list and a second read is how two
   // of them come to disagree.
   const packages = usePackages();
-  const catalogue = useCatalogue(
-    packages,
-    project.installed,
-    marketplace.listed,
-  );
+  const catalogue = useCatalogue(packages, project.installed, marketplace.listed);
   // The same question the pinned row in the sidebar asks, answered here from a
   // freshly fetched index rather than from the cached one: somebody looking at
   // this column has asked what exists, and this is the answer they asked for.
@@ -144,15 +133,13 @@ export function ExtensionsAreaProvider({
   // another one is them answering that, and the catalogue stays where they left
   // it from then on.
   const [settled, setSettled] = useState<AreaIntent | null>(null);
-  const asking =
-    intent && intent !== settled && intent.show === "extension" ? intent : null;
+  const asking = intent && intent !== settled && intent.show === "extension" ? intent : null;
   // An ask wins, then what somebody chose, then the marketplace. A chosen id
   // that no longer names anything — the package was removed while its page was
   // open — falls through to the same place, which is why removing an extension
   // lands somebody back where they can see what they have rather than on a page
   // about something that is gone.
-  const chosen =
-    chosenId !== null && catalogue.byId(chosenId) !== null ? chosenId : null;
+  const chosen = chosenId !== null && catalogue.byId(chosenId) !== null ? chosenId : null;
   const selectedId = asking?.id ?? chosen;
   const setSelectedId = (id: string | null) => {
     setSettled(intent ?? null);
@@ -228,8 +215,7 @@ export function ExtensionsNavigator() {
 export function ExtensionsWorkspace() {
   const area = useExtensionsArea();
   const composition = useCompositionContext();
-  const entry =
-    area.selectedId === null ? null : area.catalogue.byId(area.selectedId);
+  const entry = area.selectedId === null ? null : area.catalogue.byId(area.selectedId);
 
   if (entry === null) {
     return (
@@ -242,10 +228,31 @@ export function ExtensionsWorkspace() {
     );
   }
 
+  // What this extension requires, with whether each is declared in this
+  // project. The `requires` field is `id@range` strings on both the manifest
+  // and the registry listing; the id is what is shown and what the install plan
+  // resolves against. Names come from the catalogue where it can answer, and
+  // from the id where it cannot — a dependency nothing on this machine or in
+  // the registry has is still named, because the person is deciding whether to
+  // install something that needs it.
+  const requires = entry.packaged?.manifest.requires.extensions ?? entry.listed?.requires ?? [];
+  const dependencies: Dependency[] = requires.map((entry_) => {
+    const at = entry_.lastIndexOf("@");
+    const id = at === -1 ? entry_ : entry_.slice(0, at);
+    const known = area.catalogue.byId(id);
+    return {
+      id,
+      name: known?.name ?? id,
+      installed: composition.isInstalled(id),
+    };
+  });
+
   return (
     <ExtensionPage
       entry={entry}
       update={area.updates.get(entry.id) ?? null}
+      dependencies={dependencies}
+      installProgress={composition.installProgress}
       // Moving to another published version, which is the same operation
       // whichever direction the number went.
       onChange={(artefact) => void composition.change(entry.id, artefact)}
@@ -279,7 +286,6 @@ export function ExtensionsWorkspace() {
     />
   );
 }
-
 /**
  * The inspector, which is the package rather than the product.
  *
@@ -290,17 +296,11 @@ export function ExtensionsWorkspace() {
  */
 export function ExtensionsInspector() {
   const area = useExtensionsArea();
-  const entry =
-    area.selectedId === null ? null : area.catalogue.byId(area.selectedId);
+  const entry = area.selectedId === null ? null : area.catalogue.byId(area.selectedId);
 
   if (entry === null) return <PanelSurface className="bg-panel">{null}</PanelSurface>;
 
-  return (
-    <ExtensionInspector
-      entry={entry}
-      onRemove={() => area.askRemoval(entry.id)}
-    />
-  );
+  return <ExtensionInspector entry={entry} onRemove={() => area.askRemoval(entry.id)} />;
 }
 
 /**

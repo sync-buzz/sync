@@ -1,13 +1,6 @@
 "use client";
 
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
 import { forgetAdapters, prepareAdapters } from "@/lib/agent-sessions/client";
 import {
@@ -16,6 +9,7 @@ import {
   rememberDeclaration,
   repointExtension,
   type InstalledExtension,
+  type ListedExtension,
   type Pointer,
   type RegistryArtefact,
 } from "@/lib/extension-host/client";
@@ -54,6 +48,15 @@ import type { OpenProject, ToolDeclaration } from "@/lib/project/types";
  * is expendable, and the count of what stays is said out loud rather than
  * discovered later.
  */
+/** Where an install plan is, for the progress a page draws. */
+export interface InstallProgress {
+  /** 1-indexed: which step of the plan is running. */
+  readonly current: number;
+  readonly total: number;
+  /** The name of the extension being fetched or declared. */
+  readonly label: string;
+}
+
 export interface Composition {
   /** The ids this project declares, in the order it declares them. */
   readonly installed: readonly string[];
@@ -69,11 +72,27 @@ export interface Composition {
   readonly canInstall: (id: string) => boolean;
   /** True while the store is being written, so a command cannot be asked twice. */
   readonly isBusy: boolean;
+  /**
+   * Where an install is in its plan, or `null` when nothing is installing.
+   *
+   * A plan is the target plus every dependency it needs that this machine has
+   * not got and this project has not declared. Each step is a fetch (when the
+   * machine has not got it) followed by a declaration, and the progress says
+   * which step is running and what it is called — so a page can show *fetching
+   * records (1 of 3)* rather than a spinner that could be anything.
+   */
+  readonly installProgress: InstallProgress | null;
   /** Why the last change did not happen, in words, or `null`. */
   readonly failure: string | null;
   readonly dismissFailure: () => void;
   /**
    * Declare an extension, fetching it first when this machine has not got it.
+   *
+   * Fetches and declares every dependency the registry names for it that this
+   * machine has not got and this project has not declared, before the target
+   * itself. The runtime check for a missing dependency is unchanged — a package
+   * that calls into another at runtime still has to check it is there — but the
+   * ordinary case is that installing one thing brings what it needs.
    *
    * The artefact comes from the registry's index and is given by the catalogue.
    * Without one this can only declare what is already unpacked, which is what
@@ -142,6 +161,24 @@ function resolve(id: string, packages: Packages): Resolved {
 }
 
 /**
+ * [`resolve`] that also checks packages fetched in this write but not yet in
+ * the `packages` context.
+ *
+ * The reload asked for after a fetch lands in a later render, and the types
+ * and handlers have to be read from what was actually installed. Without this,
+ * a dependency fetched a moment ago would read as `NOTHING` and its types
+ * would never be published.
+ */
+function resolveWith(
+  id: string,
+  packages: Packages,
+  fresh: ReadonlyMap<string, InstalledExtension>,
+): Resolved {
+  const packaged = fresh.get(id) ?? packages.byId(id);
+  return packaged === null || packaged === undefined ? NOTHING : resolvedOf(packaged);
+}
+
+/**
  * The same answer, from a package in hand rather than from the id.
  *
  * Needed because installing from the registry answers with the package it just
@@ -200,20 +237,14 @@ function sameShape(mine: unknown, theirs: unknown): boolean {
   if (typeof mine !== "object" || typeof theirs !== "object") return false;
   if (Array.isArray(mine) !== Array.isArray(theirs)) return false;
   if (Array.isArray(mine) && Array.isArray(theirs)) {
-    return (
-      mine.length === theirs.length &&
-      mine.every((one, at) => sameShape(one, theirs[at]))
-    );
+    return mine.length === theirs.length && mine.every((one, at) => sameShape(one, theirs[at]));
   }
   const ours = Object.keys(mine as object);
   const others = Object.keys(theirs as object);
   return (
     ours.length === others.length &&
     ours.every((key) =>
-      sameShape(
-        (mine as Record<string, unknown>)[key],
-        (theirs as Record<string, unknown>)[key],
-      ),
+      sameShape((mine as Record<string, unknown>)[key], (theirs as Record<string, unknown>)[key]),
     )
   );
 }
@@ -286,24 +317,126 @@ async function stepBack(previous: Pointer): Promise<string | null> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Dependency resolution.
+//
+// The manifest's `requires.extensions` carries `id@range` strings — a
+// declaration that one extension needs another. It is read here for the one
+// thing the window can do with it: fetch and declare what is missing, so that
+// installing one thing brings what it needs. The runtime check each package
+// does when it calls into another is unchanged — a dependency declared and not
+// installed on a colleague's machine is still caught there — but the ordinary
+// case is that nobody has to discover a missing dependency by hitting it.
+// ---------------------------------------------------------------------------
+
+/** One step of an install plan: an id, and what it needs done. */
+interface InstallStep {
+  readonly id: string;
+  readonly name: string;
+  readonly artefact: RegistryArtefact | null;
+  /** True when this machine has not got the package and it must be fetched. */
+  readonly needsFetch: boolean;
+  /** True when this project has not declared it and the record must be written. */
+  readonly needsDeclare: boolean;
+}
+
+/**
+ * The id half of an `id@range` requires-entry, or the whole string when no `@`
+ * is present. The range is not used here: the registry's index carries one
+ * version per id, and satisfying a range means fetching what the index names.
+ */
+function dependencyIdOf(entry: string): string {
+  const at = entry.lastIndexOf("@");
+  return at === -1 ? entry : entry.slice(0, at);
+}
+
+/**
+ * Every step an install has to take, in the order they have to run.
+ *
+ * Dependencies before their dependents — a topological walk of `requires`
+ * chains, starting at the target. Cycles are broken by a `visiting` set rather
+ * than reported: a manifest that declares a circular dependency is a defect,
+ * but it is not one this function can repair, and refusing to install would
+ * punish the second extension for the first one's mistake. The runtime check
+ * catches the unresolved dependency when it is used.
+ *
+ * Steps that are already declared **and** already unpacked are left out: there
+ * is nothing to do for them, and a plan that included them would show a
+ * progress total that counted no-ops.
+ */
+function buildInstallPlan(
+  targetId: string,
+  listed: readonly ListedExtension[],
+  declared: readonly { readonly id: string }[],
+  packages: Packages,
+): InstallStep[] {
+  const byId = new Map(listed.map((one) => [one.id, one] as const));
+  const declaredIds = new Set(declared.map((entry) => entry.id));
+  const unpackedIds = new Set(packages.all.map((pkg) => pkg.manifest.id));
+
+  const steps: InstallStep[] = [];
+  const done = new Set<string>();
+  const visiting = new Set<string>();
+
+  const visit = (id: string): void => {
+    if (done.has(id)) return;
+    if (visiting.has(id)) return;
+    visiting.add(id);
+
+    const entry = byId.get(id);
+    if (entry !== undefined) {
+      for (const required of entry.requires) {
+        visit(dependencyIdOf(required));
+      }
+    }
+
+    visiting.delete(id);
+    done.add(id);
+
+    const isDeclared = declaredIds.has(id);
+    const isUnpacked = unpackedIds.has(id);
+    if (isDeclared && isUnpacked) return;
+
+    steps.push({
+      id,
+      name: entry?.name ?? id,
+      artefact: entry?.artefact ?? null,
+      needsFetch: !isUnpacked,
+      needsDeclare: !isDeclared,
+    });
+  };
+
+  visit(targetId);
+  return steps;
+}
+
 export function useComposition(
   project: OpenProject,
   /** What this machine has unpacked, which is what a declaration resolves to. */
   packages: Packages,
   onChanged: (project: OpenProject) => void,
+  /**
+   * What the registry lists, for resolving dependencies during install.
+   *
+   * The cached index the window reads at launch, not the fresh fetch the
+   * marketplace makes: that one is the person asking what exists, and this is
+   * the window answering what a dependency is. A machine that has never opened
+   * the catalogue has nothing cached, and install proceeds without dependency
+   * resolution — which is exactly what happened before dependencies were
+   * resolved, and is the right fallback rather than a failure.
+   */
+  listed: readonly ListedExtension[] = [],
 ): Composition {
   const [isBusy, setIsBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  const [installProgress, setInstallProgress] = useState<InstallProgress | null>(null);
 
   // Held rather than rebuilt, because it is a dependency and not only a value.
   // The list leaves this hook and is read into `useMemo` deps elsewhere — the
   // opener the window binds is one — so a fresh array on every render is a
   // fresh answer on every render, and anything downstream that re-reads when
   // its opener changes would re-read for ever. It was, before badges asked.
-  const installed = useMemo(
-    () => project.installed.map((entry) => entry.id),
-    [project.installed],
-  );
+  const installed = useMemo(() => project.installed.map((entry) => entry.id), [project.installed]);
   // Encoded as well, because a project object replaced with one declaring the
   // same extensions is a new array and the same answer: the effect below must
   // run when what the project declares changes, not when the object holding it
@@ -356,10 +489,7 @@ export function useComposition(
    * news to interrupt somebody with.
    */
   useEffect(() => {
-    void rememberDeclaration(
-      project.path,
-      declared === "" ? [] : declared.split(","),
-    ).catch(() => {
+    void rememberDeclaration(project.path, declared === "" ? [] : declared.split(",")).catch(() => {
       // Deliberately quiet: see above.
     });
   }, [declared, project.path]);
@@ -417,7 +547,19 @@ export function useComposition(
   }, [packages, project, onChanged]);
 
   const write = useCallback(
-    async (next: OpenProject, publish: readonly string[]) => {
+    async (
+      next: OpenProject,
+      publish: readonly string[],
+      /**
+       * Packages fetched in this write but not yet in the `packages` context.
+       *
+       * The reload asked for after each fetch lands in a later render, and the
+       * types and handlers have to be read from what was actually installed
+       * rather than from what this closure last saw. Empty for the remove path,
+       * which fetches nothing.
+       */
+      fresh: ReadonlyMap<string, InstalledExtension> = new Map(),
+    ) => {
       setIsBusy(true);
       try {
         // Types before the declaration: see the note on this interface. A
@@ -425,7 +567,7 @@ export function useComposition(
         // set — one transaction per extension, because installing two things
         // is two decisions even when they are made in one sitting.
         for (const id of publish) {
-          const { types } = resolve(id, packages);
+          const { types } = resolveWith(id, packages, fresh);
           if (types.length === 0) continue;
           await publishExtensionTypes(project.path, types);
         }
@@ -439,7 +581,7 @@ export function useComposition(
         for (const id of publish) {
           await callExtensionHandler(project.path, id, "installed", {
             project: { path: next.path, name: next.name },
-            version: resolve(id, packages).version,
+            version: resolveWith(id, packages, fresh).version,
           });
         }
 
@@ -476,42 +618,91 @@ export function useComposition(
     ) => {
       if (project.installed.some((entry) => entry.id === id)) return;
 
-      let resolved = resolve(id, packages);
-      if (resolved.version === null && from !== undefined) {
-        setIsBusy(true);
-        try {
-          // Answered with the package, and read from that rather than from the
-          // list of what is unpacked: the reload below lands in a later render,
-          // and what is declared has to describe what was actually installed.
-          resolved = resolvedOf(await installFromRegistry(from));
-        } catch (refused) {
-          setFailure(explain(refused));
-          setIsBusy(false);
+      // The plan is the target plus every dependency the registry names for it
+      // that this machine has not got and this project has not declared, in the
+      // order they have to run — dependencies before their dependents. When no
+      // registry index is cached, the plan is the target alone, which is what
+      // install always did before dependencies were resolved.
+      const plan = buildInstallPlan(id, listed, project.installed, packages);
+      const fresh = new Map<string, InstalledExtension>();
+      const newDeclarations: NonNullable<OpenProject["installed"][number]>[] = [];
+
+      setIsBusy(true);
+      try {
+        for (let i = 0; i < plan.length; i++) {
+          const step = plan[i];
+          setInstallProgress({
+            current: i + 1,
+            total: plan.length,
+            label: step.name,
+          });
+
+          let packaged = packages.byId(step.id) ?? fresh.get(step.id) ?? null;
+
+          // The target's artefact may come from the caller — the catalogue
+          // holds it — while a dependency's comes from the registry index.
+          if (packaged === null && step.needsFetch) {
+            const artefact = step.id === id ? (from ?? step.artefact) : step.artefact;
+            if (artefact === null) continue;
+            try {
+              packaged = await installFromRegistry(artefact);
+              fresh.set(step.id, packaged);
+            } catch (refused) {
+              setFailure(explain(refused));
+              return;
+            }
+            void packages.reload();
+          }
+
+          if (packaged === null) continue;
+          if (!step.needsDeclare) continue;
+
+          const { version, integrity, source, prompt, tools } = resolvedOf(packaged);
+          if (version === null) continue;
+          newDeclarations.push({
+            id: step.id,
+            version,
+            prompt,
+            integrity,
+            source,
+            tools,
+          });
+        }
+
+        if (newDeclarations.length === 0) {
+          // Nothing was declared — the target was already declared, or nothing
+          // could be fetched. The latter is worth a sentence rather than
+          // silence.
+          if (!project.installed.some((entry) => entry.id === id)) {
+            setFailure(
+              `Could not install ${id}: nothing on this machine answers to it and the registry has no artefact to fetch.`,
+            );
+          }
           return;
         }
-        setIsBusy(false);
-        void packages.reload();
-      }
 
-      const { version, integrity, source, prompt, tools, npm } = resolved;
-      // Nothing on this machine answers to the id, and nothing was offered to
-      // fetch. A project cannot declare a version nobody can name, and
-      // inventing one would write a lockfile entry for an artefact that does
-      // not exist.
-      if (version === null) return;
-      await write(
-        {
+        const next: OpenProject = {
           ...project,
-          installed: [
-            ...project.installed,
-            { id, version, prompt, integrity, source, tools },
-          ],
-        },
-        [id],
-      );
-      await acquireDependencies(npm);
+          installed: [...project.installed, ...newDeclarations],
+        };
+        await write(
+          next,
+          newDeclarations.map((d) => d.id),
+          fresh,
+        );
+
+        // Acquire npm dependencies for the target. `prepareAdapters` is a
+        // global operation, so one call covers every extension's needs.
+        const target = fresh.get(id) ?? packages.byId(id);
+        if (target !== null) {
+          await acquireDependencies(resolvedOf(target).npm);
+        }
+      } finally {
+        setIsBusy(false);
+        setInstallProgress(null);
+      }
     },
-    [packages, project, write],
+    [listed, packages, project, write],
   );
 
   /**
@@ -556,9 +747,7 @@ export function useComposition(
         const next = {
           ...project,
           installed: project.installed.map((entry) =>
-            entry.id === id
-              ? { id, version, prompt, integrity, source, tools }
-              : entry,
+            entry.id === id ? { id, version, prompt, integrity, source, tools } : entry,
           ),
         };
 
@@ -578,9 +767,7 @@ export function useComposition(
           });
         } catch (refused) {
           const stranded = await stepBack(previous);
-          throw stranded === null
-            ? refused
-            : new Error(`${explain(refused)} ${stranded}`);
+          throw stranded === null ? refused : new Error(`${explain(refused)} ${stranded}`);
         }
 
         setFailure(null);
@@ -614,9 +801,7 @@ export function useComposition(
   const countRecords = useCallback(
     async (id: string) => {
       const counts = await Promise.all(
-        resolve(id, packages).types.map((type) =>
-          countRecordsOfKind(project.path, type.kind),
-        ),
+        resolve(id, packages).types.map((type) => countRecordsOfKind(project.path, type.kind)),
       );
       return counts.reduce((total, count) => total + count, 0);
     },
@@ -628,6 +813,7 @@ export function useComposition(
     isInstalled: (id: string) => installed.includes(id),
     canInstall: (id: string) => packages.byId(id) !== null,
     isBusy,
+    installProgress,
     failure,
     dismissFailure: () => setFailure(null),
     install,

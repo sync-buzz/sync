@@ -161,6 +161,15 @@ pub struct Listed {
     pub license: Option<String>,
     #[serde(default)]
     pub repository: Option<String>,
+    /// What kind of extension it is, for grouping in the marketplace.
+    ///
+    /// A free-form string the registry's generator writes, read here and
+    /// forwarded whole — the marketplace decides how to group, and a build
+    /// that did not know a category would be wrong to refuse the index for it.
+    /// Older builds ignore the field entirely, which is what makes it safe to
+    /// add without a format bump.
+    #[serde(default)]
+    pub category: Option<String>,
     pub artefact: Artefact,
 }
 
@@ -687,12 +696,10 @@ mod tests {
     /// reads.
     #[test]
     fn a_path_that_climbs_back_into_the_organisation_is_ours() {
-        assert!(
-            refuse_another_repository(
-                "https://github.com/somebody/theirs/../../sync-buzz/x/releases/download/v1/x.syncext"
-            )
-            .is_ok()
-        );
+        assert!(refuse_another_repository(
+            "https://github.com/somebody/theirs/../../sync-buzz/x/releases/download/v1/x.syncext"
+        )
+        .is_ok());
     }
 
     /// A ledger is fetched from beside the index it was named in.
@@ -782,5 +789,30 @@ mod tests {
         )
         .expect("valid");
         assert_eq!(index.extensions[0].id, "a");
+    }
+
+    #[test]
+    fn a_category_is_read_when_the_index_carries_one() {
+        let index: Index = parse(
+            br#"{"formatVersion": 1, "extensions": [{
+              "id": "a", "name": "A", "version": "1.0.0", "syncApi": "^2.0",
+              "category": "Records",
+              "artefact": {"url": "u", "sha256": "s", "bytes": 1}
+            }]}"#,
+        )
+        .expect("valid");
+        assert_eq!(index.extensions[0].category.as_deref(), Some("Records"));
+    }
+
+    #[test]
+    fn a_missing_category_is_none_rather_than_an_error() {
+        let index: Index = parse(
+            br#"{"formatVersion": 1, "extensions": [{
+              "id": "a", "name": "A", "version": "1.0.0", "syncApi": "^2.0",
+              "artefact": {"url": "u", "sha256": "s", "bytes": 1}
+            }]}"#,
+        )
+        .expect("valid");
+        assert!(index.extensions[0].category.is_none());
     }
 }

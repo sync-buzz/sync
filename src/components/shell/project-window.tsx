@@ -147,7 +147,13 @@ export function ProjectWindow({
   // declaration in the project's record resolves against this list, and both
   // the catalogue and the sections read the same copy of it.
   const packages = usePackagesState();
-  const composition = useComposition(project, packages, onProjectChanged);
+  // What the registry last cached, read from disk rather than fetched: the
+  // composition needs it to resolve dependencies during install, and the
+  // sidebar needs it to count available updates. Both are reads of what
+  // somebody already asked for — see `useCachedIndex` — and neither is worth
+  // turning every launch into a request.
+  const listed = useCachedIndex();
+  const composition = useComposition(project, packages, onProjectChanged, listed);
   // Which machine this is, which is what decides the arrangement of the
   // columns and nothing else about them. Everything below is built once and
   // read by both: what an area draws and what the window knows about it are
@@ -354,7 +360,6 @@ export function ProjectWindow({
   // too old to run is a sentence on that extension's card, said once — a dot
   // for it would stand until somebody updated the application, and a mark that
   // is permanently on is not news.
-  const listed = useCachedIndex();
   const updates = useMemo(
     () =>
       [...updatesFor(project.installed, packages, listed).values()].filter(

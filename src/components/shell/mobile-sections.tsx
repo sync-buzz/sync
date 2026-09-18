@@ -4,6 +4,7 @@ import { useEffect, useRef, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 
 import { edgeMask, useScrollFade } from "@/lib/mobile-scroll";
+import { haptic } from "@/lib/haptic";
 
 /**
  * The sections, along the bottom, where a thumb is.
@@ -180,12 +181,11 @@ export function SectionsBar({
               // Said rather than shown, because what is missing is not obvious
               // from a dimmed row: the section is here, this machine is not
               // where it works.
-              title={
-                section.unavailable
-                  ? `${section.label} needs a computer`
-                  : undefined
-              }
-              onClick={() => onChoose(section.key)}
+              title={section.unavailable ? `${section.label} needs a computer` : undefined}
+              onClick={() => {
+                haptic();
+                onChoose(section.key);
+              }}
               className="relative flex h-14 w-[72px] shrink-0 snap-center flex-col items-center justify-center gap-0.5 rounded-(--radius-surface) px-1 transition-colors duration-(--motion-duration-fast) ease-shell"
               style={
                 active

@@ -713,6 +713,16 @@ html[data-vibrancy="on"] body {
     font-family: var(--font-sans);
     font-size: var(--text-sm);
     line-height: var(--text-sm--line-height);
+    /*
+     * Subpixel antialiasing is the macOS default for light-on-dark text, but
+     * for the interface itself — small labels, thin separators, subtle tiers
+     * of grey — grayscale antialiasing is crisper. The greys in this design
+     * are close enough together that subpixel colour fringing makes them read
+     * as wider apart than they are, which is how a carefully tiered palette
+     * looks muddy. Grayscale closes the gap.
+     */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   /*
@@ -776,5 +786,88 @@ html[data-vibrancy="on"] body {
 
   ::selection {
     background-color: var(--state-selected);
+  }
+
+  /*
+   * Form controls render with our tokens, not the platform's.
+   *
+   * `appearance: none` withdraws the native chrome — the inset shadow, the
+   * bevel, the search-cancel glyph — that every browser draws on an `<input>`
+   * by default. Without it, a field styled with our surface and border tokens
+   * still carries a platform shadow underneath, which is how a carefully
+   * tokened input reads as "a web form" rather than "a control in this app".
+   *
+   * The outline from `:focus-visible` above is the right thing for links and
+   * custom interactive elements. For form controls it is too loud: it draws a
+   * blue ring *outside* the field on top of whatever ring the component's own
+   * `focus:ring-*` class drew inside it, and the two together read as clutter.
+   * Removing it here lets each control own its own focus state, which is what
+   * every field in this app already does.
+   */
+  input[type="search"],
+  input[type="text"],
+  input[type="email"],
+  input[type="url"],
+  input[type="password"],
+  input[type="number"],
+  textarea,
+  select {
+    appearance: none;
+    -webkit-appearance: none;
+  }
+
+  input[type="search"]::-webkit-search-cancel-button,
+  input[type="search"]::-webkit-search-decoration {
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
+  input:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible {
+    outline: none;
+  }
+
+  /*
+   * The placeholder carries less weight than any text the field would hold,
+   * which is the point of a placeholder rather than a label. Tertiary is
+   * already that tier; `opacity: 1` is here because Safari and Firefox both
+   * default placeholders to ~0.54 opacity, which makes the colour a second
+   * muting on top of the one the token already chose.
+   */
+  input::placeholder,
+  textarea::placeholder {
+    opacity: 1;
+  }
+
+  /*
+   * Scrollbars outside the Radix `ScrollArea` — a `pre` block, an overflow
+   * panel — draw a native bar that is wider and darker than anything in this
+   * design. These make them quiet: thin, transparent until pointed, and the
+   * grey of a separator. Radix-managed areas carry their own thumb; this only
+   * touches the ones the platform would draw by itself.
+   */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background-color: var(--separator);
+    border-radius: var(--radius-control);
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--separator-strong);
+  }
+
+  ::-webkit-scrollbar-corner {
+    background: transparent;
   }
 }

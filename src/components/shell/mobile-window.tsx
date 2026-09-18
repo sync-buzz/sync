@@ -1,18 +1,8 @@
 "use client";
 
-import {
-  useCallback,
-  useMemo,
-  useState,
-  type PointerEvent,
-} from "react";
+import { useCallback, useMemo, useState, type PointerEvent } from "react";
 
-import {
-  ColumnBand,
-  PageMarks,
-  Pager,
-  type Page,
-} from "@/components/shell/mobile-pager";
+import { ColumnBand, PageMarks, Pager, type Page } from "@/components/shell/mobile-pager";
 import { SectionsBar, type Section } from "@/components/shell/mobile-sections";
 import { Shade, usePullDown } from "@/components/shell/mobile-shade";
 import { ProgressLine } from "@/components/shell/progress-line";
@@ -22,6 +12,7 @@ import type { SyncStatus } from "@/lib/memory/use-sync-state";
 import type { OpenProject } from "@/lib/project/types";
 import { BandSlotsProvider } from "@/lib/shell-bands";
 import { FRAMES } from "@/lib/shell-frames";
+import { haptic } from "@/lib/haptic";
 
 /**
  * The window with a project open, at the width of a phone.
@@ -157,13 +148,10 @@ export function MobileWindow({
     Workspace: HTMLElement | null;
   }>({ Navigator: null, Workspace: null });
   const bandRefs = useMemo(() => {
-    const attach =
-      (column: "Navigator" | "Workspace") => (element: HTMLElement | null) =>
-        setBands((current) =>
-          current[column] === element
-            ? current
-            : { ...current, [column]: element },
-        );
+    const attach = (column: "Navigator" | "Workspace") => (element: HTMLElement | null) =>
+      setBands((current) =>
+        current[column] === element ? current : { ...current, [column]: element },
+      );
     return { Navigator: attach("Navigator"), Workspace: attach("Workspace") };
   }, []);
 
@@ -233,6 +221,7 @@ export function MobileWindow({
   // list — filtering it, adding to it — and a filter that threw the screen away
   // as it was applied would be unusable.
   const advance = useCallback(() => {
+    haptic();
     setGoto((asked) => ({ page: 1, id: (asked?.id ?? 0) + 1 }));
   }, []);
 
@@ -251,9 +240,7 @@ export function MobileWindow({
       body: <AreaSlot attach={attachWorkspace} />,
       band: <ColumnBand attach={bandRefs.Workspace} />,
     },
-    ...(frame.inspector
-      ? [{ key: "inspector", body: <AreaSlot attach={attachInspector} /> }]
-      : []),
+    ...(frame.inspector ? [{ key: "inspector", body: <AreaSlot attach={attachInspector} /> }] : []),
   ];
 
   return (
@@ -285,6 +272,7 @@ export function MobileWindow({
           goto={goto}
           onPosition={setAt}
           onBehind={() => {
+            haptic();
             if (before !== null) open(before.key);
             else onLeave?.();
           }}
