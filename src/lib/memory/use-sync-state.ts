@@ -12,6 +12,7 @@ import {
 } from "@/lib/memory/client";
 import type { Overlap, SyncState, TransportState } from "@/lib/memory/types";
 import { useMemoryNotice } from "@/lib/memory/use-memory-notice";
+import { useFocusReturn } from "@/lib/use-focus-return";
 
 /**
  * Whether the project's memory is in step with its remote.
@@ -99,6 +100,11 @@ export type Exchange = "fetching" | "publishing";
 export function useSyncState(projectPath: string): SyncStatus {
   const [state, setState] = useState<SyncState | null>(null);
   const [transport, setTransport] = useState<TransportState | null>(null);
+  const transportRef = useRef<TransportState | null>(null);
+
+  useEffect(() => {
+    transportRef.current = transport;
+  }, [transport]);
   const [busy, setBusy] = useState<Exchange | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [overlaps, setOverlaps] = useState<readonly Overlap[]>([]);
@@ -141,20 +147,27 @@ export function useSyncState(projectPath: string): SyncStatus {
   const refresh = useCallback(
     (askRemote = false) => {
       const about = projectPath;
-      const still = <T,>(apply: (value: T) => void) => (value: T) => {
-        if (asked.current === about) apply(value);
-      };
+      const still =
+        <T>(apply: (value: T) => void) =>
+        (value: T) => {
+          if (asked.current === about) apply(value);
+        };
       // A status query that failed is not worth a message of its own: the
       // window is not broken, it simply has nothing new to say about the
       // remote. What is genuinely wrong — an unreachable remote — arrives as
       // an answer rather than as a rejection.
       void syncState(projectPath, askRemote).then(still(setState), () => undefined);
-      void memoryStatus(projectPath).then(
-        still((status: Awaited<ReturnType<typeof memoryStatus>>) =>
-          setTransport(status.transport),
-        ),
-        () => undefined,
-      );
+      // Transport config changes only through `setRemote`, so it is read once
+      // and held — not re-fetched on every focus, notice or exchange.
+      if (transportRef.current === null) {
+        void memoryStatus(projectPath).then(
+          still((status: Awaited<ReturnType<typeof memoryStatus>>) => {
+            transportRef.current = status.transport;
+            setTransport(status.transport);
+          }),
+          () => undefined,
+        );
+      }
     },
     [projectPath],
   );
@@ -209,9 +222,7 @@ export function useSyncState(projectPath: string): SyncStatus {
         // *and* the tip to check against, and an engine that answered only half
         // of that is one this build cannot safely undo against.
         const { localRevisionBefore: to, localRevisionAfter: from } = outcome;
-        setUndoable(
-          outcome.merged && to !== null && from !== null ? { to, from } : null,
-        );
+        setUndoable(outcome.merged && to !== null && from !== null ? { to, from } : null);
       }),
     [exchange, projectPath],
   );
@@ -275,11 +286,14 @@ export function useSyncState(projectPath: string): SyncStatus {
   useEffect(() => {
     const about = projectPath;
     refresh(false);
-    void syncState(projectPath, true).then((answer) => {
-      if (asked.current !== about) return;
-      setState(answer);
-      if (answer.remote === "waiting") fetchNow();
-    }, () => undefined);
+    void syncState(projectPath, true).then(
+      (answer) => {
+        if (asked.current !== about) return;
+        setState(answer);
+        if (answer.remote === "waiting") fetchNow();
+      },
+      () => undefined,
+    );
   }, [fetchNow, projectPath, refresh]);
 
   /**
@@ -304,11 +318,7 @@ export function useSyncState(projectPath: string): SyncStatus {
    * what this application is trying not to be, while somebody coming back to
    * it is an event that already means something.
    */
-  useEffect(() => {
-    const onFocus = () => refresh(true);
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-  }, [refresh]);
+  useFocusReturn(() => refresh(true));
 
   return {
     state,
@@ -328,7 +338,5 @@ export function useSyncState(projectPath: string): SyncStatus {
 }
 
 function messageOf(failure: unknown): string {
-  return failure instanceof Error
-    ? failure.message
-    : "The exchange did not happen.";
+  return failure instanceof Error ? failure.message : "The exchange did not happen.";
 }

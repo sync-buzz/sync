@@ -6,6 +6,7 @@ import type { Opener } from "@/components/shell/opening";
 import type { BadgeReport } from "@/lib/extension-api/badge";
 import type { MountedArea } from "@/lib/extension-host/areas";
 import { listRecords } from "@/lib/memory/client";
+import { useFocusReturn } from "@/lib/use-focus-return";
 
 /**
  * The counts the window draws on its section rows, asked of the corpus.
@@ -152,25 +153,27 @@ export function useDeclaredBadges(
     if (questions.length === 0) return undefined;
 
     let current = true;
-    const read = () => {
-      void count().then((counted) => {
-        // Held rather than replaced when nothing moved. A read answers with a
-        // fresh map every time, so storing it outright would re-render the
-        // whole column on every return to the window whether or not a single
-        // number had changed — and, because what this reads with is rebuilt
-        // from what the window is running, a render that produced a read would
-        // be a read that produced a render.
-        if (current) setBadges((held) => (same(held, counted) ? held : counted));
-      });
-    };
+    void count().then((counted) => {
+      // Held rather than replaced when nothing moved. A read answers with a
+      // fresh map every time, so storing it outright would re-render the
+      // whole column on every return to the window whether or not a single
+      // number had changed — and, because what this reads with is rebuilt
+      // from what the window is running, a render that produced a read would
+      // be a read that produced a render.
+      if (current) setBadges((held) => (same(held, counted) ? held : counted));
+    });
 
-    read();
-    window.addEventListener("focus", read);
     return () => {
       current = false;
-      window.removeEventListener("focus", read);
     };
   }, [count, questions.length]);
+
+  useFocusReturn(() => {
+    if (questions.length === 0) return;
+    void count().then((counted) => {
+      setBadges((held) => (same(held, counted) ? held : counted));
+    });
+  });
 
   return questions.length === 0 ? NOTHING : badges;
 }
@@ -194,16 +197,11 @@ function same(held: Badges, counted: Badges): boolean {
  * A badge naming kinds is a sum over those; a badge naming none is a sum over
  * whatever this section opens, which is the answer `opening.ts` already holds.
  */
-function sum(
-  byKind: Readonly<Record<string, number>>,
-  area: MountedArea,
-  opener: Opener,
-): number {
+function sum(byKind: Readonly<Record<string, number>>, area: MountedArea, opener: Opener): number {
   const declared = area.badge?.kinds ?? [];
   let total = 0;
   for (const [kind, held] of Object.entries(byKind)) {
-    const mine =
-      declared.length === 0 ? opens(opener, kind, area.key) : declared.includes(kind);
+    const mine = declared.length === 0 ? opens(opener, kind, area.key) : declared.includes(kind);
     if (mine) total += held;
   }
   return total;
@@ -231,9 +229,7 @@ export interface LiveBadges {
 }
 
 export function useLiveBadges(): LiveBadges {
-  const [reported, setReported] = useState<ReadonlyMap<string, BadgeReport>>(
-    new Map(),
-  );
+  const [reported, setReported] = useState<ReadonlyMap<string, BadgeReport>>(new Map());
 
   const report = useCallback((areaKey: string, badge: BadgeReport) => {
     setReported((held) => {
@@ -260,10 +256,7 @@ export function useLiveBadges(): LiveBadges {
  * more than a query does. Where there is none the declared count shows through
  * — see [`BadgeReport`] for why that is the rule rather than the other one.
  */
-export function mergeBadges(
-  declared: Badges,
-  reported: ReadonlyMap<string, BadgeReport>,
-): Badges {
+export function mergeBadges(declared: Badges, reported: ReadonlyMap<string, BadgeReport>): Badges {
   if (reported.size === 0) return declared;
 
   const merged = new Map(declared);

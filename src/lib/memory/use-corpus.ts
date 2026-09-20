@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { useFocusReturn } from "@/lib/use-focus-return";
+
 import {
   attachFolder,
   countRecordsOfKind,
@@ -64,10 +66,7 @@ export const ATTENTION_STATES = ["stale", "invalid"] as const;
  * still says what it was written as, and inventing a name for it would be the
  * window making something up.
  */
-export function typeName(
-  types: readonly MemoryType[],
-  kind: string,
-): string {
+export function typeName(types: readonly MemoryType[], kind: string): string {
   return types.find((type) => type.kind === kind)?.title ?? kind;
 }
 
@@ -176,10 +175,7 @@ export interface Corpus {
    * Somebody looking at a folder means that folder, and a record that appeared
    * somewhere else would be the window ignoring where they were standing.
    */
-  readonly createRecord: (
-    kind: string,
-    folder?: string,
-  ) => Promise<MemoryDocument>;
+  readonly createRecord: (kind: string, folder?: string) => Promise<MemoryDocument>;
   /**
    * Delete records, all of them or none. Everything the column shows is re-read
    * afterwards, because the counts and the page both described a corpus that no
@@ -201,11 +197,7 @@ export interface Corpus {
    * the record keeps its key, so every link pointing at it survives — and
    * omitting it says the file is a document in its own right.
    */
-  readonly resolveUnmatched: (
-    file: ScanChange,
-    kind: string,
-    adopt?: string,
-  ) => Promise<void>;
+  readonly resolveUnmatched: (file: ScanChange, kind: string, adopt?: string) => Promise<void>;
 }
 
 /**
@@ -279,9 +271,7 @@ export function useCorpus(
   const reload = useCallback(() => setAttempt((count) => count + 1), []);
 
   const rememberQuestions = useCallback((scan: ScanOutcome) => {
-    setUnmatched(
-      scan.changes.filter((change) => change.change === "unmatched"),
-    );
+    setUnmatched(scan.changes.filter((change) => change.change === "unmatched"));
     return scan;
   }, []);
 
@@ -371,10 +361,7 @@ export function useCorpus(
 
   const deleteType = useCallback(
     async (kind: string) => {
-      const { types: remaining, removed } = await deleteMemoryType(
-        projectPath,
-        kind,
-      );
+      const { types: remaining, removed } = await deleteMemoryType(projectPath, kind);
       setTypes(remaining);
       setTypesError(null);
       // Records went with it, so the counts and the current page describe a
@@ -499,11 +486,12 @@ export function useCorpus(
     void (async () => {
       await rescan();
     })();
-
-    const onFocus = () => void rescan();
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
   }, [rescan, active]);
+
+  useFocusReturn(() => {
+    if (!active) return;
+    void rescan();
+  });
 
   // The selection, read a page at a time until as much of it as was asked for
   // is in hand.
@@ -517,10 +505,7 @@ export function useCorpus(
     // Already answered, or answered as far as the store goes. Without this the
     // effect would re-read the whole selection every time anything above it
     // rendered, because `wanted` and `key` are both unchanged by that.
-    if (
-      held.current.key === key &&
-      (held.current.pages >= wanted || !held.current.hasMore)
-    ) {
+    if (held.current.key === key && (held.current.pages >= wanted || !held.current.hasMore)) {
       return;
     }
     let current = true;
@@ -528,11 +513,7 @@ export function useCorpus(
     // One page's worth of answer, put up as this hook's whole state. Written
     // out here because it is done from two places — after each page, and once
     // at the end for a re-read — and the two must not drift.
-    const put = (
-      pages: number,
-      records: readonly MemoryRecord[],
-      view: MemoryView,
-    ) =>
+    const put = (pages: number, records: readonly MemoryRecord[], view: MemoryView) =>
       setAnswer({
         key,
         pages,
@@ -635,8 +616,7 @@ export function useCorpus(
     // Only ever true of a list that is already on screen: while the first page
     // is in flight the answer in hand is for a different question, and that is
     // `isLoading` above.
-    isReadingMore:
-      answer.key === key && answer.hasMore && answer.pages < wanted,
+    isReadingMore: answer.key === key && answer.hasMore && answer.pages < wanted,
     readMore,
     error: typesError ?? answer.error,
     reload,

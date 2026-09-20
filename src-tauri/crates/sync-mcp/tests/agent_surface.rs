@@ -195,6 +195,8 @@ fn opened_in_sync(project: &Path) -> (sync_memory::MemoryClient, tempfile::TempD
             language: "en".to_owned(),
             installed: vec![sync_memory::InstalledExtension {
                 id: "acme.tracker".to_owned(),
+                name: "Acme Tracker".to_owned(),
+                icon: "ticket".to_owned(),
                 version: "1.2.0".to_owned(),
                 prompt: Some(EXTENSION_PROMPT.to_owned()),
                 // How the package was resolved — the bytes it was pinned to

@@ -89,6 +89,30 @@ export interface ProjectSettings {
 export interface InstalledExtension {
   readonly id: string;
   /**
+   * The display name the manifest gave, as the window reads it on install.
+   *
+   * Here rather than only in the build for the same reason `prompt` is: the
+   * record travels with the repository, and an area drawing the project's
+   * extensions has nowhere else to read the name from. Written on install
+   * and rewritten whenever this build's name and the stored one disagree.
+   *
+   * Empty for a record written before the field existed, which is filled on
+   * the next open rather than treated as a failure.
+   */
+  readonly name: string;
+  /**
+   * The icon name the manifest gave, as the window reads it on install.
+   *
+   * A string naming an icon from the shared library, resolved by the reader
+   * through `kindIcon`. Here for the same reason `name` is: the record
+   * travels with the repository, and an area drawing the project's
+   * extensions has nowhere else to read the icon from.
+   *
+   * Empty for a record written before the field existed, which is filled on
+   * the next open rather than treated as a failure.
+   */
+  readonly icon: string;
+  /**
    * The version that was installed, not the one available now. An extension
    * that has moved on is something the window can notice and say.
    */

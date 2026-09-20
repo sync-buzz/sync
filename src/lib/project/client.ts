@@ -43,19 +43,11 @@ export function isProjectFailure(error: unknown): error is ProjectError {
   return error instanceof ProjectError;
 }
 
-async function call<T>(
-  name: string,
-  args: Record<string, unknown>,
-): Promise<T> {
+async function call<T>(name: string, args: Record<string, unknown>): Promise<T> {
   try {
     return await command<T>(name, args);
   } catch (error) {
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "kind" in error &&
-      "message" in error
-    ) {
+    if (typeof error === "object" && error !== null && "kind" in error && "message" in error) {
       throw new ProjectError(error as ProjectFailure);
     }
     throw error;
@@ -86,21 +78,16 @@ export async function chooseFolder(): Promise<string | null> {
  * would be this window deciding what a claim may be scoped to, and the store is
  * where that belongs.
  */
-export async function chooseProjectFiles(
-  projectPath: string,
-): Promise<readonly string[]> {
+export async function chooseProjectFiles(projectPath: string): Promise<readonly string[]> {
   const chosen = await open({
     directory: false,
     multiple: true,
     defaultPath: projectPath,
     title: "Choose Files",
   });
-  const paths =
-    chosen === null ? [] : Array.isArray(chosen) ? chosen : [chosen];
+  const paths = chosen === null ? [] : Array.isArray(chosen) ? chosen : [chosen];
   const root = projectPath.endsWith("/") ? projectPath : `${projectPath}/`;
-  return paths.map((path) =>
-    path.startsWith(root) ? path.slice(root.length) : path,
-  );
+  return paths.map((path) => (path.startsWith(root) ? path.slice(root.length) : path));
 }
 
 /**
@@ -112,9 +99,7 @@ export async function chooseProjectFiles(
  * has no relative form at all, so it is answered as `null` — attaching one
  * would be describing a folder this repository does not contain.
  */
-export async function chooseProjectFolder(
-  projectPath: string,
-): Promise<string | null> {
+export async function chooseProjectFolder(projectPath: string): Promise<string | null> {
   const chosen = await open({
     directory: true,
     multiple: false,
@@ -162,9 +147,7 @@ export function projectRemote(path: string): Promise<string | null> {
  * This is what decides whether the opening flow asks anything: a repository
  * whose memory carries a project record answers for itself.
  */
-export function loadProjectSettings(
-  path: string,
-): Promise<ProjectSettingsProbe> {
+export function loadProjectSettings(path: string): Promise<ProjectSettingsProbe> {
   return call<ProjectSettingsProbe>("project_settings_load", { project: path });
 }
 
@@ -183,10 +166,7 @@ export function loadProjectSettings(
  *
  * @throws ProjectError when the project's memory would not answer.
  */
-export async function openRegistered(
-  key: string,
-  name: string,
-): Promise<OpenProject> {
+export async function openRegistered(key: string, name: string): Promise<OpenProject> {
   const known = await loadProjectSettings(key);
   if (known.memoryError !== null) {
     // The computer's own words and no kind of ours. Nothing branches on this —
@@ -241,9 +221,7 @@ export function registeredProjects(): Promise<readonly RegisteredProject[]> {
  * is a person's decision, and inventing a name here would be the machine-local
  * identifier the whole scheme exists to avoid.
  */
-export function registerProject(
-  project: RegisteredProject,
-): Promise<Registration> {
+export function registerProject(project: RegisteredProject): Promise<Registration> {
   return call<Registration>("project_register", { project });
 }
 
@@ -269,10 +247,7 @@ export function suggestProjectIdentifier(name: string): Promise<string> {
 }
 
 /** Write the project's record, creating its memory on the first write. */
-export function saveProjectSettings(
-  path: string,
-  settings: ProjectSettings,
-): Promise<void> {
+export function saveProjectSettings(path: string, settings: ProjectSettings): Promise<void> {
   return call<void>("project_settings_save", { project: path, settings });
 }
 
@@ -282,24 +257,35 @@ export function loadRecentProjects(): Promise<readonly RecentProject[]> {
 }
 
 /** Move a project to the front of that list. */
-export function recordRecentProject(
-  project: RecentProject,
-): Promise<readonly RecentProject[]> {
+export function recordRecentProject(project: RecentProject): Promise<readonly RecentProject[]> {
   return call<RecentProject[]>("recent_projects_record", { project });
 }
 
-/** What this installation shows of a project, as opposed to what it holds. */
+/**
+ * What this installation shows of a project, as opposed to what it holds.
+ *
+ * Several hooks read this on mount — section order, hidden types, watched
+ * kinds, activity — and without deduplication each fires its own IPC for the
+ * same file. The in-flight promise is shared across concurrent callers, so
+ * four hooks mounting in the same frame make one round-trip instead of four.
+ */
+const inflightProjectView = new Map<string, Promise<ProjectView>>();
+
 export function loadProjectView(path: string): Promise<ProjectView> {
-  return call<ProjectView>("project_view_load", { project: path });
+  const existing = inflightProjectView.get(path);
+  if (existing) return existing;
+  const promise = call<ProjectView>("project_view_load", { project: path }).finally(() =>
+    inflightProjectView.delete(path),
+  );
+  inflightProjectView.set(path, promise);
+  return promise;
 }
 
 /**
  * Remember it. The answer is the whole view as it now stands, so callers can
  * trust it — including the half of it they did not write.
  */
-export function saveProjectView(
-  path: string,
-  view: ProjectViewChange,
-): Promise<ProjectView> {
+export function saveProjectView(path: string, view: ProjectViewChange): Promise<ProjectView> {
+  inflightProjectView.delete(path);
   return call<ProjectView>("project_view_save", { project: path, view });
 }

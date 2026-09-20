@@ -42,6 +42,22 @@ import { device } from "@/lib/device";
  * point of the number is that a manifest can state a range and be believed. The
  * cost is honest major bumps, which is the cost of meaning it.
  *
+ * **3.23.0** gives `InstalledExtension` an `icon`. The icon name the
+ * manifest gave is now on the record, for the same reason `name` is: the
+ * record travels with the repository, and an area drawing the project's
+ * extensions has nowhere else to read the icon from. A string naming an
+ * icon from the shared library, resolved by the reader through `kindIcon`.
+ * An optional field added, so a minor, and every package stating `^3.0`
+ * goes on installing.
+ *
+ * **3.22.0** gives `InstalledExtension` a `name`. The display name the
+ * manifest gave is now on the record, for the same reason `prompt` and
+ * `tools` are: the record travels with the repository, and an area
+ * drawing the project's extensions — their names as the catalogue shows
+ * them — has nowhere else to read the name from. The manifest is on this
+ * machine; the project is what a colleague clones. An optional field
+ * added, so a minor, and every package stating `^3.0` goes on installing.
+ *
  * **3.19.0** is a column that reads in two levels and in several runs.
  * `SourceListItem` gains `band` and `children`, and `SourceListChild` is the
  * name of what the second holds — additions, so a minor, and every package
@@ -799,7 +815,7 @@ import { device } from "@/lib/device";
  * `AreaModule`, `ActivationResult` — arrived in the same commit, which on its
  * own would have been a minor.
  */
-export const SYNC_API_VERSION = "3.21.0" as const;
+export const SYNC_API_VERSION = "3.23.0" as const;
 
 /**
  * What this build can do, as opposed to what its surface looks like.

@@ -7,6 +7,7 @@ import { useMemoryNotice } from "@/lib/memory/use-memory-notice";
 import type { JournalChange, JournalEntry } from "@/lib/memory/types";
 import { loadProjectView, saveProjectView } from "@/lib/project/client";
 import type { DismissedChange } from "@/lib/project/types";
+import { useFocusReturn } from "@/lib/use-focus-return";
 
 /**
  * What has happened to this project's memory since this person last looked.
@@ -201,9 +202,7 @@ export function useActivity(
     if (!view?.seenRevision) {
       const status = await memoryStatus(path);
       if (asked.current !== path) return;
-      await saveProjectView(path, { seenRevision: status.revision }).catch(
-        () => undefined,
-      );
+      await saveProjectView(path, { seenRevision: status.revision }).catch(() => undefined);
       if (asked.current !== path) return;
       shown.current = status.revision;
       putAway.current = { list: NONE_PUT_AWAY, writing: 0 };
@@ -298,46 +297,12 @@ export function useActivity(
    * failure this avoids, and coming back is an event that already means
    * something.
    *
-   * Both ways of hearing it, because they hear different things. The DOM's
-   * `focus` fires when the *document* takes focus, which is not what happens
-   * when somebody switches back to an application whose caret is already in a
-   * field — the event goes to that element and does not bubble. The window's
-   * own focus is the one that means "this application is in front", and it is
-   * where the menu bar already listens for the same reason.
+   * The shared focus listener covers both the DOM's `focus` and the Tauri
+   * window's own — see `use-focus-return.ts` for why both are needed.
    */
-  useEffect(() => {
-    const again = () => {
-      void reread(projectPath);
-    };
-    window.addEventListener("focus", again);
-
-    let drop: (() => void) | null = null;
-    let dropped = false;
-    void (async () => {
-      try {
-        const { getCurrentWindow } = await import("@tauri-apps/api/window");
-        const stop = await getCurrentWindow().onFocusChanged(
-          ({ payload: focused }) => {
-            if (focused) again();
-          },
-        );
-        // The effect can be cleaned up before this resolves — switching
-        // projects is exactly that — and a listener installed afterwards would
-        // outlive the hook that asked for it.
-        if (dropped) stop();
-        else drop = stop;
-      } catch {
-        // Outside Tauri there is no window to follow. The DOM event above is
-        // the whole of what a browser can offer, and it is enough there.
-      }
-    })();
-
-    return () => {
-      dropped = true;
-      drop?.();
-      window.removeEventListener("focus", again);
-    };
-  }, [projectPath, reread]);
+  useFocusReturn(() => {
+    void reread(projectPath);
+  });
 
   const markSeen = useCallback(() => {
     const revision = shown.current;
@@ -386,8 +351,7 @@ export function useActivity(
       const kept = answer.dismissed.filter(
         (change) =>
           !wanted.has(change.key) &&
-          (answer.hasMore ||
-            answer.entries.some((entry) => entry.key === change.key)),
+          (answer.hasMore || answer.entries.some((entry) => entry.key === change.key)),
       );
       const next = [...kept, ...added];
 
@@ -395,9 +359,7 @@ export function useActivity(
         list: next,
         writing: putAway.current.writing + 1,
       };
-      setAnswer((held) =>
-        held.path === projectPath ? { ...held, dismissed: next } : held,
-      );
+      setAnswer((held) => (held.path === projectPath ? { ...held, dismissed: next } : held));
       void saveProjectView(projectPath, { dismissed: next })
         .catch(() => undefined)
         .finally(() => {
@@ -416,12 +378,9 @@ export function useActivity(
     // By the write and not by the record: a record put away and then written to
     // again is news again, which is the whole difference between this and the
     // mark. Matching on the key alone would silence it for good.
-    const away = new Map(
-      answer.dismissed.map((change) => [change.key, change.revision]),
-    );
+    const away = new Map(answer.dismissed.map((change) => [change.key, change.revision]));
     return answer.entries.filter(
-      (entry) =>
-        !unwatched.includes(entry.kind) && away.get(entry.key) !== entry.revision,
+      (entry) => !unwatched.includes(entry.kind) && away.get(entry.key) !== entry.revision,
     );
   }, [answer.dismissed, answer.entries, current, unwatched]);
 

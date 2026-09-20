@@ -125,6 +125,12 @@ export interface Composition {
  * which is the state a project has when it was composed elsewhere.
  */
 interface Resolved {
+  /** The display name the manifest gave. Empty when nothing on this machine
+   *  answers to the id, which is the state a project composed elsewhere is
+   *  in until it is opened here. */
+  readonly name: string;
+  /** The icon name the manifest gave. Empty for the same reason as `name`. */
+  readonly icon: string;
   readonly version: string | null;
   /** The artefact's sha256, and `undefined` for a folder being written in. */
   readonly integrity: string | undefined;
@@ -146,6 +152,8 @@ interface Resolved {
 }
 
 const NOTHING: Resolved = {
+  name: "",
+  icon: "",
   version: null,
   integrity: undefined,
   source: undefined,
@@ -189,6 +197,8 @@ function resolveWith(
  */
 function resolvedOf(packaged: InstalledExtension): Resolved {
   return {
+    name: packaged.manifest.name,
+    icon: packaged.manifest.icon ?? "",
     version: packaged.manifest.version,
     integrity: packaged.pointer.integrity ?? undefined,
     source: packaged.pointer.source,
@@ -516,14 +526,20 @@ export function useComposition(
    */
   useEffect(() => {
     const refreshed = project.installed.map((entry) => {
-      const { version, prompt, tools } = resolve(entry.id, packages);
+      const { name, icon, version, prompt, tools } = resolve(entry.id, packages);
       // Nothing on this machine answers to the id, so there is no text to
       // compare against and the stored one is left exactly as it is. Erasing it
       // would mean opening a project on a machine missing one of its extensions
       // silently took that extension's instructions away from every agent.
       if (version === null) return entry;
-      if (prompt === entry.prompt && sameTools(tools, entry.tools)) return entry;
-      return { ...entry, prompt, tools };
+      if (
+        name === entry.name &&
+        icon === entry.icon &&
+        prompt === entry.prompt &&
+        sameTools(tools, entry.tools)
+      )
+        return entry;
+      return { ...entry, name, icon, prompt, tools };
     });
     if (refreshed.every((entry, at) => entry === project.installed[at])) return;
 
@@ -657,10 +673,12 @@ export function useComposition(
           if (packaged === null) continue;
           if (!step.needsDeclare) continue;
 
-          const { version, integrity, source, prompt, tools } = resolvedOf(packaged);
+          const { name, icon, version, integrity, source, prompt, tools } = resolvedOf(packaged);
           if (version === null) continue;
           newDeclarations.push({
             id: step.id,
+            name,
+            icon,
             version,
             prompt,
             integrity,
@@ -741,13 +759,13 @@ export function useComposition(
       setIsBusy(true);
       try {
         const resolved = resolvedOf(await installFromRegistry(to));
-        const { version, integrity, source, prompt, tools, types, npm } = resolved;
+        const { name, icon, version, integrity, source, prompt, tools, types, npm } = resolved;
         if (version === null) return;
 
         const next = {
           ...project,
           installed: project.installed.map((entry) =>
-            entry.id === id ? { id, version, prompt, integrity, source, tools } : entry,
+            entry.id === id ? { id, name, icon, version, prompt, integrity, source, tools } : entry,
           ),
         };
 

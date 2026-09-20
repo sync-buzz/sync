@@ -5884,8 +5884,8 @@ dependencies = [
 
 [[package]]
 name = "memory-hub-core"
-version = "0.2.6"
-source = "git+https://github.com/sync-buzz/memory-hub?tag=v0.2.6#b7319aafc4c880e9dd456019d69e57b54894631b"
+version = "0.2.7"
+source = "git+https://github.com/sync-buzz/memory-hub?tag=v0.2.8#d147075679c19fd391714e725e2dc4995bab1d25"
 dependencies = [
  "serde",
  "serde_json",
@@ -5894,8 +5894,8 @@ dependencies = [
 
 [[package]]
 name = "memory-hub-embed"
-version = "0.2.6"
-source = "git+https://github.com/sync-buzz/memory-hub?tag=v0.2.6#b7319aafc4c880e9dd456019d69e57b54894631b"
+version = "0.2.7"
+source = "git+https://github.com/sync-buzz/memory-hub?tag=v0.2.8#d147075679c19fd391714e725e2dc4995bab1d25"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5917,8 +5917,8 @@ dependencies = [
 
 [[package]]
 name = "memory-hub-engine"
-version = "0.2.6"
-source = "git+https://github.com/sync-buzz/memory-hub?tag=v0.2.6#b7319aafc4c880e9dd456019d69e57b54894631b"
+version = "0.2.7"
+source = "git+https://github.com/sync-buzz/memory-hub?tag=v0.2.8#d147075679c19fd391714e725e2dc4995bab1d25"
 dependencies = [
  "memory-hub-core",
  "serde",
@@ -5927,8 +5927,8 @@ dependencies = [
 
 [[package]]
 name = "memory-hub-folder"
-version = "0.2.6"
-source = "git+https://github.com/sync-buzz/memory-hub?tag=v0.2.6#b7319aafc4c880e9dd456019d69e57b54894631b"
+version = "0.2.7"
+source = "git+https://github.com/sync-buzz/memory-hub?tag=v0.2.8#d147075679c19fd391714e725e2dc4995bab1d25"
 dependencies = [
  "blake3",
  "fs2",
@@ -5940,8 +5940,8 @@ dependencies = [
 
 [[package]]
 name = "memory-hub-index"
-version = "0.2.6"
-source = "git+https://github.com/sync-buzz/memory-hub?tag=v0.2.6#b7319aafc4c880e9dd456019d69e57b54894631b"
+version = "0.2.7"
+source = "git+https://github.com/sync-buzz/memory-hub?tag=v0.2.8#d147075679c19fd391714e725e2dc4995bab1d25"
 dependencies = [
  "arrow-array",
  "arrow-schema",
@@ -5959,8 +5959,8 @@ dependencies = [
 
 [[package]]
 name = "memory-hub-mcp"
-version = "0.2.6"
-source = "git+https://github.com/sync-buzz/memory-hub?tag=v0.2.6#b7319aafc4c880e9dd456019d69e57b54894631b"
+version = "0.2.7"
+source = "git+https://github.com/sync-buzz/memory-hub?tag=v0.2.8#d147075679c19fd391714e725e2dc4995bab1d25"
 dependencies = [
  "base64 0.22.1",
  "memory-hub-core",
@@ -5978,8 +5978,8 @@ dependencies = [
 
 [[package]]
 name = "memory-hub-reconcile"
-version = "0.2.6"
-source = "git+https://github.com/sync-buzz/memory-hub?tag=v0.2.6#b7319aafc4c880e9dd456019d69e57b54894631b"
+version = "0.2.7"
+source = "git+https://github.com/sync-buzz/memory-hub?tag=v0.2.8#d147075679c19fd391714e725e2dc4995bab1d25"
 dependencies = [
  "fs2",
  "git2",
@@ -5992,8 +5992,8 @@ dependencies = [
 
 [[package]]
 name = "memory-hub-schema"
-version = "0.2.6"
-source = "git+https://github.com/sync-buzz/memory-hub?tag=v0.2.6#b7319aafc4c880e9dd456019d69e57b54894631b"
+version = "0.2.7"
+source = "git+https://github.com/sync-buzz/memory-hub?tag=v0.2.8#d147075679c19fd391714e725e2dc4995bab1d25"
 dependencies = [
  "jsonschema",
  "memory-hub-core",
@@ -6005,8 +6005,8 @@ dependencies = [
 
 [[package]]
 name = "memory-hub-service"
-version = "0.2.6"
-source = "git+https://github.com/sync-buzz/memory-hub?tag=v0.2.6#b7319aafc4c880e9dd456019d69e57b54894631b"
+version = "0.2.7"
+source = "git+https://github.com/sync-buzz/memory-hub?tag=v0.2.8#d147075679c19fd391714e725e2dc4995bab1d25"
 dependencies = [
  "git2",
  "memory-hub-core",
@@ -6024,8 +6024,8 @@ dependencies = [
 
 [[package]]
 name = "memory-hub-store"
-version = "0.2.6"
-source = "git+https://github.com/sync-buzz/memory-hub?tag=v0.2.6#b7319aafc4c880e9dd456019d69e57b54894631b"
+version = "0.2.7"
+source = "git+https://github.com/sync-buzz/memory-hub?tag=v0.2.8#d147075679c19fd391714e725e2dc4995bab1d25"
 dependencies = [
  "base64 0.22.1",
  "dirs 5.0.1",

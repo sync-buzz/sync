@@ -657,6 +657,28 @@ pub struct ProjectSettings {
 #[serde(rename_all = "camelCase")]
 pub struct InstalledExtension {
     pub id: String,
+    /// The display name the manifest gave, as the window reads it on install.
+    ///
+    /// Here for the same reason [`prompt`](Self::prompt) is: the record
+    /// travels with the repository, and an area drawing the project's
+    /// extensions — their names as the catalogue shows them — has nowhere
+    /// else to read the name from. The manifest is on this machine; the
+    /// project is what a colleague clones, and a name that stayed in the
+    /// window would be one only the window could read.
+    ///
+    /// Rewritten when the build and the record disagree, the way the prompt
+    /// is. Empty for a record written before the field existed, which is
+    /// filled on the next open rather than treated as a failure.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub name: String,
+    /// The icon name the manifest gave, as the window reads it on install.
+    ///
+    /// Here for the same reason [`name`](Self::name) is: the record travels
+    /// with the repository, and an area drawing the project's extensions has
+    /// nowhere else to read the icon from. A string naming an icon from the
+    /// shared library, resolved by the reader through `kindIcon`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub icon: String,
     pub version: String,
     /// What this extension tells an agent, in full.
     ///
@@ -850,6 +872,8 @@ mod tests {
     fn a_tool_declaration_survives_the_round_trip_under_the_names_it_crosses_by() {
         let written = InstalledExtension {
             id: "acme.tracker".to_owned(),
+            name: "Acme Tracker".to_owned(),
+            icon: "ticket".to_owned(),
             version: "1.2.0".to_owned(),
             prompt: None,
             integrity: None,
@@ -885,6 +909,8 @@ mod tests {
     fn an_extension_that_offers_no_tools_writes_nothing_about_them() {
         let bare = InstalledExtension {
             id: "records".to_owned(),
+            name: "Records".to_owned(),
+            icon: "database".to_owned(),
             version: "1.0.1".to_owned(),
             prompt: None,
             integrity: None,
