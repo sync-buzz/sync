@@ -222,6 +222,14 @@ jobs:
   memory-contract:
     name: memory / bundled sidecar contract
     runs-on: macos-14
+    env:
+      # Narrowed to the one sidecar this job is about, for the reason the `rust`
+      # job empties the list: every entry has to exist before anything compiles,
+      # and a stub put there to satisfy that would be taken for a working
+      # binary. The inference sidecar is a release build of llama.cpp and this
+      # job tests the engine's channel, so it is left undeclared rather than
+      # built or faked — `release` is where both are staged for real.
+      TAURI_CONFIG: '{"bundle":{"externalBin":["binaries/sync-mcp"]}}'
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
