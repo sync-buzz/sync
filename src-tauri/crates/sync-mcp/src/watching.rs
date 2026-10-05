@@ -165,7 +165,10 @@ mod tests {
         assert_eq!(subscriptions.ended(&[watch]), vec![watch]);
         // Said once. A second ending is not a second thing to tell the
         // application about.
-        assert!(subscriptions.ended(&[watch]).is_empty());
+        assert!(
+            subscriptions.ended(&[watch]).is_empty(),
+            "a second ending is not a second thing to tell about"
+        );
 
         subscriptions.deliver(watch, &json!({"seq": 1}));
         assert!(

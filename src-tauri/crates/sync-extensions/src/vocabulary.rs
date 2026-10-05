@@ -287,7 +287,8 @@ mod tests {
         assert!(
             read_types(root.path(), &manifest(""))
                 .expect("reads")
-                .is_empty()
+                .is_empty(),
+            "a package naming no types publishes none"
         );
     }
 

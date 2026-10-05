@@ -400,7 +400,11 @@ mod tests {
         );
         // And nowhere else: a model in the environment would be a second,
         // silent channel for the same decision.
-        assert!(env_of(&command).is_empty());
+        assert!(
+            env_of(&command).is_empty(),
+            "nothing was put in the environment: got {:?}",
+            env_of(&command)
+        );
     }
 
     /// The Claude adapter reads its model from the environment before any of
@@ -452,7 +456,11 @@ mod tests {
         let command = command_for(&registry::CODEX, &SpawnOptions::default());
         let args: Vec<_> = command.get_args().collect();
         assert_eq!(args, ["agent-bridge", "codex"]);
-        assert!(env_of(&command).is_empty());
+        assert!(
+            env_of(&command).is_empty(),
+            "nothing was put in the environment: got {:?}",
+            env_of(&command)
+        );
     }
 
     /// An id this crate has never heard of still arrives untouched. The agent
@@ -485,7 +493,11 @@ mod tests {
     #[test]
     fn opencode_raised_with_defaults_injects_nothing() {
         let command = command_for(&registry::OPENCODE, &SpawnOptions::default());
-        assert!(env_of(&command).is_empty());
+        assert!(
+            env_of(&command).is_empty(),
+            "nothing was put in the environment: got {:?}",
+            env_of(&command)
+        );
     }
 
     #[test]

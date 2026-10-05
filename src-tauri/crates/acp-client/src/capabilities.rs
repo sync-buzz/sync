@@ -193,7 +193,11 @@ mod tests {
             "authMethods": [],
         }));
         assert!(!profile.offers_authentication());
-        assert!(profile.auth_method_ids().is_empty());
+        assert!(
+            profile.auth_method_ids().is_empty(),
+            "got {:?}",
+            profile.auth_method_ids()
+        );
     }
 
     #[test]

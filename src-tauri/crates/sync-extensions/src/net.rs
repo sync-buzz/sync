@@ -1107,7 +1107,10 @@ mod tests {
             1,
             "a host has no case, and neither does the match"
         );
-        assert!(secrets_for("https://api.other.example/x", &allowed).is_empty());
+        assert!(
+            secrets_for("https://api.other.example/x", &allowed).is_empty(),
+            "a host nobody named reads nobody's keychain"
+        );
         assert!(
             secrets_for("not a url at all", &allowed).is_empty(),
             "a request that will be refused reads nobody's keychain first"

@@ -813,7 +813,7 @@ mod tests {
     #[test]
     fn a_list_with_no_file_behind_it_is_not_looked_for() {
         let projects = Projects::over(Vec::new(), None);
-        assert!(projects.keys().is_empty());
+        assert!(projects.keys().is_empty(), "got {:?}", projects.keys());
     }
 
     #[test]

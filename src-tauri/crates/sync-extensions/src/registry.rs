@@ -1008,8 +1008,16 @@ mod tests {
         let entry = &index.extensions[0];
         assert_eq!(entry.category.as_deref(), Some("MCP Servers"));
         assert!(entry.artefact.is_none());
-        assert!(entry.version.is_empty());
-        assert!(entry.sync_api.is_empty());
+        assert!(
+            entry.version.is_empty(),
+            "an MCP server has nothing to version: got {:?}",
+            entry.version
+        );
+        assert!(
+            entry.sync_api.is_empty(),
+            "and no surface to state a range against: got {:?}",
+            entry.sync_api
+        );
         assert!(matches!(
             entry.transport.as_ref().expect("a transport"),
             McpTransportSpec::Stdio { command, args, env }

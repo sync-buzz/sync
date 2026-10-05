@@ -1297,7 +1297,7 @@ mod tests {
             manifest.ui.is_none(),
             "a package declares the code it ships"
         );
-        assert!(manifest.areas.is_empty());
+        assert!(manifest.areas.is_empty(), "got {:?}", manifest.areas);
     }
 
     #[test]
@@ -1870,7 +1870,11 @@ mod tests {
         let manifest =
             Manifest::parse(minimal(r#", "ui": "ui/index.js""#).as_bytes()).expect("valid");
         assert!(manifest.service.is_none());
-        assert!(manifest.handlers().is_empty());
+        assert!(
+            manifest.handlers().is_empty(),
+            "got {:?}",
+            manifest.handlers()
+        );
     }
 
     /// The mirror of the areas-without-ui refusal: an occasion with nothing to

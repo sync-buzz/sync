@@ -470,29 +470,44 @@ mod tests {
     /// write about a spelling is the way to write about any other code.
     #[test]
     fn a_wikilink_quoted_as_an_example_is_not_one() {
-        assert!(wikilinks("Do not write `[[d-one]]`.").is_empty());
-        assert!(wikilinks("Before:\n\n```\n[[d-one]]\n```\n\nAfter.").is_empty());
+        assert!(
+            wikilinks("Do not write `[[d-one]]`.").is_empty(),
+            "a spelling quoted inline is an example"
+        );
+        assert!(
+            wikilinks("Before:\n\n```\n[[d-one]]\n```\n\nAfter.").is_empty(),
+            "and so is one inside a fence"
+        );
     }
 
     /// Somebody's array is not somebody's link, and refusing a write over one
     /// would be this door deciding what a pair of brackets means.
     #[test]
     fn brackets_around_something_no_key_looks_like_are_left_alone() {
-        assert!(wikilinks("The shape is [[1, 2], [3, 4]] rows.").is_empty());
+        assert!(
+            wikilinks("The shape is [[1, 2], [3, 4]] rows.").is_empty(),
+            "nested brackets are somebody's array"
+        );
     }
 
     /// A key is a word somebody chose, and plenty of them are words. Reading
     /// one in running text would report every sentence about architecture.
     #[test]
     fn an_ordinary_word_that_happens_to_be_a_key_is_left_alone() {
-        assert!(bare("The architecture is settled.", "d-two", resolve).is_empty());
+        assert!(
+            bare("The architecture is settled.", "d-two", resolve).is_empty(),
+            "a key that is also an ordinary word stays prose"
+        );
     }
 
     /// A fence holds a command or a quoted record, and neither is prose.
     #[test]
     fn a_key_inside_a_fence_is_an_example_rather_than_a_reference() {
         let content = "Before:\n\n```json\n{\"key\": \"d-one\"}\n```\n\nAfter.";
-        assert!(bare(content, "d-two", resolve).is_empty());
+        assert!(
+            bare(content, "d-two", resolve).is_empty(),
+            "what a fence or an existing link holds is not a reference"
+        );
     }
 
     /// A key already written as a link is what this asks for, and reporting it
@@ -500,14 +515,20 @@ mod tests {
     #[test]
     fn a_key_already_written_as_a_link_is_not_reported() {
         let content = "Superseded by [The one that was taken](sync://decision/d-one).";
-        assert!(bare(content, "d-two", resolve).is_empty());
+        assert!(
+            bare(content, "d-two", resolve).is_empty(),
+            "what a fence or an existing link holds is not a reference"
+        );
     }
 
     /// A key nothing answers to cannot be named, so there is nothing to suggest
     /// and nothing to report.
     #[test]
     fn a_key_no_record_answers_to_is_not_reported() {
-        assert!(bare("See `d-gone`.", "d-two", resolve).is_empty());
+        assert!(
+            bare("See `d-gone`.", "d-two", resolve).is_empty(),
+            "a key nothing answers to cannot be named"
+        );
     }
 
     /// Said twice, reported once: the report is a list of records to name, not

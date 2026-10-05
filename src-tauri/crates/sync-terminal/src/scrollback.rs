@@ -142,7 +142,7 @@ mod tests {
     fn an_offset_past_the_end_is_answered_empty() {
         let ring = Scrollback::new(64);
         let tail = ring.since(99);
-        assert!(tail.bytes.is_empty());
+        assert!(tail.bytes.is_empty(), "got {:?}", tail.bytes);
         assert_eq!(tail.to, tail.from);
     }
 

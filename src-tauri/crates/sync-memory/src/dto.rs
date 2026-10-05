@@ -1008,7 +1008,7 @@ mod tests {
 
         let read: InstalledExtension = serde_json::from_value(older).expect("it reads back");
 
-        assert!(read.tools.is_empty());
+        assert!(read.tools.is_empty(), "got {:?}", read.tools);
     }
 
     /// An MCP server entry carries a transport where a package carries an
@@ -1050,7 +1050,7 @@ mod tests {
 
         let read: InstalledExtension = serde_json::from_value(crossing).expect("it reads back");
         assert_eq!(read.transport, server.transport);
-        assert!(read.version.is_empty());
+        assert!(read.version.is_empty(), "got {:?}", read.version);
     }
 
     /// A header secret's scheme is optional, and its absence survives the

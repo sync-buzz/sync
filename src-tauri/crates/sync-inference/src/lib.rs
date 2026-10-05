@@ -356,7 +356,11 @@ mod tests {
             "weights": { "url": "u", "sha256": "h" }
         }"#;
         let manifest: ModelManifest = serde_json::from_str(json).expect("optional fields absent");
-        assert!(manifest.requires.arch.is_empty());
+        assert!(
+            manifest.requires.arch.is_empty(),
+            "got {:?}",
+            manifest.requires.arch
+        );
         assert_eq!(manifest.requires.gpu, "any");
         assert!(manifest.schemas.is_empty());
     }
