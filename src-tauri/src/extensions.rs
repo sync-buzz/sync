@@ -313,8 +313,8 @@ impl InstalledExtension {
                 .map_or(0, |since| since.as_millis());
             format!("{SCHEME}://{}/{path}?v={stamp}", installed.manifest.id)
         };
-        let ui = installed.manifest.ui.as_ref().map(&served);
-        let styles = installed.manifest.styles.as_ref().map(&served);
+        let ui = installed.manifest.ui.as_ref().map(served);
+        let styles = installed.manifest.styles.as_ref().map(served);
 
         let (types, prompt, defect) = match read_types(&installed.root, &installed.manifest)
             .and_then(|types| {
