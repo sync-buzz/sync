@@ -306,15 +306,20 @@ pub(crate) fn ask<R: Runtime>(
     // "engine path" is the bundled `laya_server.py` script. For everything
     // else, both are files in the store.
     let (model_path, engine_path) = if model.runtime == sync_inference::Runtime::Laya {
-        let script = std::env::current_exe()
+        // Asked of the resource directory rather than worked out from the
+        // executable's own, because those are two different places in a
+        // bundle: a `resources` entry lands in `Contents/Resources` and the
+        // executable sits in `Contents/MacOS`. This door answers both, and in
+        // a build from source it answers `src-tauri`, where the file is.
+        let script = tauri::Manager::path(app)
+            .resource_dir()
             .map_err(|e| {
                 InferenceError::new(
                     "store_failed",
-                    format!("could not find the app executable: {e}"),
+                    format!("could not find the bundled resources: {e}"),
                 )
             })?
-            .parent()
-            .ok_or_else(|| InferenceError::new("store_failed", "the app executable has no parent"))?
+            .join("binaries")
             .join("laya_server.py");
         (
             model.weights.url.clone(),

@@ -44,7 +44,13 @@ next-env.d.ts
 /.sync
 
 # Bundled memory engine — a build artifact of ../memory-hub, not source
-/src-tauri/binaries/
+# The contents rather than the directory: an excluded directory is one Git does
+# not descend into, and the exception below would never be read.
+/src-tauri/binaries/*
+# That exception is one file, which is source and happens to live among the
+# artefacts — the bundler stages it from here, so a checkout without it fails
+# the build on a missing resource rather than on anything a person wrote.
+!/src-tauri/binaries/laya_server.py
 
 # Nothing here needs one — the manifest pins the engine to a tag and a clean
 # checkout builds from it. Ignored anyway, so that a `[patch]` written while

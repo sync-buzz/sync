@@ -8,9 +8,9 @@
 //! Python process for as long as the model is in use.
 //!
 //! The script path arrives as `engine_path` in [`RunParams`](sync_inference::ipc::RunParams)
-//! — the same field Needle 3 uses for its binary. The window resolves where
-//! `laya_server.py` is (beside the app executable in a bundle, or an override
-//! in dev) and passes it through.
+//! — the same field Needle 3 uses for its binary. The window resolves it out of
+//! its own resource directory, which is `Contents/Resources` in a bundle and
+//! `src-tauri` in a build from source, and passes it through.
 
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
