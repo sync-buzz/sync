@@ -87,6 +87,9 @@ export function updatesFor(
     const packaged = packages.byId(id);
     const newest = inRegistry.get(id);
     if (packaged === null || newest === undefined) continue;
+    // An MCP server has a transport rather than an artefact, so there is no
+    // package to compare against and no release to move to.
+    if (newest.artefact === null) continue;
     if (!mayBeUpdated(packaged.pointer.source)) continue;
 
     // `gt` rather than an inequality: `1.10.0` is newer than `1.9.0` and a

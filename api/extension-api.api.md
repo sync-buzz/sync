@@ -147,6 +147,9 @@ export const buttonVariants: (props?: ({
 } & ClassProp) | undefined) => string;
 
 // @public
+export function callExtensionHandler(project: string, id: string, occasion: string, payload: unknown): Promise<unknown>;
+
+// @public
 export function capabilitiesHere(): readonly SyncCapability[];
 
 // @public
@@ -156,10 +159,25 @@ export function chooseAttachments(defaultPath: string): Promise<readonly string[
 export function cn(...inputs: ClassValue[]): string;
 
 // @public
+export interface CommentsOnPage {
+    // (undocumented)
+    readonly active: string | null;
+    // (undocumented)
+    readonly placed: readonly PlacedComment[];
+    readonly resolve: (key: string) => void;
+    // (undocumented)
+    readonly reveal: (key: string) => void;
+}
+
+// @public (undocumented)
+export const CommentsProvider: Provider<(page: CommentsOnPage | null) => void>;
+
+// @public
 export function ContextInspector(input: {
     corpus: Corpus;
     open: OpenDocument | null;
     projectPath: string;
+    comments?: CommentsOnPage | null;
 }): JSX.Element;
 
 // @public
@@ -223,6 +241,9 @@ export interface Dependents {
 }
 
 // @public
+export function describeAnchor(text: string, start: number, end: number): TextAnchor;
+
+// @public
 export function describeMemoryFolder(project: string, folder: string, kind: string): Promise<MemoryDocument>;
 
 // @public
@@ -236,6 +257,16 @@ export function discardWorktree(args: {
     project: string;
     path: string;
 }): Promise<void>;
+
+// @public
+export interface DocumentComment {
+    // (undocumented)
+    readonly anchor: TextAnchor;
+    // (undocumented)
+    readonly body: string;
+    // (undocumented)
+    readonly key: string;
+}
 
 // @public
 export interface DocumentDraft {
@@ -278,6 +309,22 @@ export interface DocumentPatch {
 }
 
 // @public
+export interface DocumentPoint {
+    // (undocumented)
+    readonly offset: number;
+    // (undocumented)
+    readonly path: readonly number[];
+}
+
+// @public (undocumented)
+export interface DocumentRange {
+    // (undocumented)
+    readonly anchor: DocumentPoint;
+    // (undocumented)
+    readonly focus: DocumentPoint;
+}
+
+// @public
 export function DocumentView(input: {
     open: OpenDocument;
     icon: string | null | undefined;
@@ -288,6 +335,14 @@ export function DocumentView(input: {
     onArchive: () => void;
     onDelete: () => void;
     justCreated?: boolean;
+    comments?: readonly DocumentComment[];
+    onCommentWrite?: (anchor: TextAnchor, body: string) => void;
+    onCommentRewrite?: (key: string, body: string) => void;
+    onCommentResolve?: (key: string) => void;
+    onCommentMoved?: (moves: readonly {
+        readonly key: string;
+        readonly anchor: TextAnchor;
+    }[]) => void;
 }): JSX.Element;
 
 // @public (undocumented)
@@ -557,6 +612,7 @@ export interface InstalledExtension {
     readonly settings?: Readonly<Record<string, unknown>>;
     readonly source?: string;
     readonly tools?: readonly ToolDeclaration[];
+    readonly transport?: McpTransportConfig;
     readonly version: string;
 }
 
@@ -580,6 +636,19 @@ export function KindMark(input: {
     icon: string | null | undefined;
     className?: string;
 }): JSX.Element;
+
+// @public
+export function locateAnchor(text: string, anchor: TextAnchor): Located | null;
+
+// @public
+export interface Located {
+    // (undocumented)
+    readonly end: number;
+    // (undocumented)
+    readonly exact: boolean;
+    // (undocumented)
+    readonly start: number;
+}
 
 // @public
 export function Markdown(input: {
@@ -623,6 +692,37 @@ export interface MarkdownPlugin {
     // (undocumented)
     readonly render: (block: MarkdownBlock) => ReactNode | null;
 }
+
+// @public
+export interface McpEnvSecret {
+    // (undocumented)
+    readonly name: string;
+    readonly secret: string;
+}
+
+// @public
+export interface McpHeaderSecret {
+    // (undocumented)
+    readonly name: string;
+    readonly scheme?: string;
+    readonly secret: string;
+}
+
+// @public
+export type McpTransportConfig = {
+    readonly type: "stdio";
+    readonly command: string;
+    readonly args?: readonly string[];
+    readonly env?: readonly McpEnvSecret[];
+} | {
+    readonly type: "http";
+    readonly url: string;
+    readonly headers?: readonly McpHeaderSecret[];
+} | {
+    readonly type: "sse";
+    readonly url: string;
+    readonly headers?: readonly McpHeaderSecret[];
+};
 
 // @public
 export interface MemoryCounts {
@@ -959,6 +1059,17 @@ export interface PermissionRequest {
             readonly message?: string;
         };
     };
+}
+
+// @public
+export interface PlacedComment {
+    // (undocumented)
+    readonly at: Located | null;
+    // (undocumented)
+    readonly comment: DocumentComment;
+    readonly fresh: TextAnchor | null;
+    // (undocumented)
+    readonly range: DocumentRange | null;
 }
 
 // @public
@@ -1490,10 +1601,10 @@ export function stopSession(key: string): Promise<void>;
 export function supportsApiRange(range: string): boolean;
 
 // @public
-export const SYNC_API_VERSION: "3.23.0";
+export const SYNC_API_VERSION: "3.27.0";
 
 // @public
-export const SYNC_CAPABILITIES: readonly ["records", "agents.acp", "markdown.plugins", "native-menu", "folders", "sheets", "net", "net.write", "vault", "background", "schedule", "work.agent", "agent.tools", "terminal", "tools.call"];
+export const SYNC_CAPABILITIES: readonly ["records", "agents.acp", "markdown.plugins", "native-menu", "folders", "sheets", "net", "net.write", "vault", "background", "schedule", "work.agent", "agent.tools", "terminal", "tools.call", "handler.call", "models"];
 
 // @public (undocumented)
 export type SyncCapability = (typeof SYNC_CAPABILITIES)[number];
@@ -1560,6 +1671,20 @@ export interface TerminalSize {
     readonly cols: number;
     // (undocumented)
     readonly rows: number;
+}
+
+// @public
+export interface TextAnchor {
+    // (undocumented)
+    readonly end: number;
+    // (undocumented)
+    readonly prefix: string;
+    // (undocumented)
+    readonly quote: string;
+    // (undocumented)
+    readonly start: number;
+    // (undocumented)
+    readonly suffix: string;
 }
 
 // @public

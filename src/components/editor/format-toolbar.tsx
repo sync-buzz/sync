@@ -36,6 +36,7 @@ import {
   List,
   ListOrdered,
   Strikethrough,
+  StickyNote,
   TextQuote,
 } from "lucide-react";
 import { KEYS, type SlateEditor } from "platejs";
@@ -105,7 +106,16 @@ function block(label: string, icon: ComponentType, key: string): Command {
   };
 }
 
-export function FormatToolbar() {
+export function FormatToolbar({
+  onComment,
+}: {
+  /**
+   * Leave a comment on the selection. Absent where comments have nowhere to be kept,
+   * and then the button is not drawn at all — a control that cannot store what
+   * it takes is worse than a control that is not there.
+   */
+  onComment?: () => void;
+}) {
   const editorId = useEditorId();
   const focusedEditorId = useEventEditorValue("focus");
   const state = useFloatingToolbarState({
@@ -142,6 +152,7 @@ export function FormatToolbar() {
           <CommandButton key={command.label} command={command} />
         ))}
         <LinkButton />
+        {onComment ? <CommentButton onComment={onComment} /> : null}
         <Separator orientation="vertical" className="mx-0.5 h-5" />
         {BLOCKS.map((command) => (
           <CommandButton key={command.label} command={command} />
@@ -186,6 +197,34 @@ function LinkButton() {
         </Button>
       </TooltipTrigger>
       <TooltipContent>{pressed ? "Remove link" : "Link"}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+/**
+ * Leave a comment on the selected words.
+ *
+ * Not a mark and not a block, so it carries no pressed state: the passage may
+ * already have a comment and this one is another, the way two people reading the
+ * same sentence have two remarks about it. What is already there is shown in the
+ * text and listed beside it.
+ */
+function CommentButton({ onComment }: { onComment: () => void }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Comment"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={onComment}
+          className="text-fg-secondary"
+        >
+          <StickyNote />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>Comment</TooltipContent>
     </Tooltip>
   );
 }

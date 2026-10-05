@@ -41,6 +41,8 @@
 //! occasion *means* is the manifest's business: it names a handler, and the
 //! name is what gets called.
 
+use std::sync::Arc;
+
 use serde_json::Value;
 use sync_extensions::{Manifest, NET_CAPABILITY, NetRequest};
 use sync_handlers::{HandlerError, Host, Limits};
@@ -84,6 +86,9 @@ const OFFERED: &[&str] = &[
     "vault.write",
     "vault.forget",
     "net.fetch",
+    "sync.call",
+    "model.run",
+    "model.serving",
 ];
 
 /// What a package must ask for before it may spend somebody's tokens.
@@ -100,6 +105,19 @@ const OFFERED: &[&str] = &[
 /// `sync-ext check` scans the built module for it as well, in the author's own
 /// terminal, which is the earliest place the mistake can be caught at all.
 const WORK_AGENT_CAPABILITY: &str = "work.agent";
+
+/// What a package must ask for before it may call another package's handler.
+/// The same path an agent's `sync_call` takes, reached from a handler: the
+/// called extension runs in its own isolate with its own capabilities, so the
+/// caller receives only the answer.
+const HANDLER_CALL_CAPABILITY: &str = "handler.call";
+
+/// What a package must ask for before it may call a local auxiliary model.
+/// Spelled here rather than beside `sync_extensions::manifest::MODELS_CAPABILITY`
+/// for the same reason `WORK_AGENT_CAPABILITY` is: whether a handler ever asks
+/// is inside its built JavaScript, and the only honest place to enforce it is
+/// the call.
+const MODELS_CAPABILITY: &str = "models";
 
 /// The project's memory, as a handler is allowed to see it.
 ///
@@ -145,6 +163,15 @@ struct ProjectMemory<R: Runtime> {
     /// This is not secrecy from the package: it holds the value and may send it
     /// anywhere its manifest allows. It is one accident, closed.
     redacted: Vec<String>,
+    /// Held MCP connections for the run this handler is one call in.
+    ///
+    /// A `sync.call` to a project-scoped MCP server reuses a connection here
+    /// rather than connecting, asking and shutting down on every call — so a
+    /// server whose process holds state across calls (a browser a `navigate`
+    /// opened) stays alive for the run. The pool is shared with [`run`], which
+    /// holds its own clone and drains it when the handler returns: the run is
+    /// the lifetime, and a stdio server's process goes when it ends.
+    mcp_pool: Arc<tokio::sync::Mutex<sync_mcp_client::Pool>>,
 }
 
 impl<R: Runtime> Host for ProjectMemory<R> {
@@ -274,11 +301,124 @@ impl<R: Runtime> Host for ProjectMemory<R> {
                 fetch_now(&self.id, &self.manifest, &request)
                     .map(|response| serde_json::to_value(response).unwrap_or(Value::Null))
             }
+            // Call another extension's tool handler. The tool is named
+            // `<extension id>.<tool name>` — the same shape an agent's
+            // `sync_call` uses — and the target runs in its own isolate with
+            // its own capabilities and its own vault. The caller receives only
+            // the answer, never the called extension's secrets or hosts.
+            //
+            // The same path an agent's `sync_call` takes means the same
+            // dispatch too: a project-scoped MCP server is reached first, and
+            // only when none answers does the call fall through to an
+            // extension's handler. The comment above named that path before
+            // the code did, and a tool a project declared as an MCP server —
+            // `playwright.navigate`, `puppeteer.navigate` — was reaching the
+            // extension store and failing with *not installed* instead.
+            "sync.call" => {
+                asked_for(&self.manifest, &self.id, HANDLER_CALL_CAPABILITY)?;
+                let tool = arguments
+                    .get("tool")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| said("a tool name"))?;
+                let call_arguments = arguments.get("args").cloned().unwrap_or(Value::Null);
+                let Some((target_id, tool_name)) = tool.split_once('.') else {
+                    return Err(format!(
+                        "`{function}` was given `{tool}`, which has no `.`: a tool is `<extension id>.<tool name>`"
+                    ));
+                };
+                // The same dispatch the agent's `sync_call` takes, but pooled:
+                // a project-scoped MCP server is reached through a held
+                // connection so a server whose process holds state across
+                // calls — a browser a `navigate` opened — stays alive for the
+                // run. `Ok(None)` is not an MCP server, and the call falls
+                // through to an extension's handler as `sync_call` does.
+                let app = self.app.clone();
+                let project = self.project.clone();
+                let asking = self.id.clone();
+                let pool = self.mcp_pool.clone();
+                let pooled_args = call_arguments.clone();
+                match tauri::async_runtime::block_on(async move {
+                    let mut pool = pool.lock().await;
+                    crate::mcp::call_tool_pooled(
+                        &app,
+                        &mut pool,
+                        &project,
+                        target_id,
+                        tool_name,
+                        &pooled_args,
+                        Some(&asking),
+                    )
+                    .await
+                }) {
+                    Ok(Some(answer)) => Ok(answer),
+                    Ok(None) => {
+                        let installed = store(&self.app)?
+                            .resolve(target_id)
+                            .map_err(|error| error.to_string())?
+                            .ok_or_else(|| {
+                                format!("`{target_id}` is not installed on this machine")
+                            })?;
+                        let Some(handler) = installed.manifest.handler_for(tool_name) else {
+                            return Err(format!(
+                                "`{target_id}` does not offer a tool named `{tool_name}`"
+                            ));
+                        };
+                        run(
+                            &self.app,
+                            &installed,
+                            &self.project,
+                            handler,
+                            &call_arguments,
+                        )
+                    }
+                    Err(error) => Err(error),
+                }
+            }
             // Named rather than ignored, and named as a refusal rather than as a
             // missing function: a handler asking for something it has no
             // permission for should hear why, and its author should be able to
             // catch it and carry on.
             //
+            // The sentence names what *is* offered, and it names it from the
+            // list rather than from a second spelling of it: this refusal is
+            // the whole of what bounds the drift between this match and the
+            // surface `@sync-buzz/extension-api/service` publishes.
+            // An auxiliary model: a small local model this machine has
+            // downloaded, asked through the pass-through surface. The task and
+            // the input cross whole — the shape is the model's, declared in its
+            // manifest, not encoded in this signature. See `models.rs` and
+            // `sync-inference` for why.
+            //
+            // Spends the machine's cycles rather than somebody's tokens, which
+            // is why this is a separate capability from `work.agent`: a person
+            // agreeing to this is agreeing to inference running unattended, not
+            // to a bill.
+            "model.run" => {
+                asked_for(&self.manifest, &self.id, MODELS_CAPABILITY)?;
+                let task = arguments
+                    .get("task")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| said("a task"))?;
+                let input = arguments.get("input").cloned().unwrap_or(Value::Null);
+                crate::models::ask(&self.app, task, &input)
+                    .map(|v| serde_json::to_value(v).unwrap_or(Value::Null))
+                    .map_err(|error| error.message)
+            }
+            // The schema a model declares for a task, so an author can write
+            // against the shape without reading the manifest file. The same
+            // capability: reading what a model takes is half of calling one.
+            "model.serving" => {
+                asked_for(&self.manifest, &self.id, MODELS_CAPABILITY)?;
+                let task = arguments
+                    .get("task")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| said("a task"))?;
+                match crate::models::serving_schema(&self.app, task) {
+                    Some(schema) => serde_json::to_value(schema)
+                        .map_err(|error| format!("could not encode the schema: {error}")),
+                    None => Ok(Value::Null),
+                }
+            }
             // The sentence names what *is* offered, and it names it from the
             // list rather than from a second spelling of it: this refusal is
             // the whole of what bounds the drift between this match and the
@@ -476,6 +616,7 @@ pub(crate) fn run<R: Runtime>(
     let source = std::fs::read_to_string(installed.root.join(path))
         .map_err(|error| format!("`{id}` could not be read to run `{handler}`: {error}"))?;
 
+    let mcp_pool = Arc::new(tokio::sync::Mutex::new(sync_mcp_client::Pool::new()));
     let host = ProjectMemory {
         app: app.clone(),
         project: project.to_owned(),
@@ -484,8 +625,9 @@ pub(crate) fn run<R: Runtime>(
         handler: handler.to_owned(),
         manifest: installed.manifest.clone(),
         redacted: Vec::new(),
+        mcp_pool: mcp_pool.clone(),
     };
-    match sync_handlers::call(&source, handler, payload, LIMITS, host) {
+    let result = match sync_handlers::call(&source, handler, payload, LIMITS, host) {
         Ok(answer) => Ok(answer),
         // The extension's id belongs in front of every one of these: by the
         // time somebody reads it, which package it was is the first thing they
@@ -494,7 +636,15 @@ pub(crate) fn run<R: Runtime>(
             Err(format!("`{id}` and its service module disagree: {error}"))
         }
         Err(error) => Err(format!("`{id}`: {error}")),
-    }
+    };
+    // The run is over: drain the held MCP connections so a stdio server's
+    // process — and the browser it holds — does not outlive the handler. The
+    // isolate has dropped its `ProjectMemory` by now, and this clone is the
+    // last, so the pool goes when drain takes it.
+    tauri::async_runtime::block_on(async {
+        mcp_pool.lock().await.drain().await;
+    });
+    result
 }
 
 #[cfg(test)]

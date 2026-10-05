@@ -2,6 +2,7 @@ import {
   AudioLines,
   Bell,
   Bot,
+  Cpu,
   GitBranch,
   KeyRound,
   Palette,
@@ -195,6 +196,13 @@ export const SETTINGS_SECTIONS = [
     label: "Working trees",
     icon: GitBranch,
     headline: "Where a conversation works when it works somewhere disposable.",
+    band: BANDS.work,
+  },
+  {
+    id: "models",
+    label: "Models",
+    icon: Cpu,
+    headline: "Local models this machine has downloaded, available to any project's extensions.",
     band: BANDS.work,
   },
   {

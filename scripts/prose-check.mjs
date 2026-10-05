@@ -402,7 +402,12 @@ function tracked() {
   return execFileSync("git", ["ls-files", "-z"], { cwd: ROOT, encoding: "utf8" })
     .split("\0")
     .filter(Boolean)
-    .filter((f) => f !== "scripts/prose-check.mjs");
+    .filter((f) => f !== "scripts/prose-check.mjs")
+    // Somebody else's prose, vendored whole. The rules below are about what is
+    // written here — holding a copied-in document to them means either editing
+    // a file that is replaced wholesale on the next copy, or a red build
+    // nobody can fix.
+    .filter((f) => !f.startsWith(".agents/"));
 }
 
 function run() {

@@ -18,7 +18,9 @@
  *   semantics, which is why that part is done here rather than asked of anyone.
  * - **`sync://<kind>/<key>`** for a record with no file, whose body lives in
  *   the corpus itself. There is no path to point at, so the record is named
- *   directly.
+ *   directly. A third segment in front of the kind names the project — the
+ *   spelling an address takes when it leaves the window, where nothing knows
+ *   which of the machine's projects was meant.
  *
  * The kind is in the second spelling deliberately. A record's kind is what
  * decides which part of the window opens it — `openerOf` in
@@ -46,8 +48,17 @@ export const RECORD_SCHEME = "sync";
 
 /** What a link points at, when it points anywhere this window can reach. */
 export type LinkTarget =
-  /** A record, named. */
-  | { readonly at: "record"; readonly key: string; readonly kind: string }
+  /**
+   * A record, named — and the project it is in, where the link says. `null` is
+   * *this* project, which is what a link written inside one means and what every
+   * body in every corpus already holds.
+   */
+  | {
+      readonly at: "record";
+      readonly key: string;
+      readonly kind: string;
+      readonly project: string | null;
+    }
   /**
    * A file of an attached folder, by its path from the repository root. Which
    * record holds it is the store's to say, and is asked when it is followed.
@@ -72,23 +83,52 @@ export function isWebUrl(url: string): boolean {
 }
 
 /**
- * Parsed rather than handed to `URL`.
+ * The record a `sync://` url names, or `null` for any other url.
  *
- * `new URL("sync://Decision/d-1")` lowercases the host, and the host is the
- * kind — a kind spelled with a capital would silently become another kind, and
- * the link would open the wrong section or none.
+ * Two segments name a record and leave the project to be understood; three name
+ * the project first, by the identifier it answers to on the machine the link is
+ * followed on. The second spelling exists because the first cannot survive
+ * leaving the window — see `src-tauri/src/links.rs`, which reads the same
+ * grammar for an address arriving from anywhere else on the machine, and has to
+ * read it identically: a link the two sides disagree about opens the wrong
+ * record or none.
+ *
+ * Parsed rather than handed to `URL`, and the segments are what makes that
+ * worth stating twice: a kind decides which section opens the record and an
+ * identifier decides which project does, so neither may be quietly folded or
+ * normalised by something that thinks it is looking at a host.
+ *
+ * A raw `/` inside a key is what the three-segment spelling costs, and it costs
+ * nothing real: every segment of every address Sync writes is escaped — here and
+ * in `sync-mcp`'s `link.rs` both — so a slash in a key arrives as `%2F` and
+ * comes back out of the segment it was written in.
  */
-const RECORD_URL = /^sync:\/\/([^/?#]+)\/([^?#]+)$/i;
+export function recordTarget(
+  url: string,
+): { key: string; kind: string; project: string | null } | null {
+  const trimmed = url.trim();
+  const scheme = trimmed.indexOf("://");
+  if (scheme === -1) return null;
+  // The scheme is the one part read either way, because that is what a scheme
+  // is. Everything after it is somebody's name for something.
+  if (trimmed.slice(0, scheme).toLowerCase() !== RECORD_SCHEME) return null;
 
-/** The record a `sync://` url names, or `null` for any other url. */
-export function recordTarget(url: string): { key: string; kind: string } | null {
-  const match = RECORD_URL.exec(url.trim());
-  if (match === null) return null;
+  // The query and the fragment are dropped: nothing in this grammar reads
+  // either, and an address that came back from a chat client with something
+  // appended still names the record it named. One trailing slash is forgiven for
+  // the same reason, and a second one is not — by then it is not an address.
+  const path = trimmed.slice(scheme + 3).split(/[?#]/, 1)[0];
+  const written = path.endsWith("/") ? path.slice(0, -1) : path;
+
+  const raw = written.split("/");
+  if (raw.length < 2 || raw.length > 3) return null;
+  if (raw.some((segment) => segment === "")) return null;
 
   try {
-    const kind = decodeURIComponent(match[1]);
-    const key = decodeURIComponent(match[2]);
-    return kind === "" || key === "" ? null : { kind, key };
+    const [first, second, third] = raw.map(decodeURIComponent);
+    return third === undefined
+      ? { project: null, kind: first, key: second }
+      : { project: first, kind: second, key: third };
   } catch {
     // A url this window cannot decode is a url it does not own. Drawn as an
     // ordinary link, which is what it looks like to everything else too.
@@ -96,9 +136,26 @@ export function recordTarget(url: string): { key: string; kind: string } | null 
   }
 }
 
-/** How a record with no file is addressed from inside a body. */
-export function recordHref({ kind, key }: { kind: string; key: string }): string {
-  return `${RECORD_SCHEME}://${encodeURIComponent(kind)}/${encodeURIComponent(key)}`;
+/**
+ * How a record with no file is addressed from inside a body.
+ *
+ * Without a project, which is what a body is written with: the identifier is
+ * what a project answers to on *this* machine, and a body travels with the
+ * repository it is in. With one where the address is leaving the window — the
+ * only thing that can follow a link from a terminal or another application is
+ * an address that says which project it is about.
+ */
+export function recordHref({
+  kind,
+  key,
+  project = null,
+}: {
+  kind: string;
+  key: string;
+  project?: string | null;
+}): string {
+  const named = project === null ? "" : `${encodeURIComponent(project)}/`;
+  return `${RECORD_SCHEME}://${named}${encodeURIComponent(kind)}/${encodeURIComponent(key)}`;
 }
 
 /** The directory part of a repository path. `""` is the root. */
@@ -237,7 +294,10 @@ function encodeSegment(segment: string): string {
 export interface RecordLinks {
   /**
    * What this url points at, given the file the body it is written in lives in.
-   * `null` for a url that leaves the project, which includes every `https://`.
+   *
+   * A web address is one of the three answers rather than an absence — see
+   * `LinkTarget` — and `null` means *nowhere*: a path resolving outside every
+   * attached folder, or a scheme the capability does not grant.
    */
   readonly targetOf: (url: string, base: string | null) => LinkTarget | null;
   readonly follow: (target: LinkTarget) => void;
@@ -301,7 +361,10 @@ export function useOpenRecord():
     () =>
       links === null
         ? null
-        : ({ key, kind }) => links.follow({ at: "record", key, kind }),
+        : ({ key, kind }) =>
+            // No project: a section showing a record of the project it is
+            // mounted in is the only record it can be asking for.
+            links.follow({ at: "record", key, kind, project: null }),
     [links],
   );
 }

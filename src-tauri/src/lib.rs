@@ -26,7 +26,11 @@ pub mod dock;
 pub mod extensions;
 pub mod flagship;
 pub mod handlers;
+pub mod inference;
+pub mod links;
+pub mod mcp;
 pub mod memory;
+pub mod models;
 pub mod project;
 pub mod remote;
 pub mod schedule;
@@ -66,6 +70,11 @@ pub fn run() {
         // opening a *path* is a different command and is not granted, so a
         // record cannot ask this window to launch something on the disk.
         .plugin(tauri_plugin_opener::init())
+        // What makes `sync://` an address the machine can follow. The webview
+        // is granted none of it: an address arrives from another application,
+        // often with nothing of Sync on screen, so which window answers it is
+        // decided in `links.rs` before there is a window to ask.
+        .plugin(tauri_plugin_deep_link::init())
         // Nothing of this is granted to the webview either. The banner is
         // raised by `attention::announcer`, which runs where a window does not
         // have to exist.
@@ -75,6 +84,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(memory::MemorySessions::default())
         .manage(memory::MemoryWatchers::default())
+        .manage(inference::InferenceSidecar::default())
         .manage(server::RunningServer::default())
         .manage(schedule::ScheduleFile::default())
         .manage(work::WorkFile::default())
@@ -95,6 +105,9 @@ pub fn run() {
         // Where a click on a banner is left for the window that will answer it,
         // which is a window that may not have been made when it was clicked.
         .manage(attention::Addressed::default())
+        // And the same for an address followed from outside the application,
+        // which is the other thing that arrives at a window without it asking.
+        .manage(links::Waiting::default())
         // Terminals outlive the section that opened one, for the same reason:
         // an area can be left, hidden or reloaded, and none of those is a
         // reason for a build to stop. What ends them is closing the project.
@@ -137,6 +150,10 @@ pub fn run() {
             // click is delivered to whatever is listening by the time the
             // launch is over.
             attention::install(&handle);
+            // Beside it, and for the same reason: following a `sync://` address
+            // launches Sync as readily as clicking a banner does, and a listener
+            // installed later is installed after the click it was for.
+            links::install(&handle);
             // The Dock icon's own menu, which is the only place a second window
             // can be asked for without Sync being the active application first.
             #[cfg(target_os = "macos")]
@@ -204,6 +221,7 @@ pub fn run() {
             flagship::flagship_servers,
             flagship::flagship_call,
             flagship::extension_tool_call,
+            mcp::mcp_list_tools,
             consent::tool_consent_status,
             consent::tool_consent_grant,
             consent::tool_consent_revoke,
@@ -220,6 +238,7 @@ pub fn run() {
             handlers::extension_handler_call,
             project::project_probe,
             project::project_remote,
+            project::project_author,
             project::project_initialize_repository,
             server::server_status,
             server::server_restart,
@@ -307,9 +326,16 @@ pub fn run() {
             voice::voice_choose,
             voice::voice_speak,
             voice::voice_stop,
+            models::models_status,
+            models::model_install_catalogue,
+            models::model_remove,
+            models::model_assign,
+            models::model_test,
             attention::notifications_settings,
             attention::notifications_addressed,
             attention::notifications_choose,
+            links::link_followed,
+            links::link_follow,
             windows::window_new,
             windows::window_named,
             windows::window_holds,

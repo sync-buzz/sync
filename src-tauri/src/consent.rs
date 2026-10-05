@@ -84,6 +84,18 @@ struct Agreed {
     granted: Vec<Agreement>,
 }
 
+/// A server name that matches every server, for a package a person has agreed
+/// may call any of their MCP servers rather than one.
+///
+/// The narrow rule this file keeps is one package and one server, and a row
+/// that names a server is still that. A wildcard is a second kind of row, given
+/// deliberately and read back as *this package, any server* — the width a
+/// drawing surface needs when the set of servers it reaches is decided in the
+/// project (a node names `playwright.navigate` today and `stripe.get_account`
+/// tomorrow) rather than fixed in the package. It is wider than the per-server
+/// row, and it is the width the person asked for, on the package's own page.
+pub(crate) const WILDCARD_SERVER: &str = "*";
+
 /// One package, with every server it was agreed it may call.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -160,10 +172,10 @@ pub(crate) fn allows<R: Runtime>(app: &AppHandle<R>, extension: &str, server: &s
 }
 
 fn allowed(agreed: &Agreed, extension: &str, server: &str) -> bool {
-    agreed
-        .granted
-        .iter()
-        .any(|agreement| agreement.extension == extension && agreement.server == server)
+    agreed.granted.iter().any(|agreement| {
+        agreement.extension == extension
+            && (agreement.server == server || agreement.server == WILDCARD_SERVER)
+    })
 }
 
 /// What a person agreed to for one package, beside whatever it held already.
@@ -311,6 +323,37 @@ mod tests {
     fn nothing_is_allowed_until_somebody_agrees() {
         let agreed = Agreed::default();
         assert!(!allowed(&agreed, "panel", "sync"));
+    }
+
+    /// A wildcard row agrees to every server for that package and no server for
+    /// any other. The width a drawing surface needs when the servers it reaches
+    /// are decided in the project, not in the package.
+    #[test]
+    fn a_wildcard_agreement_allows_every_server_for_that_package() {
+        let mut agreed = Agreed::default();
+        grant(&mut agreed, "workflows", WILDCARD_SERVER);
+
+        assert!(allowed(&agreed, "workflows", "playwright"));
+        assert!(allowed(&agreed, "workflows", "stripe"));
+        // Another package is not covered: a wildcard is per package.
+        assert!(!allowed(&agreed, "other-panel", "playwright"));
+    }
+
+    /// A named server is still agreed to by its name, and a wildcard does not
+    /// erase it. The two coexist, and withdrawing the wildcard leaves the named
+    /// one standing — the same rule every other pair already follows.
+    #[test]
+    fn a_wildcard_does_not_replace_a_named_agreement() {
+        let mut agreed = Agreed::default();
+        grant(&mut agreed, "workflows", "playwright");
+        grant(&mut agreed, "workflows", WILDCARD_SERVER);
+
+        assert!(allowed(&agreed, "workflows", "playwright"));
+        assert!(allowed(&agreed, "workflows", "stripe"));
+
+        revoke(&mut agreed, "workflows", WILDCARD_SERVER);
+        assert!(allowed(&agreed, "workflows", "playwright"));
+        assert!(!allowed(&agreed, "workflows", "stripe"));
     }
 
     #[test]

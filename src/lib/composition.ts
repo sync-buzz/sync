@@ -10,6 +10,7 @@ import {
   repointExtension,
   type InstalledExtension,
   type ListedExtension,
+  type McpTransportSpec,
   type Pointer,
   type RegistryArtefact,
 } from "@/lib/extension-host/client";
@@ -20,8 +21,9 @@ import {
   type ExtensionTypeInput,
 } from "@/lib/memory/client";
 import { explain } from "@/lib/memory/use-corpus";
-import { saveProjectSettings } from "@/lib/project/client";
-import type { OpenProject, ToolDeclaration } from "@/lib/project/types";
+import type { CatalogueEntry } from "@/lib/extension-host/catalogue";
+import { mcpListTools, saveProjectSettings } from "@/lib/project/client";
+import type { McpTransportConfig, OpenProject, ToolDeclaration } from "@/lib/project/types";
 
 /**
  * What a project is composed of, and how that changes.
@@ -99,6 +101,16 @@ export interface Composition {
    * installing from a file or a folder leaves behind.
    */
   readonly install: (id: string, from?: RegistryArtefact) => Promise<void>;
+  /**
+   * Declare an MCP server from its catalogue entry, discovering its tools.
+   *
+   * The entry carries the transport live from the registry, so a stale cache
+   * cannot turn the add into *no artefact to fetch* the way a lookup by id
+   * could. The declaration is written first, then the server's tools are
+   * discovered and written in — best-effort, so a server not yet on the PATH is
+   * still added with its tools filled in on a later refresh.
+   */
+  readonly addMcp: (entry: CatalogueEntry) => Promise<void>;
   /**
    * Move a declared extension to another version the registry published.
    *
@@ -420,6 +432,46 @@ function buildInstallPlan(
   return steps;
 }
 
+/**
+ * The runtime half of an MCP transport spec, as the project record stores it.
+ *
+ * The spec carries the descriptions a credential prompt needs; the record
+ * drops them, keeping only the secret names and where they live in the vault.
+ * What is left is what a call site needs to connect and what a session launcher
+ * needs to hand an agent.
+ */
+function toConfig(spec: McpTransportSpec): McpTransportConfig {
+  switch (spec.type) {
+    case "stdio":
+      return {
+        type: "stdio",
+        command: spec.command,
+        args: spec.args ? [...spec.args] : [],
+        env: (spec.env ?? []).map((e) => ({ name: e.name, secret: e.secret })),
+      };
+    case "http":
+      return {
+        type: "http",
+        url: spec.url,
+        headers: (spec.headers ?? []).map((h) => ({
+          name: h.name,
+          secret: h.secret,
+          ...(h.scheme ? { scheme: h.scheme } : {}),
+        })),
+      };
+    case "sse":
+      return {
+        type: "sse",
+        url: spec.url,
+        headers: (spec.headers ?? []).map((h) => ({
+          name: h.name,
+          secret: h.secret,
+          ...(h.scheme ? { scheme: h.scheme } : {}),
+        })),
+      };
+  }
+}
+
 export function useComposition(
   project: OpenProject,
   /** What this machine has unpacked, which is what a declaration resolves to. */
@@ -617,6 +669,49 @@ export function useComposition(
       }
     },
     [onChanged, packages, project.path],
+  );
+
+  const addMcp = useCallback(
+    async (entry: CatalogueEntry): Promise<void> => {
+      if (project.installed.some((one) => one.id === entry.id)) return;
+      // The transport comes from the catalogue entry the sheet holds — live from
+      // the registry — rather than a cache lookup, so a stale cache cannot turn
+      // an MCP add into "no artefact to fetch". The declaration is written first,
+      // then the server's tools are discovered and written in.
+      const transport = entry.transport;
+      if (transport === null) return;
+      const declaration = {
+        id: entry.id,
+        name: entry.name,
+        icon: entry.icon ?? "",
+        version: entry.version,
+        transport: toConfig(transport),
+        tools: [] as readonly ToolDeclaration[],
+      };
+      const next: OpenProject = {
+        ...project,
+        installed: [...project.installed, declaration],
+      };
+      await write(next, []);
+      try {
+        const tools = await mcpListTools(project.path, entry.id);
+        if (tools.length > 0) {
+          await write(
+            {
+              ...next,
+              installed: next.installed.map((one) =>
+                one.id === entry.id ? { ...one, tools } : one,
+              ),
+            },
+            [],
+          );
+        }
+      } catch {
+        // The server may not be on the PATH yet, or a secret may be wrong;
+        // either is a sentence for later, not a reason to refuse the add.
+      }
+    },
+    [project, write],
   );
 
   const install = useCallback(
@@ -835,6 +930,7 @@ export function useComposition(
     failure,
     dismissFailure: () => setFailure(null),
     install,
+    addMcp,
     change,
     remove,
     countRecords,

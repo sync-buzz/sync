@@ -115,6 +115,10 @@ export interface InstalledExtension {
   /**
    * The version that was installed, not the one available now. An extension
    * that has moved on is something the window can notice and say.
+   *
+   * Empty for an MCP server, which has a `transport` rather than a package to
+   * version — there is nothing to compare, and an update check treats empty
+   * as *nothing to compare*.
    */
   readonly version: string;
   /**
@@ -168,6 +172,56 @@ export interface InstalledExtension {
    * which is most of them.
    */
   readonly settings?: Readonly<Record<string, unknown>>;
+  /**
+   * How to reach an MCP server, when this entry is one rather than a package.
+   *
+   * Present turns this entry into an MCP server: the session launcher resolves
+   * it into the `mcp_servers` an agent is given, and a tool call routes it
+   * through Sync's own client. The secrets it names live in the vault under
+   * `mcp-{id}`, not here. Absent for a code package.
+   */
+  readonly transport?: McpTransportConfig;
+}
+
+/**
+ * How a project declares it reaches an MCP server, as the record carries it.
+ *
+ * The runtime half of the registry's spec: the descriptions a credential
+ * prompt needs are not here, only the secret names and where they live in the
+ * vault.
+ */
+export type McpTransportConfig =
+  | {
+      readonly type: "stdio";
+      readonly command: string;
+      readonly args?: readonly string[];
+      readonly env?: readonly McpEnvSecret[];
+    }
+  | {
+      readonly type: "http";
+      readonly url: string;
+      readonly headers?: readonly McpHeaderSecret[];
+    }
+  | {
+      readonly type: "sse";
+      readonly url: string;
+      readonly headers?: readonly McpHeaderSecret[];
+    };
+
+/** One environment variable an installed MCP stdio transport needs. */
+export interface McpEnvSecret {
+  readonly name: string;
+  /** The vault key the value is stored under, as `mcp-{id}/{secret}`. */
+  readonly secret: string;
+}
+
+/** One HTTP header an installed MCP transport sends. */
+export interface McpHeaderSecret {
+  readonly name: string;
+  /** The vault key the value is stored under, as `mcp-{id}/{secret}`. */
+  readonly secret: string;
+  /** How the value is prefixed onto the header (`Bearer` is common). */
+  readonly scheme?: string;
 }
 
 /** One tool an extension offers an agent, as the project records it. */

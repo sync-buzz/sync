@@ -42,6 +42,51 @@ import { device } from "@/lib/device";
  * point of the number is that a manifest can state a range and be believed. The
  * cost is honest major bumps, which is the cost of meaning it.
  *
+ * **3.27.0** renames the surface 3.26.0 introduced for remarks on a passage:
+ * `DocumentNote` becomes `DocumentComment`, `NotesOnPage` becomes
+ * `CommentsOnPage`, `NotesProvider` becomes `CommentsProvider`, and the
+ * `DocumentView` props follow — `onNoteWrite` is `onCommentWrite`,
+ * `onNoteClose` is `onCommentResolve`. `PlacedComment` is new: a comment with
+ * the place in the text it was found at. A *note* is what somebody writes for
+ * themselves on a page; what this is, is a remark addressed to whoever reads
+ * the passage next, and Apple's own text calls that a comment. The old spelling
+ * went out in 3.26.0 and nothing was built against it, which is why this is a
+ * minor and not a major — the number is honest only because the names it
+ * removed had nowhere to be in use. 3.26.0 is deprecated on npm so that no
+ * range resolves to a surface whose names are gone.
+ *
+ * **3.26.0** is two things that arrived together. `callExtensionHandler`, and
+ * `handler.call` beside it, let a handler run another package's handler — the
+ * same path an agent's `sync_call` takes, with the called package in its own
+ * isolate, its own capabilities and its own vault, and only the answer coming
+ * back. And a remark can be kept beside a passage without being written into
+ * it: `describeAnchor` and `locateAnchor` state and find a place in the text by
+ * the quote and the words either side of it rather than by an offset, which is
+ * what lets the remark survive the paragraph above it growing. `TextAnchor`,
+ * `Located`, `DocumentPoint` and `DocumentRange` name those shapes. Added and
+ * nothing removed, so a minor.
+ *
+ * **3.25.0** is a local auxiliary model. `models` joins the capability list,
+ * and a handler may ask one through the service surface's `model.run(task,
+ * input)` and read its declared schema through `model.serving(task)`. The
+ * surface is pass-through — the input and output are opaque, because a model's
+ * request and response shape moves between versions of the model without the
+ * surface moving with it — and the shape is declared in the model's manifest,
+ * not in the surface. A model is a machine-level concern, downloaded into the
+ * application's configuration directory and shared by every project, reached by
+ * any handler whose manifest asked for the capability. A capability added and
+ * nothing an existing package names changed, so a minor.
+ *
+ * **3.24.0** gives `InstalledExtension` a `transport`. An entry that carries
+ * one is an MCP server the project declares rather than a package it depends
+ * on: there is no artefact, no version and no integrity, and the secrets it
+ * names live in the vault under `mcp-{id}` rather than on the record. The new
+ * types `McpTransportConfig`, `McpEnvSecret` and `McpHeaderSecret` name the
+ * shape of one. `version`, which was required, becomes optional for the same
+ * reason — an MCP server has nothing to version. Optional fields added and
+ * none removed, so a minor, and every package stating `^3.0` goes on
+ * installing.
+ *
  * **3.23.0** gives `InstalledExtension` an `icon`. The icon name the
  * manifest gave is now on the record, for the same reason `name` is: the
  * record travels with the repository, and an area drawing the project's
@@ -815,7 +860,7 @@ import { device } from "@/lib/device";
  * `AreaModule`, `ActivationResult` — arrived in the same commit, which on its
  * own would have been a minor.
  */
-export const SYNC_API_VERSION = "3.23.0" as const;
+export const SYNC_API_VERSION = "3.27.0" as const;
 
 /**
  * What this build can do, as opposed to what its surface looks like.
@@ -1010,6 +1055,36 @@ export const SYNC_CAPABILITIES = [
    * for, is inside its built JavaScript.
    */
   "tools.call",
+  /**
+   * Calling another package's handler from this one.
+   *
+   * The same path an agent's `sync_call` takes, reached from a handler: the
+   * called extension runs in its own isolate with its own capabilities and
+   * its own vault, and the caller receives only the answer. Checked when the
+   * call is made, like `work.agent` and `vault`: whether a handler ever calls
+   * another is inside its built JavaScript.
+   */
+  "handler.call",
+  /**
+   * Asking a local auxiliary model — a small model this machine has downloaded
+   * — to answer a typed task.
+   *
+   * A separate agreement from `tools.call` for the same reason that one is
+   * separate from `net`: a tool call is a turn of somebody's agent, which costs
+   * tokens and a wait, and a model call is neither. The model is on this
+   * machine, the answer is local, and what a person is agreeing to is that this
+   * package may spend the machine's cycles on inference while nobody is
+   * looking.
+   *
+   * Checked when the call is made rather than when the manifest is read, like
+   * `work.agent` and `vault`: whether a handler ever asks a model is inside its
+   * built JavaScript. The surface is pass-through — `model.run(task, input)`
+   * with an opaque input and an opaque output — because a model's request and
+   * response shape moves between versions of the model without the shell's
+   * surface moving with it. The shape is declared in the model's manifest; the
+   * task is what the shell dispatches on.
+   */
+  "models",
 ] as const;
 
 export type SyncCapability = (typeof SYNC_CAPABILITIES)[number];

@@ -206,6 +206,31 @@ export { DocumentView } from "@/components/shell/document-view";
 export { Markdown, type MarkdownBlock, type MarkdownPlugin } from "@/components/shell/markdown";
 export { RecordMetadata } from "@/components/shell/record-metadata";
 export { ContextInspector } from "@/components/shell/context-inspector";
+/**
+ * A comment on a passage of a record.
+ *
+ * Every part of drawing one is the shell's — the shaded passage, the card, the
+ * list beside the text — and every part of *keeping* one is not. The shell is
+ * handed comments and reports what happened to them; which kind of record a comment is
+ * stored as, and whether this project keeps comments at all, belong to the package
+ * that opened the view.
+ *
+ * What is guaranteed here is the thing the mechanism exists for: a comment is a
+ * decoration over the text and never a node of it, so nothing about it can be
+ * written into a body — including a body that is a file in the repository. The
+ * anchoring is a quote with the text either side of it rather than a position,
+ * which is what survives a save reflowing the Markdown.
+ */
+export {
+  describeAnchor,
+  locateAnchor,
+  type DocumentPoint,
+  type DocumentRange,
+  type Located,
+  type TextAnchor,
+} from "@/lib/editor/anchor";
+export { CommentsProvider, type CommentsOnPage } from "@/lib/editor/comment-view";
+export { type DocumentComment, type PlacedComment } from "@/lib/editor/comments";
 
 // ---------------------------------------------------------------------------
 // Native gestures.
@@ -445,6 +470,9 @@ export type {
   ProjectLanguageId,
   InstalledExtension,
   ToolDeclaration,
+  McpTransportConfig,
+  McpEnvSecret,
+  McpHeaderSecret,
 } from "@/lib/project/types";
 // The list the id is drawn from, because the id is derived from it: a type
 // defined as "one of these" cannot be named without the these.
@@ -570,3 +598,12 @@ export {
 // ---------------------------------------------------------------------------
 
 export { cn } from "@/lib/utils";
+
+// ---------------------------------------------------------------------------
+// Calling an extension's own handler from its screen. The host's door onto the
+// isolate — the same path the clock and an agent's tool call take, reached from
+// a button a package drew. The `id` is the extension's own, `occasion` the
+// handler name the manifest declares, `payload` what the handler receives.
+// ---------------------------------------------------------------------------
+
+export { callExtensionHandler } from "@/lib/extension-host/client";

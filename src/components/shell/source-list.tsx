@@ -294,7 +294,7 @@ function SourceListRow({
         }
       }}
       className={cn(
-        "relative flex h-(--control-height-lg) w-full items-center gap-2.5 rounded-(--radius-control) text-left text-base text-fg-secondary transition-colors duration-(--motion-duration-fast) ease-shell hover:bg-hover hover:text-fg data-[within=true]:text-fg data-[active=true]:bg-selected data-[active=true]:font-medium data-[active=true]:text-fg data-[dragging=true]:opacity-50",
+        "group relative flex h-(--control-height-lg) w-full items-center gap-2.5 rounded-(--radius-control) text-left text-base text-fg-secondary transition-colors duration-(--motion-duration-fast) ease-shell hover:bg-hover hover:text-fg data-[within=true]:text-fg data-[active=true]:bg-accent-fill data-[active=true]:font-medium data-[active=true]:text-accent-on data-[dragging=true]:opacity-50",
         rail ? "justify-center px-0" : "px-2",
       )}
     >
@@ -327,7 +327,7 @@ function SourceListRow({
         {rail && item.badge?.kind === "dot" ? (
           <span
             aria-hidden
-            className="absolute -top-0.5 -right-0.5 size-1.5 rounded-full bg-fg-tertiary"
+            className="absolute -top-0.5 -right-0.5 size-1.5 rounded-full bg-fg-tertiary group-data-[active=true]:bg-accent-on"
           />
         ) : null}
       </span>
@@ -337,12 +337,12 @@ function SourceListRow({
           {item.badge === undefined ? null : (
             <span
               aria-hidden
-              className="ml-auto shrink-0 text-xs text-fg-tertiary tabular-nums"
+              className="ml-auto shrink-0 text-xs text-fg-tertiary tabular-nums group-data-[active=true]:text-accent-on"
             >
               {item.badge.kind === "count" ? (
                 badgeText(item.badge)
               ) : (
-                <span className="block size-1.5 rounded-full bg-fg-tertiary" />
+                <span className="block size-1.5 rounded-full bg-current" />
               )}
             </span>
           )}
@@ -506,7 +506,7 @@ function ChildRow({
       aria-current={isActive ? "true" : undefined}
       tabIndex={tabIndex}
       onClick={onSelect}
-      className="flex h-(--control-height) w-full items-center rounded-(--radius-control) pr-2 pl-6 text-left text-sm text-fg-secondary transition-colors duration-(--motion-duration-fast) ease-shell hover:bg-hover hover:text-fg data-[active=true]:bg-selected data-[active=true]:font-medium data-[active=true]:text-fg"
+      className="flex h-(--control-height) w-full items-center rounded-(--radius-control) pr-2 pl-6 text-left text-sm text-fg-secondary transition-colors duration-(--motion-duration-fast) ease-shell hover:bg-hover hover:text-fg data-[active=true]:bg-accent-fill data-[active=true]:font-medium data-[active=true]:text-accent-on"
     >
       <span className="truncate">{child.label}</span>
     </button>

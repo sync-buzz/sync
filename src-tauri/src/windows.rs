@@ -136,7 +136,9 @@ pub fn window_holds<R: Runtime>(
 ///    made, and the person is back where they were.
 /// 2. A window holding nothing — one somebody left on the list of projects.
 ///    Giving it the project is what that window is for.
-/// 3. A new window. **Not the frontmost one**, which is the tempting third
+/// 3. The window a launch is still making, when the launch is what is
+///    happening — see [`starting`].
+/// 4. A new window. **Not the frontmost one**, which is the tempting fourth
 ///    answer and the wrong one: a person who clicked a banner asked to be shown
 ///    one project, not to have another one taken off their screen.
 pub fn reveal<R: Runtime>(app: &AppHandle<R>, project: &Path) -> Option<WebviewWindow<R>> {
@@ -160,6 +162,14 @@ pub fn reveal<R: Runtime>(app: &AppHandle<R>, project: &Path) -> Option<WebviewW
         return Some(window);
     }
 
+    // A launch still on its way up. The window is left alone rather than shown:
+    // it is created hidden and reveals itself once it has something to draw, and
+    // showing it from here is a transparent rectangle on somebody's screen for
+    // as long as the webview takes to start.
+    if let Some(window) = starting(app).and_then(|label| app.get_webview_window(&label)) {
+        return Some(window);
+    }
+
     match open(app) {
         Ok(window) => Some(window),
         Err(error) => {
@@ -167,6 +177,58 @@ pub fn reveal<R: Runtime>(app: &AppHandle<R>, project: &Path) -> Option<WebviewW
             None
         }
     }
+}
+
+/// The window a launch has just made, before it has said anything.
+///
+/// A window says what it holds from the webview, which is several hundred
+/// milliseconds after the process starts — and something that *launched* Sync,
+/// a banner clicked while it was closed or an address followed from another
+/// application, is answered inside that gap. Without this the only window there
+/// is has not spoken yet, none of the answers above matches it, and the click
+/// opens a second window beside the one that was made for it.
+///
+/// Narrow on purpose: it answers only while **no** window has said anything at
+/// all, which is true of a launch and of nothing else. A person with windows
+/// open has said something in each of them, so nobody's work can be taken by
+/// this — which is the rule [`reveal`]'s second answer keeps, at the one moment
+/// there is nothing yet to keep it about.
+fn starting<R: Runtime>(app: &AppHandle<R>) -> Option<String> {
+    let state = app.state::<Holding>();
+    let held = state.0.lock().ok()?;
+    if !held.is_empty() {
+        return None;
+    }
+    drop(held);
+
+    // The settings window is open at a launch like this one about as often as
+    // any other window is, and a project does not go in it.
+    app.webview_windows()
+        .into_keys()
+        .find(|label| label == FIRST || label.starts_with(FOLLOWING))
+}
+
+/// The project somebody is looking at, for an address that does not say which.
+///
+/// The focused window first, and any window holding a project after it. The
+/// order is the answer to *which project did they mean*: somebody who clicked a
+/// link about a record was almost certainly just reading that project, and a
+/// window nobody is in front of is a guess rather than a reading.
+///
+/// `None` means no window has a project open, which is the ordinary state of an
+/// application sitting in the menu bar. Nothing can be guessed from there, and
+/// a caller that has nowhere to put a record says so rather than choosing one.
+pub fn foremost<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
+    let held = app.state::<Holding>();
+    let held = held.0.lock().ok()?;
+
+    let focused = app
+        .webview_windows()
+        .iter()
+        .find(|(_, window)| window.is_focused().unwrap_or(false))
+        .and_then(|(label, _)| held.get(label).cloned().flatten());
+
+    focused.or_else(|| held.values().flatten().next().cloned())
 }
 
 /// Forget what a window held, because the window is gone.

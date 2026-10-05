@@ -469,6 +469,30 @@ async fn asked<R: Runtime>(
     ask: Ask,
 ) -> Result<serde_json::Value, ProjectError> {
     let app = app.clone();
+
+    // A server the project declares is reached through Sync's own MCP client,
+    // not through the flagship. The flagship's servers live in the agent's own
+    // configuration file; a project-scoped one lives in the project record, with
+    // a transport and secrets in the vault. The two are one door from the
+    // caller's side — the same `Ask`, the same consent — but only one of them
+    // raises an agent, and the dispatch lives in [`crate::mcp`]. Consent for a
+    // project-scoped server is checked inside `call_tool`; the flagship path
+    // checks its own below.
+    match crate::mcp::call_tool(
+        &app,
+        &project,
+        &ask.server,
+        &ask.tool,
+        &ask.arguments,
+        asking,
+    )
+    .await
+    {
+        Ok(Some(answer)) => return Ok(answer),
+        Ok(None) => {}
+        Err(error) => return Err(ProjectError::new("mcp_call", error)),
+    }
+
     let chosen = working_agent(&app).ok_or_else(|| {
         ProjectError::new(
             "no_flagship",

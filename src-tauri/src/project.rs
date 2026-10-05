@@ -568,6 +568,37 @@ pub fn project_remote(path: String) -> Result<Option<String>, ProjectError> {
     Ok(if url.is_empty() { None } else { Some(url) })
 }
 
+/// Who git would record as the author of a commit made here.
+///
+/// Asked so that a comment on a passage can say who left it. The name is git's
+/// own answer — `user.name` as this repository resolves it, which folds in the
+/// global configuration and any override made for this project — rather than
+/// anything this application asks somebody to type. There is no account here and
+/// nothing to sign in to, so the one identity already on the machine is the
+/// honest one to use, and it is the same name that will appear beside the commit
+/// the comment is written in.
+///
+/// `None` where git has no name configured. That is an ordinary state on a fresh
+/// machine, and what is written then is a comment with no author rather than a
+/// comment refused or one attributed to a guess.
+///
+/// # Errors
+///
+/// When git cannot be run at all, which no amount of retrying will fix.
+#[tauri::command(async)]
+pub fn project_author(path: String) -> Result<Option<String>, ProjectError> {
+    let path = Path::new(&path);
+    require_directory(path)?;
+
+    let output = run_git(path, &["config", "user.name"])?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+
+    let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    Ok(if name.is_empty() { None } else { Some(name) })
+}
+
 fn probe(path: &Path) -> Result<FolderProbe, ProjectError> {
     require_directory(path)?;
 

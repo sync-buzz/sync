@@ -16,6 +16,7 @@ import { TypographySection } from "@/components/settings/typography-section";
 import { VaultSection } from "@/components/settings/vault-section";
 import { NotificationsSection } from "@/components/settings/notifications-section";
 import { VoiceSection } from "@/components/settings/voice-section";
+import { ModelsSection } from "@/components/settings/models-section";
 import { WorktreesSection } from "@/components/settings/worktrees-section";
 import { SourceList } from "@/components/shell/source-list";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -45,6 +46,7 @@ const SCREENS: Record<SettingsSectionId, (group: string) => ReactNode> = {
   server: () => <ServerSection />,
   agents: (group) => <AgentsSection only={group} />,
   worktrees: () => <WorktreesSection />,
+  models: () => <ModelsSection />,
   remote: () => <RemoteSection />,
   vault: () => <VaultSection />,
 };
@@ -126,15 +128,9 @@ export function SettingsWindow() {
                 indented under another already knows; a person sent here from
                 the other window did not choose it at all, and the line is the
                 only thing that tells them where they are standing. */}
-            {group === null ? null : (
-              <p className="text-xs text-fg-tertiary">{section.label}</p>
-            )}
-            <h1 className="text-lg font-medium text-fg">
-              {group?.label ?? section.label}
-            </h1>
-            <p className="text-sm text-fg-secondary">
-              {group?.headline ?? section.headline}
-            </p>
+            {group === null ? null : <p className="text-xs text-fg-tertiary">{section.label}</p>}
+            <h1 className="text-lg font-medium text-fg">{group?.label ?? section.label}</h1>
+            <p className="text-sm text-fg-secondary">{group?.headline ?? section.headline}</p>
           </header>
 
           {SCREENS[section.id](group?.id ?? section.id)}

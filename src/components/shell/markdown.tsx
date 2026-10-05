@@ -400,9 +400,16 @@ function Mark({ text }: { text: string }) {
 }
 
 /**
- * The editor's own treatment of a link, and its own rule about which ones go
- * anywhere: one that points into this project is followed, everything else is
- * drawn and inert.
+ * A link, and the three places one can go.
+ *
+ * Into the project, which the window follows in place; out to the web, which
+ * goes to whatever browser the person set; and nowhere, which is a path
+ * resolving to no document of this project and is drawn as the text it is.
+ *
+ * Which of the three a url is, is not decided here and must not be. `targetOf`
+ * answers it with the project's attached folders in hand and with the one list
+ * of schemes the capability grants — a second copy of that list in this file
+ * would be this view promising a link the boundary then refuses.
  *
  * A record this view is showing is one the editor refused — its Markdown would
  * not survive being written back — and that is a reason to read it rather than
@@ -433,7 +440,12 @@ function InlineLink({ label, url }: { label: string; url: string }) {
         event.preventDefault();
         links.follow(target);
       }}
-      className="cursor-pointer text-fg underline decoration-separator-strong underline-offset-2 hover:decoration-fg"
+      // The accent, and the distinction this view could not previously draw: a
+      // link that goes somewhere and a link that is drawn and inert were the
+      // same grey underline, so the only way to learn which was which was to
+      // click. Colour tells them apart now — the inert one above keeps the
+      // grey — and the underline still carries it in greyscale.
+      className="cursor-pointer text-accent-text underline decoration-accent-text/40 underline-offset-2 hover:decoration-accent-text"
     >
       {label}
     </a>

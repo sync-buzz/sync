@@ -87,6 +87,7 @@ import { LinkToolbar } from "@/components/editor/link-toolbar";
 import { PictureDrop } from "@/components/editor/picture-drop";
 import { SlashMenu } from "@/components/editor/slash-menu";
 import { MARKDOWN_OPTIONS } from "@/lib/editor/markdown";
+import { CommentPlugin } from "@/lib/editor/comment-plugin";
 import { isProjectPath, RECORD_SCHEME, recordTarget } from "@/lib/record-link";
 
 /** The blocks a list style can be attached to. A list item is a block. */
@@ -273,6 +274,12 @@ export const EDITOR_PLUGINS = [
   // The last block of a record is a paragraph, so there is always somewhere to
   // put the caret under the text a person just finished writing.
   TrailingBlockPlugin,
+
+  // A passage somebody left a comment about, shaded. It is a decoration rather than
+  // a mark, so there is nothing for the serialiser below to write: the comment is a
+  // record of its own and the body is untouched, which is what makes a comment
+  // possible on a document that is a file in the repository.
+  CommentPlugin,
 
   MarkdownPlugin.configure({ options: MARKDOWN_OPTIONS }),
 ];

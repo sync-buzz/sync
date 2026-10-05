@@ -21,6 +21,7 @@ import type {
   RecentProject,
   RegisteredProject,
   Registration,
+  ToolDeclaration,
 } from "./types";
 
 /**
@@ -249,6 +250,18 @@ export function suggestProjectIdentifier(name: string): Promise<string> {
 /** Write the project's record, creating its memory on the first write. */
 export function saveProjectSettings(path: string, settings: ProjectSettings): Promise<void> {
   return call<void>("project_settings_save", { project: path, settings });
+}
+
+/**
+ * The tools a project-scoped MCP server offers, discovered at run time.
+ *
+ * Answers an empty list when `id` is not an MCP server the project declares, or
+ * when the server could not be reached: discovery is best-effort, and a server
+ * whose tools could not be listed is still added with its tools filled in on a
+ * later refresh.
+ */
+export function mcpListTools(path: string, id: string): Promise<readonly ToolDeclaration[]> {
+  return call<ToolDeclaration[]>("mcp_list_tools", { project: path, id });
 }
 
 /** The projects this installation has opened, most recent first. */

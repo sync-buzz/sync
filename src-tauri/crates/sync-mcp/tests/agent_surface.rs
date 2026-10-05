@@ -213,6 +213,7 @@ fn opened_in_sync(project: &Path) -> (sync_memory::MemoryClient, tempfile::TempD
                         "properties": {"words": {"type": "string"}},
                     }),
                 }],
+                transport: None,
             }],
         })
         .expect("the project describes itself");

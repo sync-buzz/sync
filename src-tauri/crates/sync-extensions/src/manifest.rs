@@ -118,6 +118,20 @@ pub const TERMINAL_CAPABILITY: &str = "terminal";
 /// answer for.
 pub const TOOLS_CAPABILITY: &str = "tools.call";
 
+/// Asking an auxiliary model — a small local model this machine has downloaded
+/// — to answer a typed task.
+///
+/// A separate agreement from [`TOOLS_CAPABILITY`] for the same reason that one
+/// is separate from `net`: a tool call is a turn of somebody's agent, which
+/// costs tokens and a wait, and a model call is neither. The model is on this
+/// machine, the answer is local, and what a person is agreeing to is that this
+/// package may spend the machine's cycles on inference while nobody is looking.
+///
+/// Checked when the call is made rather than when the manifest is read, like
+/// `work.agent` and `vault`: whether a handler ever asks a model is inside its
+/// built JavaScript, and the file a person installs says nothing about it.
+pub const MODELS_CAPABILITY: &str = "models";
+
 /// The manifest format this build reads.
 ///
 /// Bumped when the *shape* changes incompatibly, which is a different question

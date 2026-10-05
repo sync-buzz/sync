@@ -21,6 +21,11 @@ import { useWaiting } from "@/lib/command";
  * extension reads the corpus through the shell's own functions and is reported
  * by the act of asking.
  *
+ * It is drawn in the accent rather than in a grey, and that is the third of
+ * the three sentences one tone carries here: *this is happening*. A tertiary
+ * grey two pixels high on a hairline is a line nobody notices, which for the
+ * one mark that says the window is waiting is the whole of the failure.
+ *
  * There is no fade. A line this thin fading in is a line that is illegible for
  * as long as it is arriving, and what it says — *something is happening* — is
  * worth nothing late. The steadiness comes from the thresholds instead: it is
@@ -34,7 +39,7 @@ export function ProgressLine() {
     <div
       role="progressbar"
       aria-label="Working"
-      className="pointer-events-none absolute inset-x-0 bottom-0 h-0.5 overflow-hidden motion-reduce:bg-fg-tertiary/40"
+      className="pointer-events-none absolute inset-x-0 bottom-0 h-0.5 overflow-hidden motion-reduce:bg-accent-text/40"
     >
       {/*
         A segment that travels, on a track that is not drawn: the hairline it
@@ -43,7 +48,7 @@ export function ProgressLine() {
         whole width is tinted instead — the launch screen can drop it and keep
         the word `Starting`, and here there is no word to fall back to.
       */}
-      <div className="h-full w-1/3 bg-fg-tertiary animate-[indeterminate-progress_1.4s_var(--motion-ease)_infinite] motion-reduce:hidden" />
+      <div className="h-full w-1/3 bg-accent-text animate-[indeterminate-progress_1.4s_var(--motion-ease)_infinite] motion-reduce:hidden" />
     </div>
   );
 }

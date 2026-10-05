@@ -89,7 +89,7 @@ them — which is correct for a refresh interval, a window position, or anything
 else that is this machine's answer to a question the project did not ask.
 
 The split is the one the window already keeps — see
-[`architecture.md`](architecture.md) §"Where a fact lives." A package's prompt
+[`architecture.md`](architecture.md) §"Where a fact lives is a decision". A package's prompt
 travels; a package's keychain entry does not. Settings follow the same line,
 and `sync:portable` is the mark that draws it.
 

@@ -50,9 +50,10 @@ radius or a duration.
 
 The layer covers window, sidebar, panel, workspace and raised-control surfaces;
 primary, secondary and tertiary text; separators in two weights; hover,
-selected and keyboard-focus states; the scrim a sheet dims the slab with;
-success, warning and danger; spacing; control heights; corner radii; and motion
-duration and easing. The shadcn/ui
+selected and keyboard-focus states; the one accent the focus ring and the
+filled row are drawn from; the scrim a sheet dims the slab
+with; success, warning and danger; spacing; control heights; corner radii; and
+motion duration and easing. The shadcn/ui
 variable contract (`--background`, `--foreground`, `--border`, `--ring`, …) is
 mapped onto those tokens rather than maintained beside them, so the vendored
 components inherit the system automatically.
@@ -98,8 +99,9 @@ Every grey in the layer is mixed from one hue and one saturation scale
 (`--tint-h`, `--tint-s`), which is precisely what separates the base colours
 shadcn/ui publishes — zinc, neutral, gray, slate, stone. Choosing one retints
 the surfaces, the text and the separators together and changes nothing else:
-there is one design, not five. Status colours and the focus ring are not
-tinted, because they are the two things that must not shift with a preference.
+there is one design, not five. The status colours and the accent are not
+tinted, because they are the things that must not shift with a preference — and
+the focus ring is the accent, so it does not either.
 
 Zinc is the default and is what the shell was designed in.
 
@@ -275,22 +277,41 @@ a project.
 
 ## Selection
 
-Selection is a surface shift plus a weight change, and nothing else. No
-coloured fill, no leading marker. Remove colour from the window and the
-selected row is still the obvious one.
+A selected row in a source list is filled with the accent, and it has one
+reading. An earlier pass gave it two — quiet while the list was idle, filled
+while it held the keyboard, the way Finder and Mail distinguish them — and it
+was rejected on sight: the argument for it is about four columns disagreeing,
+and what a person actually sees is the thing they are looking at changing
+colour when they click somewhere else.
 
-The shift is quiet: a selected row sits at 7.5% over the surface in light and
-8.5% in dark, hover at 4.5% and 5%. An earlier pass ran a third heavier and read
-as a highlighter rather than as a source list — the weight change is what says
-"this one", and the surface only has to separate it from its neighbours. The
-opaque equivalents used under reduced transparency are tuned to the same
-apparent step rather than to the same numbers.
+Filled rather than tinted, because a tint at the weight this step allows is not
+worth the hue. The weight change goes with it, and the row still reads in
+greyscale on its surface and its weight alone — the accent is what makes the
+one place you are findable across four columns rather than merely marked.
 
-An earlier draft carried a two-pixel rail on the leading edge of the selected
-row, offered as the shell's signature detail and as the future home of
-verification state. It was removed: the sidebar rows
-are navigation, not status, and a marker that means "selected" today and
-"verified" tomorrow overloads one piece of geometry with two unrelated jobs.
+**Every list that carries rows is filled the same way**: the navigator's list
+and tree, Activity's, the catalogue's. A row that outlined itself differently
+in one section would be the two states above, arriving by another route.
+
+A filled row takes its marks with it. A count, a dot, a muted label and a glyph
+all read the row's own colour, because a tertiary grey on the accent is a mark
+nobody can read. On a filled row that tier is carried by **size, not colour**,
+and the reason is arithmetic: white on the fill measures 5.1:1 in light and
+4.8:1 in dark, and that is the ceiling, so every dimmed white lands under the
+4.5:1 this document requires of an 11 px label. The badge is already a size
+smaller than the label beside it, which is a tier that costs no contrast.
+
+**`--state-selected` stayed grey, and that is a decision.** It is what a
+pressed toolbar button, a metadata chip, a console tab and the track on the
+launch screen are drawn with — some two dozen places, none of which is *where
+you are*. Tinting it would have spent the accent on every toggle in the window
+and left it meaning nothing in the one place it has to mean something.
+
+No leading marker. An earlier draft carried a two-pixel rail on the leading
+edge of the selected row, offered as the shell's signature detail and as the
+future home of verification state. It was removed: the sidebar rows are
+navigation, not status, and a marker that means "selected" today and "verified"
+tomorrow overloads one piece of geometry with two unrelated jobs.
 
 ## The signature detail: typed marks
 
@@ -353,7 +374,7 @@ are one decision and the first pass made it twice: a relaxed line under a full
 line of air put 42 px between one paragraph's baseline and the next's, so
 pressing Return dropped the caret most of a line further than the text it was
 leaving, and every paragraph read as the start of a section. A desktop document
-— TextEdit, Notes, Pages — sets prose at about one and a half and separates
+— TextEdit, Comments, Pages — sets prose at about one and a half and separates
 paragraphs by half a line.
 
 What air a section gets is carried by the heading that starts it, above itself,
@@ -376,9 +397,10 @@ The store holds a body as Markdown. The editor is a view of that, not a second
 format, so what it offers is exactly what survives being written back: headings,
 paragraphs, lists — bulleted, numbered and task — quotes, fenced code, tables,
 rules, links, and the four marks that carry meaning inside a sentence. No colour,
-no font, no alignment, no image, no comment thread. Not because they are hard,
-but because none of them is Markdown, and a block that vanished the next time the
-record was opened is worse than a block that was never offered.
+no font, no alignment, no image, and nothing written *into* the body that is not
+part of what the record says. Not because any of them is hard, but because none
+of them is Markdown, and a block that vanished the next time the record was
+opened is worse than a block that was never offered.
 
 Three consequences are stated rather than hidden:
 
@@ -426,6 +448,42 @@ Three consequences are stated rather than hidden:
   The rule that follows is general: **a refusal to edit may only ever name
   something the editor could not have written**, and a spelling the editor
   produces has to be one it also reads.
+
+#### A remark about a passage is kept beside the body, never in it
+
+A person reads a claim and wants to say something about four words of it without
+changing them. That is not a block, and the rule above is exactly why it cannot
+become one: there is no Markdown for it, so anything written into the body would
+be either lost on the next open or — worse, for a record whose body is a file in
+the repository — a change to somebody else's file made on our behalf, arriving
+in their diff.
+
+So the remark is a record of its own, and what ties it to the passage is a
+**quote with the text on either side of it** rather than a position or a marker.
+A position dies on the first edit above it and the first save, which reflows the
+body; a marker in the text is the thing the paragraph above forbids. The passage
+is found again each time the record is opened, and when it cannot be found the
+remark says so and keeps its quote — the words it was written about are the only
+record left of what it meant.
+
+In the window it is a shaded passage with a mark after it, a card level with that
+passage, and a row in the context column, which is where every remark on a
+record is read at once: the page is set to one measure and the workspace has a
+minimum width, so at the widths this window actually gets there is no margin on
+the page to list anything in. The mechanism is `src/lib/editor/anchor.ts` and
+what draws it is `src/lib/editor/comment-plugin.ts`, which decorates rather than
+marks — the serialiser walks nodes, so a decoration is a thing it cannot write
+even by mistake.
+
+What is **deliberately absent** is a thread: a remark is answered by another
+remark about the same passage, and nothing here nests, sorts by reply or resolves
+one comment into another.
+
+Which kind of record a remark is stored as is not the shell's to decide, and
+neither is whether a project keeps them at all. The window is handed the remarks
+of the open record and reports what happened to them; a project whose packages
+keep none gets the page it always had, with no command over a selection and
+nothing in the column beside it.
 
 ### Saving is not a button
 
@@ -557,7 +615,7 @@ the window's title bar. Those are the two wrong answers, and each is wrong for
 its own reason.
 
 The bottom bar belongs to the source list beside it. Mail's `+` adds a mailbox,
-Notes' adds a folder, Reminders' adds a list, and none of them writes what the
+Comments' adds a folder, Reminders' adds a list, and none of them writes what the
 list contains. An earlier pass moved `+` there to writing a record, on the
 argument that a project gains a claim far more often than it gains a kind of
 claim. The frequency is real; the conclusion was not. That pass left the
@@ -565,7 +623,7 @@ structural command inside an overflow menu and put the frequent one in the one
 place macOS never puts it.
 
 The title bar is where an application puts the command it exists for —
-composing, in Mail and Notes. **Sync is not a text editor.** A window is opened
+composing, in Mail and Comments. **Sync is not a text editor.** A window is opened
 here to read what a project knows and to see what stopped being true, not to
 produce prose; a claim is written often, but it is not what the window is for,
 and a control in the title bar would claim otherwise about the whole product.
@@ -652,10 +710,42 @@ claims — because that gesture is the one macOS already owns.
 
 ## Colour restraint
 
-Colour is supporting information, never layout. It appears in the keyboard
-focus ring and is reserved for status and destructive actions. Selection,
-hierarchy and grouping are carried by position, surface value, border, weight
-and spacing, so the shell survives being read in greyscale.
+Colour is supporting information, never layout. Hierarchy and grouping are
+carried by position, surface value, border, weight and spacing, so the shell
+survives being read in greyscale.
+
+Past status and destruction, the window spends **one** colour, named
+`--accent-*` in the token layer. It was already here twice over and had no
+name: the focus ring is this blue, and so is the blue a program writes in the
+console. Naming it is what lets one tone carry three sentences —
+
+- *this is where you are*: the selected row, in every list that has rows;
+- *this goes somewhere*: a link in a record's prose that is actually followed,
+  which the inert one beside it no longer looks identical to;
+- *this is happening*: the line on the hairline under the top band.
+
+— where three colours would have been a palette, and a palette is a theme.
+
+Three values rather than one, because the tone has three jobs and no single
+value holds them: a fill, what stays legible on that fill, and the tone as a
+mark on a panel. The fill is asked for directly — `bg-accent-fill` with
+`text-accent-on` — rather than through `--state-selected`, which is the token
+two dozen unrelated controls share. In the dark appearance those last two pull apart hard — a blue
+dark enough to carry white text is far too dark to read as a line on a
+near-black surface — which is why `--accent-fill` there is *darker* than the
+light appearance's rather than lighter.
+
+The accent is not tinted, for the reason the status colours are not.
+`--tint-h` retints the surfaces, the text and the separators together, and an
+accent travelling with them would be five designs rather than one design in
+five tints. Under `prefers-contrast: more` it darkens rather than saturates,
+which is what the sixteen console colours do and for the same reason: the tone
+has to stay the tone.
+
+Every use above survives the greyscale test on something other than the colour
+— the selected row on its surface and weight, the link on its underline, the
+progress line on its movement. That is the condition for spending the accent
+anywhere else.
 
 ## Accessibility requirements
 

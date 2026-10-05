@@ -1,10 +1,13 @@
 "use client";
 
 import { GitCommitHorizontal } from "lucide-react";
-import { PanelHeader, PanelSurface } from "@/components/shell/panel";
+
 import { FRESHNESS_STATES, StateMark } from "@/components/shell/entity-marks";
+import { CommentList } from "@/components/shell/comment-list";
+import { PanelHeader, PanelSurface } from "@/components/shell/panel";
 import { RecordMetadata } from "@/components/shell/record-metadata";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import type { CommentsOnPage } from "@/lib/editor/comment-view";
 import type { OpenDocument } from "@/lib/memory/use-document";
 import { ATTENTION_STATES, type Corpus } from "@/lib/memory/use-corpus";
 
@@ -24,12 +27,20 @@ export function ContextInspector({
   corpus,
   open,
   projectPath,
+  comments,
 }: {
   corpus: Corpus;
   /** The record the workspace has open, if it has one. */
   open: OpenDocument | null;
   /** Where the project is, so the panel's open panel opens inside it. */
   projectPath: string;
+  /**
+   * The comments on the open record, as its page reports them, or absent where
+   * comments are not kept. What is true *of* a record is edited above; a comment is
+   * about a passage of it, which is why it is a section of its own under that
+   * rather than another field in it.
+   */
+  comments?: CommentsOnPage | null;
 }) {
   return (
     <PanelSurface className="bg-panel">
@@ -37,17 +48,20 @@ export function ContextInspector({
       <ScrollArea className="min-h-0 flex-1">
         <div className="space-y-5 p-3">
           {open?.document && open.draft ? (
-            <RecordMetadata
-              document={open.document}
-              draft={open.draft}
-              type={corpus.types.find(
-                (type) => type.kind === open.document?.kind,
-              )}
-              types={corpus.types}
-              projectPath={projectPath}
-              onEdit={open.edit}
-              onWrite={open.write}
-            />
+            <>
+              <RecordMetadata
+                document={open.document}
+                draft={open.draft}
+                type={corpus.types.find(
+                  (type) => type.kind === open.document?.kind,
+                )}
+                types={corpus.types}
+                projectPath={projectPath}
+                onEdit={open.edit}
+                onWrite={open.write}
+              />
+              {comments ? <CommentList comments={comments} /> : null}
+            </>
           ) : (
             <CorpusFacts corpus={corpus} />
           )}

@@ -199,7 +199,8 @@ the thing* — a platform without a bundled ACP sidecar exposes the same
 So a build publishes named capabilities and a manifest may require them:
 `records`, `agents.acp`, `markdown.plugins`, `native-menu`, `folders`, `sheets`,
 `net`, `net.write`, `vault`, `background`, `schedule`, `work.agent`,
-`agent.tools`, `terminal`, `tools.call`. A missing capability is a refusal
+`agent.tools`, `terminal`, `tools.call`, `handler.call`, `models`. A missing
+capability is a refusal
 with a sentence a person can act on, and it is also what lets an extension
 degrade deliberately — asking for a capability is a choice, and reading whether
 one is present is allowed.
@@ -859,7 +860,7 @@ All three occasions resolve to a handler through one answer to *which function
 is this*, and run through one evaluation path. An occasion added later cannot
 quietly get a different runtime, different limits or a different host.
 
-### Four capabilities, because they are four different agreements
+### Six capabilities, because they are six different agreements
 
 | Capability | What a person is agreeing to |
 | --- | --- |
@@ -867,6 +868,8 @@ quietly get a different runtime, different limits or a different host.
 | `schedule` | it runs while nobody is there |
 | `work.agent` | it may raise an agent, which **spends money while they sleep** |
 | `agent.tools` | an agent is told this package is there, and may act through it |
+| `handler.call` | it may run another package's handler, in that package's isolate |
+| `models` | it may spend this machine's cycles on inference while nobody is looking |
 
 A manifest that ships a service module and does not ask for `background` is
 refused when it is read, and so are one that schedules a handler without
@@ -881,6 +884,14 @@ the reason the second is: `background` is this package running its own code, and
 being acted on by an agent is a conversation the person who installed it is not
 part of.
 
+The last two cannot be checked from the manifest either, and are refused at the
+call like `work.agent`. They are two agreements rather than one with
+`work.agent` because what is spent differs: an agent's turn costs money and a
+wait, a model's answer costs neither and is never seen by anybody, and a call
+into another package reaches a vault and a host list that are not this
+package's. A person reading one sentence about all three would be told the
+price of the dearest and agree to the cheapest.
+
 ### What a handler may reach
 
 Only what it was handed. Nothing is ambient.
@@ -893,6 +904,13 @@ Only what it was handed. Nothing is ambient.
   package's own secrets, in the namespace §4 describes.
 - `net.fetch(request)` — the door §4 describes, under the same two
   capabilities and with the same three spellings of what is sent.
+- `sync.call(tool, arguments)` — one tool of another package, named
+  `<extension id>.<tool name>`. It runs in its own isolate with its own
+  capabilities and its own vault, and the answer is all that comes back.
+- `model.run(task, input)`, `model.serving(task)` — a local auxiliary model this
+  machine has downloaded. The input and the output are opaque on purpose: a
+  model's request shape moves between versions of the model, and the shape is
+  declared in the model's own manifest rather than here.
 - `console.*` — a line, which the host places.
 
 Asking for anything else is a refusal naming what *is* offered, which a handler

@@ -223,6 +223,21 @@ fn run<R: Runtime>(app: &AppHandle<R>, params: &Value) -> Result<Value, String> 
     } = asked(params)?;
     let (project, id, tool) = (project.as_str(), id.as_str(), tool.as_str());
 
+    // A project-scoped MCP server is reached through Sync's own client rather
+    // than a JavaScript handler: the agent called the same `sync_call` door it
+    // calls for an extension's tool, and the dispatch is the proxy's to decide.
+    // `Ok(None)` is an extension — fall through to its handler — and the lookup
+    // that tells the two apart is the cost of one door; a cache keyed by the
+    // record's revision is the ceiling, added if a call sits behind a tighter
+    // loop.
+    match tauri::async_runtime::block_on(crate::mcp::call_tool(
+        app, project, id, tool, &arguments, None,
+    )) {
+        Ok(Some(answer)) => return Ok(answer),
+        Ok(None) => {}
+        Err(error) => return Err(error),
+    }
+
     let installed = crate::extensions::store(app)?
         .resolve(id)
         .map_err(|error| error.to_string())?

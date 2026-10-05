@@ -1,0 +1,57 @@
+[package]
+name = "sync-mcp-client"
+description = "Speaking MCP as a client, to a server a project declares"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+expect_used = "warn"
+
+[dependencies]
+# The transport and protocol. The client half of what `sync-mcp` publishes: a
+# declared MCP server is reached as a client, not hosted as a server, so this
+# crate carries the client features and none of the server ones. `transport-io`
+# spawns a stdio server; `transport-streamable-http-client-reqwest` reaches an
+# HTTP or SSE one. The memory engine is not linked here — this crate is a leaf,
+# and staying out of `default-members`'s slow builds is the point of that.
+sync-memory = { path = "../sync-memory" }
+rmcp = { version = "3.1", default-features = false, features = [
+    "client",
+    "transport-child-process",
+    "transport-streamable-http-client-reqwest",
+] }
+# `HeaderName` and `HeaderValue`, the types `rmcp`'s HTTP client config takes.
+# `rmcp` depends on this crate but does not re-export it, and a direct use is
+# more honest than reaching through another crate's private dependency.
+http = "1"
+# The HTTP client `rmcp`'s streamable transport drives. The version and the
+# `rustls` feature come from `rmcp`'s own dependency through feature unification;
+# stated here because a `Client::default()` is what the transport is built from.
+reqwest = { version = "0.13", default-features = false }
+# `process` for `TokioChildProcess`, `io-util` for the framed transport,
+# `time` for the handshake's internal timeouts. A multi-thread runtime is not
+# required — the caller's runtime is borrowed — but `rt` is, because `serve`
+# schedules the transport worker onto one.
+tokio = { version = "1", features = ["rt", "process", "io-util", "time", "sync"] }
+# What a tool's arguments are and what its result is, carried whole. The
+# `preserve_order` feature matches the rest of the workspace: a schema's
+# properties arrive in the order their author wrote them, not alphabetised.
+serde_json = { version = "1", features = ["preserve_order"] }
+# The words a failed call says. A call that cannot reach its server is a
+# sentence a person or an agent reads, and `thiserror` is how the rest of the
+# workspace writes one.
+thiserror = "2"
+# What the network door says happened. A call that fails at 3am is read after
+# the fact, and `eprintln!` has no timestamp and no level.
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+serde_json = { version = "1", features = ["preserve_order"] }

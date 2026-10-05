@@ -97,6 +97,10 @@ jobs:
         shell: bash
         run: ./scripts/prepare-sidecar.sh --target ${{ matrix.target }}
 
+      - name: Build and stage the inference sidecar
+        shell: bash
+        run: ./scripts/prepare-inference-sidecar.sh --target ${{ matrix.target }}
+
       - name: Build the installer
         uses: tauri-apps/tauri-action@v0
         env:

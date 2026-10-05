@@ -679,6 +679,16 @@ pub struct InstalledExtension {
     /// shared library, resolved by the reader through `kindIcon`.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub icon: String,
+    /// The version that was installed, not the one available now.
+    ///
+    /// Empty for an entry that is not a package — an MCP server, whose
+    /// [`transport`](Self::transport) is the whole of what it is. There is no
+    /// version to compare, and an update check treats empty as *nothing to
+    /// compare*, which is the honest answer for a descriptor rewritten on
+    /// re-add rather than released. Serialized as `""` rather than omitted, so
+    /// the window — which spells the field `string` — reads a value on every
+    /// entry the way it did before the field gained a default.
+    #[serde(default)]
     pub version: String,
     /// What this extension tells an agent, in full.
     ///
@@ -734,6 +744,69 @@ pub struct InstalledExtension {
     /// Empty for the extensions that offer none, which is most of them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<ToolDeclaration>,
+    /// How to reach an MCP server, when this entry is one rather than a
+    /// package.
+    ///
+    /// Present turns this entry into an MCP server the project declares: the
+    /// session launcher resolves it into the `mcp_servers` an agent is given,
+    /// and a tool call routes it through Sync's own client rather than the
+    /// flagship. The secrets it names live in the vault under `mcp-{id}`, not
+    /// here — a descriptor travels with the repository, a credential does not.
+    ///
+    /// Absent for a code package, which is everything else in this list.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transport: Option<McpTransportConfig>,
+}
+
+/// How a project declares it reaches an MCP server, as the record carries it.
+///
+/// The runtime half of the registry's transport spec: the descriptions a
+/// credential prompt needs are not here, because once a server is installed
+/// only the secret's name and its place in the vault remain. What is here is
+/// what a call site needs to connect and what a session launcher needs to
+/// hand an agent.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase", tag = "type")]
+pub enum McpTransportConfig {
+    Stdio {
+        command: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        args: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        env: Vec<McpEnvSecret>,
+    },
+    Http {
+        url: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        headers: Vec<McpHeaderSecret>,
+    },
+    Sse {
+        url: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        headers: Vec<McpHeaderSecret>,
+    },
+}
+
+/// One environment variable an installed MCP server's stdio transport needs.
+///
+/// `secret` is the vault key, not the value: the descriptor travels with the
+/// repository, and the value is read from `mcp-{id}/{secret}` at call time.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct McpEnvSecret {
+    pub name: String,
+    pub secret: String,
+}
+
+/// One HTTP header an installed MCP server's transport sends.
+///
+/// `scheme`, when present, is how the value is prefixed onto the header —
+/// `Bearer` is the common case. Absent means the value is sent as-is.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct McpHeaderSecret {
+    pub name: String,
+    pub secret: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scheme: Option<String>,
 }
 
 /// One tool an extension offers an agent, as the project records it.
@@ -883,6 +956,7 @@ mod tests {
                 description: "Finds tickets by their words".to_owned(),
                 input: json!({"type": "object", "properties": {"words": {"type": "string"}}}),
             }],
+            transport: None,
         };
 
         let crossing = serde_json::to_value(&written).expect("it serialises");
@@ -916,6 +990,7 @@ mod tests {
             integrity: None,
             source: None,
             tools: Vec::new(),
+            transport: None,
         };
 
         let crossing = serde_json::to_value(&bare).expect("it serialises");
@@ -934,6 +1009,79 @@ mod tests {
         let read: InstalledExtension = serde_json::from_value(older).expect("it reads back");
 
         assert!(read.tools.is_empty());
+    }
+
+    /// An MCP server entry carries a transport where a package carries an
+    /// artefact, and the secrets it names are keys rather than values — the
+    /// descriptor travels with the repository, the credentials do not.
+    #[test]
+    fn an_mcp_server_declaration_round_trips_with_its_transport() {
+        let server = InstalledExtension {
+            id: "github".to_owned(),
+            name: "GitHub MCP".to_owned(),
+            icon: "github".to_owned(),
+            version: String::new(),
+            prompt: None,
+            integrity: None,
+            source: Some("registry".to_owned()),
+            tools: Vec::new(),
+            transport: Some(McpTransportConfig::Stdio {
+                command: "github-mcp-server".to_owned(),
+                args: vec!["stdio".to_owned()],
+                env: vec![McpEnvSecret {
+                    name: "GITHUB_TOKEN".to_owned(),
+                    secret: "github-token".to_owned(),
+                }],
+            }),
+        };
+
+        let crossing = serde_json::to_value(&server).expect("it serialises");
+        // No version is written for an entry that has none, the way no tools
+        // are written for an entry that offers none.
+        assert!(
+            crossing.get("version").is_none() || crossing["version"].as_str() == Some(""),
+            "an MCP server writes nothing it does not version: {crossing}"
+        );
+        assert_eq!(
+            crossing["transport"]["type"], "stdio",
+            "the transport crosses with its discriminator: {crossing}"
+        );
+        assert_eq!(crossing["transport"]["env"][0]["secret"], "github-token");
+
+        let read: InstalledExtension = serde_json::from_value(crossing).expect("it reads back");
+        assert_eq!(read.transport, server.transport);
+        assert!(read.version.is_empty());
+    }
+
+    /// A header secret's scheme is optional, and its absence survives the
+    /// round trip as honestly as its presence.
+    #[test]
+    fn an_http_transport_round_trips_with_and_without_a_scheme() {
+        let with_scheme = McpTransportConfig::Http {
+            url: "https://mcp.example/app".to_owned(),
+            headers: vec![McpHeaderSecret {
+                name: "Authorization".to_owned(),
+                secret: "token".to_owned(),
+                scheme: Some("Bearer".to_owned()),
+            }],
+        };
+        let value = serde_json::to_value(&with_scheme).expect("serialises");
+        let read: McpTransportConfig = serde_json::from_value(value).expect("reads back");
+        assert_eq!(read, with_scheme);
+
+        let without = McpTransportConfig::Sse {
+            url: "https://mcp.example/sse".to_owned(),
+            headers: vec![McpHeaderSecret {
+                name: "X-Key".to_owned(),
+                secret: "key".to_owned(),
+                scheme: None,
+            }],
+        };
+        let value = serde_json::to_value(&without).expect("serialises");
+        // A header without a scheme writes nothing about one.
+        assert!(value["headers"][0].get("scheme").is_none());
+        let read: McpTransportConfig = serde_json::from_value(value).expect("reads back");
+        assert_eq!(read, without);
     }
 }
 

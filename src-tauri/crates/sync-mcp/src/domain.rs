@@ -31,7 +31,7 @@ use sync_memory::mapping::{
     suggested_key, titled_put, type_definition, type_key, type_record,
 };
 use sync_memory::{
-    ContentView, EntityInput, FolderEntry, Journal, Listing, MemoryPresence, ModelStatus,
+    ContentView, Counts, EntityInput, FolderEntry, Journal, Listing, MemoryPresence, ModelStatus,
     ProjectSettings, RecordView, ScanOutcome, SearchOutcome, SyncState, TransactionResult,
     TransportStatus,
 };
@@ -65,6 +65,15 @@ pub struct Domain {
     /// Writability is not cached: it is a filesystem fact (`chmod` does not
     /// move a revision), and `list_types` fetches it fresh each time.
     type_records: Option<(String, Vec<Value>)>,
+    /// The corpus-wide counts, cached by revision.
+    ///
+    /// `records()` reads them to subtract hidden kinds from the counts and the
+    /// total. They change only when the corpus is written to, and every write
+    /// moves the revision, so a revision match is a guarantee they have not
+    /// moved — the same shape as `type_records` and for the same reason.
+    /// Pre-warmed during `publish_types` so the first `records()` call does not
+    /// pay the cold-read cost on a large corpus.
+    corpus_counts: Option<(String, Counts)>,
 }
 
 impl Domain {
@@ -85,6 +94,7 @@ impl Domain {
             initialised: false,
             transactions: 0,
             type_records: None,
+            corpus_counts: None,
         }
     }
 
@@ -285,6 +295,49 @@ impl Domain {
         Ok(listing.records)
     }
 
+    /// The corpus-wide counts, served from a revision-gated cache.
+    ///
+    /// `records()` reads them on every page to subtract hidden kinds, and they
+    /// change only when the corpus is written to. Every write moves the
+    /// revision, so a revision match is a guarantee they have not moved. The
+    /// first call after a write pays one `limit: 1` metadata read; every later
+    /// call for the same revision is free.
+    ///
+    /// # Errors
+    ///
+    /// Returns whatever reading the counts refused.
+    fn ensure_corpus_counts(&mut self) -> Result<()> {
+        let fresh = self
+            .corpus_counts
+            .as_ref()
+            .is_some_and(|(rev, _)| rev == &self.revision);
+        if fresh {
+            return Ok(());
+        }
+        let counting = json!({"limit": 1, "metadata_only": true});
+        let everything = self.list_records(&counting)?.counts;
+        self.corpus_counts = Some((self.revision.clone(), everything));
+        Ok(())
+    }
+
+    /// Read one actual record to warm the engine's record store.
+    ///
+    /// `ensure_corpus_counts` reads with `metadata_only`, which skips the
+    /// freshness reconciliation — the git-log walk the engine does per scope
+    /// path. That walk is the expensive part of the first `list_records` that
+    /// returns records, and its first invocation initialises whatever the
+    /// engine caches for later records. Reading one record here, during
+    /// `publish_types`, pays that cost while the window is in its opening state
+    /// rather than on the first `records` page the person asks for.
+    ///
+    /// # Errors
+    ///
+    /// Returns whatever reading the record refused.
+    fn warm_record_store(&mut self) -> Result<()> {
+        let _ = self.list_records(&json!({"limit": 1}))?;
+        Ok(())
+    }
+
     /// Publish the definitions Sync needs for its own records, if the store
     /// does not already hold them.
     ///
@@ -307,10 +360,28 @@ impl Domain {
     pub fn publish_types(&mut self) -> Result<bool> {
         let stored = self.type_records()?;
         if corpus_matches(&stored) {
+            // The corpus is current, so no write follows. Pre-warm the
+            // corpus counts and the record store now: a project opened for the
+            // first time in this session pays one read here — while the window
+            // is still showing its opening state — rather than on the first
+            // `records` call, where a cold LanceDB index on a large corpus is a
+            // wait the person sitting in front of it was not warned about.
+            //
+            // The pre-warm reads one actual record (not `metadata_only`), which
+            // is what triggers the engine's freshness reconciliation — the git
+            // log it walks per scope path — for the first time. That walk is the
+            // expensive part of a `list_records` that returns records, and doing
+            // it here means the first `records` page does not pay for it.
+            self.ensure_corpus_counts()?;
+            self.warm_record_store()?;
             return Ok(false);
         }
         let transaction = self.next_transaction_id("sync-types");
         self.apply(&transaction, &own_type_definitions())?;
+        // A write moved the revision, so the cache (if any) is stale. Fill it
+        // for the new revision — same reasoning as the no-write path above.
+        self.ensure_corpus_counts()?;
+        self.warm_record_store()?;
         Ok(true)
     }
 
@@ -580,11 +651,20 @@ impl Domain {
     /// of the page, because a navigator that lists nine types beside a total
     /// counting eleven is arithmetic nobody can follow.
     ///
-    /// One read per excluded kind, plus one for everything and one for the page.
-    /// The engine has no "every kind except these" filter, so each exclusion is
-    /// counted on its own and subtracted; the counting reads are `limit: 1`
-    /// metadata reads asked for their counts rather than their records, and all
-    /// of them are local round trips to a process already running.
+    /// The corpus-wide counts and per-kind breakdowns are served from a
+    /// revision-gated cache ([`Self::ensure_corpus_counts`], [`Self::kind_counts`]),
+    /// so a second page read for the same revision pays only for the page
+    /// itself. The per-hidden-kind subtraction under the selection's own filters
+    /// is skipped when the selection narrows to nothing — a paged read with no
+    /// folder or freshness filter asks the same question the cached per-kind
+    /// counts already answered.
+    ///
+    /// Per-kind counts are derived from the corpus-wide `by_kind` map rather
+    /// than read one kind at a time: the total and `by_kind` subtraction are
+    /// exact, and the `by_freshness` breakdown for a hidden kind is not
+    /// subtracted — a hidden kind's stale records stay in the overall freshness
+    /// count, which is a display inaccuracy rather than a data one, and the
+    /// alternative was one cold engine read per hidden kind.
     ///
     /// # Errors
     ///
@@ -597,14 +677,34 @@ impl Domain {
         // report eleven fewer claims than it holds.
         let excluded: BTreeSet<&str> = hidden.iter().map(String::as_str).collect();
 
-        let counting = json!({"limit": 1, "metadata_only": true});
-        let everything = self.list_records(&counting)?;
-        let mut excluded_counts = Vec::with_capacity(excluded.len());
-        for kind in &excluded {
-            let mut query = counting.clone();
-            query["kind"] = json!(kind);
-            excluded_counts.push(self.list_records(&query)?.counts);
-        }
+        // Corpus-wide counts, revision-gated and pre-warmed by `publish_types`.
+        self.ensure_corpus_counts()?;
+        let everything = self
+            .corpus_counts
+            .as_ref()
+            .map(|(_, counts)| counts.clone())
+            .unwrap_or_default();
+
+        // Per-kind counts derived from the corpus-wide `by_kind` map. The total
+        // for each hidden kind is exact; the `by_freshness` breakdown is not
+        // carried, so `excluding` cannot subtract it — see the doc comment above.
+        let excluded_counts: Vec<Counts> = excluded
+            .iter()
+            .map(|kind| {
+                let total = everything.by_kind.get(*kind).copied().unwrap_or(0);
+                let mut by_kind = BTreeMap::new();
+                by_kind.insert(kind.to_string(), total);
+                Counts {
+                    total,
+                    by_kind,
+                    by_freshness: BTreeMap::new(),
+                    archived: 0,
+                    live: 0,
+                    service: 0,
+                }
+            })
+            .collect();
+
         let listing = self.list_records(&engine_query(selection))?;
 
         // What the caller will draw beside each row, named by it. Absent asks
@@ -623,14 +723,20 @@ impl Domain {
         // A selection that names a kind is one kind already: hiding either takes
         // all of it or none of it, and no read settles that. A selection that
         // names none carries every kind with it, so each hidden one is counted
-        // under the selection's own filters and subtracted — a second `limit: 1`
-        // read per hidden kind, and only where something is hidden, because the
-        // corpus counts above answer a different question and cannot be reused:
-        // they are over everything, and this is over a folder, a freshness, or
-        // whatever else the selection narrowed to.
+        // under the selection's own filters and subtracted. But a selection that
+        // narrows to nothing — no folder, no freshness — asks the same question
+        // the cached per-kind counts already answered, so the subtraction is
+        // arithmetic rather than a read.
         let total = match selection.get("kind").and_then(Value::as_str) {
             Some(kind) if excluded.contains(kind) => 0,
             Some(_) => listing.total,
+            None if !has_narrowing_filters(selection) => {
+                let mut total = listing.total;
+                for counts in &excluded_counts {
+                    total = total.saturating_sub(counts.total);
+                }
+                total
+            }
             None => {
                 let mut total = listing.total;
                 for kind in &excluded {
@@ -643,7 +749,7 @@ impl Domain {
 
         Ok(RecordsPage {
             revision: listing.revision,
-            counts: RecordsCounts::excluding(&everything.counts, &excluded_counts),
+            counts: RecordsCounts::excluding(&everything, &excluded_counts),
             total,
             // A page of the whole corpus carries every kind with it, including
             // the ones not being shown. A page of one kind cannot, so this
@@ -2372,6 +2478,20 @@ fn hidden_query(selection: &Value, kind: &str) -> Value {
     query["limit"] = json!(1);
     query["metadata_only"] = json!(true);
     query
+}
+
+/// Whether a selection narrows beyond paging and field projection.
+///
+/// A selection with no folder, freshness or folder-scope filter asks the same
+/// question the cached per-kind counts already answer, so the hidden-kind
+/// subtraction under the selection is arithmetic rather than a read. A
+/// selection that does narrow — to a folder, a freshness, or a subtree —
+/// answers a different question and still has to be counted.
+fn has_narrowing_filters(selection: &Value) -> bool {
+    let Some(obj) = selection.as_object() else {
+        return false;
+    };
+    obj.contains_key("folder") || obj.contains_key("freshness") || obj.contains_key("folderScope")
 }
 
 /// Whether a string can be a kind at all.

@@ -39,10 +39,10 @@ mod protocol;
 pub use client::{EngineInfo, MemoryClient};
 pub use dto::{
     ContentView, Counts, EntityInput, FetchOutcome, FolderAttachment, FolderEntry, Handshake,
-    InstalledExtension, Journal, JournalChange, JournalEntry, LinkInput, Listing, MemoryPresence,
-    ModelStatus, Overlap, ProjectSettings, RecordView, RemoteCheck, ScanOutcome, SearchOutcome,
-    Subscription, SyncState, ToolDeclaration, TransactionResult, TransportStatus, TypeRemoval,
-    Version,
+    InstalledExtension, Journal, JournalChange, JournalEntry, LinkInput, Listing, McpEnvSecret,
+    McpHeaderSecret, McpTransportConfig, MemoryPresence, ModelStatus, Overlap, ProjectSettings,
+    RecordView, RemoteCheck, ScanOutcome, SearchOutcome, Subscription, SyncState, ToolDeclaration,
+    TransactionResult, TransportStatus, TypeRemoval, Version,
 };
 pub use error::{CommandError, MemoryError, MemoryErrorKind, Result};
 pub use operations::{Effect, Operations, effect};

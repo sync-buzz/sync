@@ -59,10 +59,13 @@ and an entry to `PLATFORMS` in `scripts/release.sh` is the whole of putting a
 platform back — the two lists have to move together, because the second is what
 refuses to publish a manifest that is missing one.
 
-The runner builds the sidecar before the bundler runs. `sync-mcp` links the
-memory engine, so that step is a release build of LanceDB and llama.cpp and is
-most of the wall-clock time — expect the release build to take considerably
-longer than CI does.
+The runner builds both sidecars before the bundler runs, each by its own
+script. `sync-mcp` links the memory engine, so that step is a release build of
+LanceDB and llama.cpp and is most of the wall-clock time — expect the release
+build to take considerably longer than CI does. `sync-inference-server` links
+llama.cpp and not LanceDB, which is why it is a second binary rather than a
+second mode of the first: the engine's build is the expensive half, and a
+machine answering a model has no reason to pay for it.
 
 The installer filenames carry no version. The README links to
 `releases/latest/download/<name>`, which GitHub resolves to the newest release,

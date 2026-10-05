@@ -23,7 +23,7 @@ import type {
  * short enough that "Saved" arrives while the person is still looking at the word
  * they changed.
  */
-const SAVE_DELAY_MS = 1200;
+export const SAVE_DELAY_MS = 1200;
 
 /**
  * A record as the window has it: what the store answered, with whatever has been

@@ -5,7 +5,7 @@ import type { LucideIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { KindGlyph, KindMark } from "@/components/shell/entity-marks";
-import { ServersItMayCall } from "@/components/shell/extension-servers";
+import { ServersItMayCall, McpServersItMayCall } from "@/components/shell/extension-servers";
 import {
   PackageTags,
   describePackage,
@@ -101,7 +101,7 @@ export function ExtensionNavigator({
                 <Row
                   key={entry.id}
                   label={entry.name}
-                  icon={entry.packaged?.manifest.icon}
+                  icon={entry.icon}
                   trailing={entry.version}
                   isActive={entry.id === selectedId}
                   dimmed={entry.unavailable !== null}
@@ -182,21 +182,26 @@ function Row({
       aria-current={isActive ? "true" : undefined}
       onClick={onSelect}
       className={cn(
-        "flex h-(--control-height-lg) w-full items-center gap-2.5 rounded-(--radius-control) px-2.5 text-left text-sm text-fg-secondary transition-colors duration-(--motion-duration-fast) ease-shell hover:bg-hover hover:text-fg data-[active=true]:bg-selected data-[active=true]:text-fg",
+        "group flex h-(--control-height-lg) w-full items-center gap-2.5 rounded-(--radius-control) px-2.5 text-left text-sm text-fg-secondary transition-colors duration-(--motion-duration-fast) ease-shell hover:bg-hover hover:text-fg data-[active=true]:bg-accent-fill data-[active=true]:text-accent-on",
         dimmed && "text-fg-tertiary",
       )}
     >
       {Glyph === null ? (
         <KindGlyph
           icon={icon as string | null | undefined}
-          className="size-4 shrink-0 text-fg-tertiary"
+          className="size-4 shrink-0 text-fg-tertiary group-data-[active=true]:text-accent-on"
         />
       ) : (
-        <Glyph aria-hidden="true" className="size-4 shrink-0 text-fg-tertiary" />
+        <Glyph
+          aria-hidden="true"
+          className="size-4 shrink-0 text-fg-tertiary group-data-[active=true]:text-accent-on"
+        />
       )}
       <span className={cn("truncate", isActive && "font-medium")}>{label}</span>
       {trailing === undefined ? null : (
-        <span className="ml-auto shrink-0 font-mono text-xs text-fg-tertiary">{trailing}</span>
+        <span className="ml-auto shrink-0 font-mono text-xs text-fg-tertiary group-data-[active=true]:text-accent-on">
+          {trailing}
+        </span>
       )}
     </button>
   );
@@ -425,7 +430,7 @@ function matching(entries: readonly CatalogueEntry[], asked: string): readonly C
     const haystack = [
       entry.id,
       entry.name,
-      entry.packaged?.manifest.summary ?? entry.listed?.summary ?? "",
+      entry.summary,
       entry.category ?? "",
       ...(entry.packaged?.types.map((type) => type.kind) ?? entry.listed?.publishes ?? []),
     ]
@@ -504,7 +509,7 @@ function MarketplaceCard({
             aria-hidden="true"
             className="flex size-9 shrink-0 items-center justify-center rounded-(--radius-control) bg-hover text-fg-secondary"
           >
-            <KindGlyph icon={packaged?.manifest.icon ?? entry.listed?.icon} className="size-5" />
+            <KindGlyph icon={entry.icon} className="size-5" />
           </span>
           <div className="min-w-0 flex-1">
             <p className="truncate text-base font-medium text-fg">{entry.name}</p>
@@ -516,9 +521,7 @@ function MarketplaceCard({
         </div>
 
         <p className="text-sm leading-5 text-fg-secondary">
-          {packaged?.manifest.summary ||
-            entry.listed?.summary ||
-            "This project depends on it, and nothing answers to the name."}
+          {entry.summary || "This project depends on it, and nothing answers to the name."}
         </p>
 
         {packaged === null ? null : <PackageTags extension={packaged} />}
@@ -653,10 +656,14 @@ export function ExtensionPage({
                 ? `Installing ${installProgress.label}…`
                 : entry.declared
                   ? "Removing…"
-                  : "Installing…"
+                  : entry.transport !== null
+                    ? "Adding…"
+                    : "Installing…"
               : entry.declared
                 ? "Remove"
-                : "Install"}
+                : entry.transport !== null
+                  ? "Add"
+                  : "Install"}
           </Button>
         </div>
       </div>
@@ -713,7 +720,7 @@ export function ExtensionPage({
               aria-hidden="true"
               className="flex size-11 shrink-0 items-center justify-center rounded-(--radius-surface) bg-hover text-fg-secondary"
             >
-              <KindGlyph icon={packaged?.manifest.icon ?? entry.listed?.icon} className="size-5" />
+              <KindGlyph icon={entry.icon} className="size-5" />
             </span>
             <div className="min-w-0 flex-1">
               <p className="flex items-baseline justify-between gap-3">
@@ -721,9 +728,7 @@ export function ExtensionPage({
                 <span className="shrink-0 font-mono text-xs text-fg-tertiary">{entry.version}</span>
               </p>
               <p className="mt-0.5 text-sm leading-5 text-fg-secondary">
-                {packaged?.manifest.summary ||
-                  entry.listed?.summary ||
-                  "This project depends on it, and nothing answers to the name."}
+                {entry.summary || "This project depends on it, and nothing answers to the name."}
               </p>
             </div>
           </div>
@@ -875,6 +880,18 @@ export function ExtensionPage({
                 </Section>
               ) : null}
 
+              {/* A package that calls other tools through `sync.call` reaches
+                  the project's own MCP servers — a workflow node naming
+                  `playwright.navigate`, for instance. The set is decided in
+                  the project rather than in the package, so the agreement is
+                  the wildcard rather than one server at a time. Drawn for
+                  `handler.call`, the capability `sync.call` is gated by. */}
+              {packaged.manifest.capabilities.includes("handler.call") ? (
+                <Section title="MCP servers it may call">
+                  <McpServersItMayCall id={entry.id} />
+                </Section>
+              ) : null}
+
               {/* Only for a package that has handlers. A section drawn empty
                   would name a state instead of showing one, which is the rule
                   the navigator's groups already follow. */}
@@ -986,10 +1003,14 @@ export function ExtensionPage({
                   ? `Installing ${installProgress.label}…`
                   : entry.declared
                     ? "Removing…"
-                    : "Installing…"
+                    : entry.transport !== null
+                      ? "Adding…"
+                      : "Installing…"
                 : entry.declared
                   ? `Remove ${entry.name}`
-                  : `Install ${entry.name}`}
+                  : entry.transport !== null
+                    ? `Add ${entry.name}`
+                    : `Install ${entry.name}`}
             </Button>
           </div>
         </div>

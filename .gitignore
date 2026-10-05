@@ -63,3 +63,7 @@ src-tauri/.cargo/
 # keeping is `api/extension-api.api.md`, which is committed; this is the scrap
 # it was derived from.
 /temp/
+
+# Written by the browser the Playwright tools drive, beside whatever directory
+# they were started in. Nothing reads it back.
+.playwright-mcp/

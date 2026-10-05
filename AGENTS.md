@@ -131,6 +131,13 @@ single place.
 - **The CSP applies only to a packaged build.** `tauri dev` loads over http,
   where Tauri does not apply it at all. Any CSP change is verified against
   `pnpm tauri build`, never against `pnpm tauri dev`.
+- **A `sync://` address needs a bundle too, and macOS will not be told
+  otherwise.** The scheme reaches Launch Services through `CFBundleURLTypes`,
+  which the bundler writes from `plugins > deep-link > desktop` — so a build from
+  source is never handed an address at all, and there is no runtime
+  registration on macOS to stand in for it. Verified against `pnpm tauri build`
+  with the application in `/Applications`: `open 'sync://<PROJECT>/<kind>/<key>'`
+  is the whole test, and the project is the key `sync_projects` lists.
 - **A banner that can be clicked needs a bundle, so `tauri dev` never has
   one.** The notification centre reads the running process's bundle identifier,
   and a build from source is a bare executable with none — so the banner falls

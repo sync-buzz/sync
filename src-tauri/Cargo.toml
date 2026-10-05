@@ -4,7 +4,7 @@ members = ["crates/*"]
 # it. Neither belongs in the window's build, and an ordinary `cargo check` here
 # is the window's build — so the sidecar is a member that is not a default one,
 # reached with `-p sync-mcp` when it is the thing being worked on.
-default-members = [".", "crates/sync-memory", "crates/sync-terminal", "crates/sync-extensions", "crates/sync-handlers", "crates/sync-vault", "crates/sync-voice", "crates/acp-client", "crates/agent-bridge"]
+default-members = [".", "crates/sync-memory", "crates/sync-terminal", "crates/sync-extensions", "crates/sync-handlers", "crates/sync-vault", "crates/sync-voice", "crates/sync-inference", "crates/sync-mcp-client", "crates/acp-client", "crates/agent-bridge"]
 
 [package]
 name = "sync"
@@ -50,6 +50,8 @@ async-trait = "0.1.92"
 # time the application itself needs it.
 base64 = "0.22"
 getrandom = "0.3"
+# Encoding a model's sha256 as hex. Already in the tree under `sync-extensions`.
+hex = "0.4"
 jsonc-parser = { version = "0.33.1", features = ["serde"] }
 # The words a working tree is named with. Two trees made from `main` on the
 # same afternoon are identical in everything git holds about them, so the name
@@ -74,8 +76,16 @@ reqwest = { version = "0.12", default-features = false, features = [
     "json",
     "rustls-tls",
 ] }
+# Reading an address back: every segment of a `sync://` url is escaped by
+# `link.rs` on the way out, so it is unescaped here on the way in. The same
+# spelling as its neighbours in the tree, so the graph gains nothing.
+percent-encoding = "2.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Verifying a downloaded model's bytes against the sha256 its manifest carries.
+# Already in the tree under `sync-extensions` and `sync-memory`; the same
+# spelling, so no new dependency is added to the graph.
+sha2 = "0.10"
 sync-extensions = { path = "crates/sync-extensions" }
 # What an extension runs when no screen is mounted. Tauri-free like its
 # neighbours: it takes a module and a name and answers, and everything it is
@@ -87,6 +97,10 @@ sync-handlers = { path = "crates/sync-handlers" }
 # is decided in `src/vault.rs` and how it is done is decided in the crate.
 sync-vault = { path = "crates/sync-vault" }
 sync-memory = { path = "crates/sync-memory" }
+# The client half of MCP: a project-scoped server declared in the project record
+# is reached as a client, per-call, by the command layer's unified tool-call
+# door. A leaf crate — no engine — so it costs the window's build nothing heavy.
+sync-mcp-client = { path = "crates/sync-mcp-client" }
 # The pty, and the process on the far end of it. Tauri-free like its
 # neighbours: it holds terminals under an owner it is handed, and who may ask
 # for one — and which project the owner is — is decided in `src/terminal.rs`.
@@ -95,8 +109,20 @@ sync-terminal = { path = "crates/sync-terminal" }
 # sentence and says it, and who may ask for one is decided in `voice.rs`, where
 # the installation's chosen voice is known.
 sync-voice = { path = "crates/sync-voice" }
+# Local model inference: the runtimes this machine can load, and the shape a
+# model's manifest takes. Tauri-free like its neighbours — it takes a manifest
+# and an input and answers, and who may ask is decided in `models.rs`.
+sync-inference = { path = "crates/sync-inference" }
 tauri = { version = "2.11.3", features = ["macos-private-api", "tray-icon", "image-png"] }
 tauri-plugin-autostart = "2"
+# What makes `sync://` an address the whole machine can follow. The plugin
+# earns its place twice: the schemes in `tauri.conf.json` are what the
+# bundler writes into `CFBundleURLTypes`, which is the only way macOS ever
+# hears of the scheme, and the same declaration is what a link arriving as a
+# command line argument is matched against off the Mac. Nothing of it is
+# granted to the webview: an address is routed in `src/links.rs`, which has
+# to choose a window before there is a window to ask.
+tauri-plugin-deep-link = "2.4.10"
 tauri-plugin-dialog = "2.7.2"
 # The banner, and it is the whole of what this window can say from behind
 # another application. Raised in Rust and never through the webview — a

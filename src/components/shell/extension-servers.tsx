@@ -180,3 +180,79 @@ function reached(reach: Reach): string {
 function serversOf(held: readonly ConsentedExtension[], id: string): readonly string[] {
   return held.find((one) => one.id === id)?.servers ?? [];
 }
+
+/** The server name that means *any server*, kept with the Rust that reads it. */
+const WILDCARD_SERVER = "*";
+
+/**
+ * One agreement for every MCP server the project declares, for a package that
+ * reaches them through `sync.call` rather than through the flagship.
+ *
+ * The per-server section above is for `tools.call` — a package spending turns
+ * of the person's agent on the agent's own servers, agreed one server at a
+ * time. A package that calls a project-scoped MCP server from a handler
+ * (`sync.call`, gated by `handler.call`) reaches servers the person added to
+ * the project themselves, and the set is decided in the project rather than in
+ * the package: a workflow node names `playwright.navigate` today and
+ * `stripe.get_account` tomorrow. Agreeing one server at a time is a friction
+ * the person asked to lift, so the row here is the wildcard — `*` — and it is
+ * the width it says it is: every MCP server the project holds, now and later.
+ *
+ * Drawn for `handler.call`, because that is the capability `sync.call` is
+ * gated by, and `sync.call` is the door that reaches a project-scoped MCP
+ * server from a handler.
+ */
+export function McpServersItMayCall({ id }: { id: string }) {
+  const [agreed, setAgreed] = useState<readonly string[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+
+  useEffect(() => {
+    let current = true;
+    void loadToolConsent()
+      .then((held) => {
+        if (current) setAgreed(serversOf(held, id));
+      })
+      .catch((refused: unknown) => {
+        if (current) setFailure(said(refused));
+      });
+    return () => {
+      current = false;
+    };
+  }, [id]);
+
+  const agree = useCallback(() => {
+    setBusy(true);
+    setFailure(null);
+    void grantToolConsent(id, WILDCARD_SERVER)
+      .then((held) => setAgreed(serversOf(held, id)))
+      .catch((refused: unknown) => setFailure(said(refused)))
+      .finally(() => setBusy(false));
+  }, [id]);
+
+  const isAgreed = agreed?.includes(WILDCARD_SERVER) ?? false;
+
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="max-w-[68ch] text-sm leading-5 text-fg-secondary">
+        A handler of this package calls MCP servers the project declares — a workflow node naming
+        <span className="font-mono text-xs"> playwright.navigate</span>, for instance. Agreeing here
+        lets it call <strong>any</strong> MCP server in this project, now and later, including ones
+        that change things. Withdraw it in Settings, under Agents.
+      </p>
+
+      {isAgreed ? (
+        <span className="flex items-center gap-1 text-xs text-fg-tertiary">
+          <Check aria-hidden="true" className="size-3 shrink-0" />
+          May call any MCP server in this project
+        </span>
+      ) : (
+        <Button variant="outline" size="sm" disabled={agreed === null || busy} onClick={agree}>
+          Allow all MCP servers
+        </Button>
+      )}
+
+      {failure !== null && <p className="text-xs text-danger">{failure}</p>}
+    </div>
+  );
+}

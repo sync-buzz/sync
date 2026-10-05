@@ -43,6 +43,22 @@
 //! `the_spelling_is_the_one_the_window_reads` below is for: it states the
 //! spelling in full rather than deriving it, so a change on either side has to
 //! be made deliberately on both.
+//!
+//! # The address that leaves, and why it is not written here
+//!
+//! An address can carry the project in front of the kind —
+//! `sync://<project>/<kind>/<key>` — and that spelling is what makes a link
+//! followable from a terminal or a chat window, where nothing knows which of the
+//! machine's projects was meant. Two readers hold it: the window's parser, and
+//! `src-tauri/src/links.rs`, which is what the system hands an address to.
+//!
+//! Nothing in this file writes one, and that is the division rather than an
+//! omission. What is written here goes into a *body*, and a body travels with
+//! the repository it is in — the project key is the name this machine answers to,
+//! so writing it into somebody's prose would be putting a local answer in a text
+//! that leaves. The addressed spelling belongs to whoever is speaking to a
+//! person, and the instructions in `server.rs` are where an agent is told to use
+//! it there.
 
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 
@@ -86,7 +102,13 @@ const COMPONENT: &AsciiSet = &NON_ALPHANUMERIC
     .remove(b'*')
     .remove(b'\'');
 
-/// How a record is addressed from inside a body or a message.
+/// How a record is addressed from inside a body.
+///
+/// Two segments, which is the spelling a body is written with: a body travels
+/// with the repository it is in, and the project key is the name *this* machine
+/// answers to. An address that leaves the project names it in a third segment in
+/// front — see this module's opening — and nothing here writes one, because
+/// nothing here speaks to a person.
 #[must_use]
 pub fn href(kind: &str, key: &str) -> String {
     let kind = utf8_percent_encode(kind, COMPONENT);

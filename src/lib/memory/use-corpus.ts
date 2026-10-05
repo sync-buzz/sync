@@ -446,8 +446,22 @@ export function useCorpus(
     });
   }, [question]);
 
+  // The types the project holds, read once per project rather than on every
+  // selection change or tab switch.
+  //
+  // Types change in two ways this window causes, and neither needs a re-read
+  // here: a type write returns the fresh corpus and `setTypes` is called
+  // directly from `createType`/`updateType`/`deleteType`. What is deliberately
+  // not in the deps is `attempt` — it bumps on every record write, and a record
+  // write does not move the types, so wiring it here made every created or
+  // deleted document re-read the type list for nothing. `active` is in the deps
+  // but gated by `typesLoadedFor`, so coming back to a project tab does not
+  // re-read types that have not changed.
+  const typesLoadedFor = useRef<string | null>(null);
+
   useEffect(() => {
     if (!active) return;
+    if (typesLoadedFor.current === projectPath) return;
     let current = true;
 
     void (async () => {
@@ -457,6 +471,7 @@ export function useCorpus(
         if (!current) return;
         setTypes(published);
         setTypesError(null);
+        typesLoadedFor.current = projectPath;
       } catch (failure) {
         if (!current) return;
         setTypes([]);
@@ -467,7 +482,7 @@ export function useCorpus(
     return () => {
       current = false;
     };
-  }, [projectPath, attempt, active]);
+  }, [projectPath, active]);
 
   // Attached folders are reconciled when the project opens and whenever this
   // window comes back to the front. The second is the one that matters in

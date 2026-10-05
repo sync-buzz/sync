@@ -42,15 +42,21 @@ fn every_published_extension_downloads_and_opens() {
     );
 
     for listed in &fetched.answer.extensions {
+        // An MCP server entry names a transport, not a package; there is nothing
+        // here to download or hash, so the round trip this test holds is one it
+        // does not take part in.
+        let Some(artefact) = listed.artefact.as_ref() else {
+            continue;
+        };
         let file = registry
-            .download(&listed.artefact, dir.path())
+            .download(artefact, dir.path())
             .unwrap_or_else(|error| panic!("{} did not download: {error}", listed.id));
 
         let written = std::fs::metadata(&file)
             .expect("the artefact was written")
             .len();
         assert_eq!(
-            written, listed.artefact.bytes,
+            written, artefact.bytes,
             "{} arrived at another size",
             listed.id
         );
@@ -86,6 +92,11 @@ fn every_indexed_version_is_in_its_own_ledger() {
 
     let fetched = registry.index().expect("the index is reachable");
     for listed in &fetched.answer.extensions {
+        // An MCP server has no ledger: it is not versioned the way a package is,
+        // and asking for its changelog is a question about a thing it does not have.
+        let Some(artefact) = listed.artefact.as_ref() else {
+            continue;
+        };
         let ledger = registry
             .ledger(&listed.id)
             .unwrap_or_else(|error| panic!("{} has no readable ledger: {error}", listed.id));
@@ -108,7 +119,7 @@ fn every_indexed_version_is_in_its_own_ledger() {
         // of the two was regenerated without the other, and an update applied
         // from the ledger would then not be the artefact the index named.
         assert_eq!(
-            newest.artefact.sha256, listed.artefact.sha256,
+            newest.artefact.sha256, artefact.sha256,
             "{} is published as two different files",
             listed.id,
         );

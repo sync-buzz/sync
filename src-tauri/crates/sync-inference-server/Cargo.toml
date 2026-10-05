@@ -1,0 +1,26 @@
+[package]
+name = "sync-inference-server"
+description = "The inference sidecar: loads a local model and answers tasks, isolated from the window"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.91"
+publish = false
+
+[dependencies]
+sync-inference = { path = "../sync-inference" }
+llama-cpp-2 = "0.1"
+ort = { version = "2.0.0-rc.13", features = ["ndarray"] }
+ndarray = "0.17"
+tokenizers = { version = "0.21", default-features = false, features = ["fancy-regex"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+expect_used = "warn"

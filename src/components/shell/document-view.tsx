@@ -18,6 +18,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import type { TextAnchor } from "@/lib/editor/anchor";
+import type { DocumentComment } from "@/lib/editor/comments";
 import { editorHoldsRecord, forgetEditability } from "@/lib/editor/probe";
 import type { Presence } from "@/lib/memory/types";
 import type { OpenDocument, SaveState } from "@/lib/memory/use-document";
@@ -58,6 +60,11 @@ export function DocumentView({
   onArchive,
   onDelete,
   justCreated,
+  comments,
+  onCommentWrite,
+  onCommentRewrite,
+  onCommentResolve,
+  onCommentMoved,
 }: {
   open: OpenDocument;
   /** The mark for this record's type, from the published corpus. */
@@ -79,6 +86,21 @@ export function DocumentView({
   onDelete: () => void;
   /** True when this record was created a moment ago and still has no name. */
   justCreated?: boolean;
+  /**
+   * The comments on this record, and what may happen to one.
+   *
+   * Passed through to the page, which shades the passages and shows the cards.
+   * All four are absent where comments are not kept, and then this view is exactly
+   * what it was before them — the shell keeps no comments of its own, and what a
+   * comment is stored as belongs to whoever opened this view.
+   */
+  comments?: readonly DocumentComment[];
+  onCommentWrite?: (anchor: TextAnchor, body: string) => void;
+  onCommentRewrite?: (key: string, body: string) => void;
+  onCommentResolve?: (key: string) => void;
+  onCommentMoved?: (
+    moves: readonly { readonly key: string; readonly anchor: TextAnchor }[],
+  ) => void;
 }) {
   const { document, draft, save } = open;
 
@@ -216,6 +238,11 @@ export function DocumentView({
               icon={icon}
               note={note}
               autoFocusTitle={justCreated}
+              comments={comments}
+              onCommentWrite={onCommentWrite}
+              onCommentRewrite={onCommentRewrite}
+              onCommentResolve={onCommentResolve}
+              onCommentMoved={onCommentMoved}
               onTitle={(title) => open.edit({ title })}
               onBody={open.editBody}
             />

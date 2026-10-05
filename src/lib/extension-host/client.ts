@@ -393,8 +393,15 @@ export interface ListedExtension {
   readonly name: string;
   readonly summary: string;
   readonly icon: string | null;
+  /**
+   * The version of the package this entry points at. Empty for an MCP server,
+   * which has a `transport` rather than a package to version.
+   */
   readonly version: string;
-  /** The range of Sync's extension API it was written for. */
+  /**
+   * The range of Sync's extension API it was written for. Empty for an MCP
+   * server, which is not a package that runs against the extension API.
+   */
   readonly syncApi: string;
   readonly capabilities: readonly string[];
   readonly requires: readonly string[];
@@ -415,7 +422,56 @@ export interface ListedExtension {
    * file or a folder, and every index entry whose author did not set one.
    */
   readonly category: string | null;
-  readonly artefact: RegistryArtefact;
+  /**
+   * Where the package's bytes come from. `null` for an MCP server, which has
+   * a `transport` rather than bytes to download.
+   */
+  readonly artefact: RegistryArtefact | null;
+  /**
+   * How to reach an MCP server, when this entry names one rather than a
+   * package. `null` for a downloadable extension.
+   */
+  readonly transport: McpTransportSpec | null;
+}
+
+/**
+ * How a catalogue entry names an MCP server, as the registry publishes it.
+ *
+ * The spec carries the descriptions a credential prompt needs; the project
+ * record drops them, keeping only the secret names and where they live in the
+ * vault.
+ */
+export type McpTransportSpec =
+  | {
+      readonly type: "stdio";
+      readonly command: string;
+      readonly args?: readonly string[];
+      readonly env?: readonly McpEnvSpec[];
+    }
+  | {
+      readonly type: "http";
+      readonly url: string;
+      readonly headers?: readonly McpHeaderSpec[];
+    }
+  | {
+      readonly type: "sse";
+      readonly url: string;
+      readonly headers?: readonly McpHeaderSpec[];
+    };
+
+/** One environment variable an MCP stdio transport needs, for the prompt. */
+export interface McpEnvSpec {
+  readonly name: string;
+  readonly secret: string;
+  readonly description: string;
+}
+
+/** One HTTP header an MCP transport sends, for the prompt. */
+export interface McpHeaderSpec {
+  readonly name: string;
+  readonly secret: string;
+  readonly scheme: string | null;
+  readonly description: string;
 }
 
 export interface RegistryIndex {

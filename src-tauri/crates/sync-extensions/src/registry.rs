@@ -41,7 +41,12 @@ use url::Url;
 /// Read before anything else in the file, so an index from a newer registry is
 /// answered with "this Sync is too old" rather than with a field name nobody
 /// asked about — the same order [`crate::manifest`] reads a manifest in.
-pub const SUPPORTED_REGISTRY_FORMAT: u32 = 1;
+///
+/// Format 2 made `artefact`, `version` and `syncApi` optional and added
+/// `transport`, so an entry can name an MCP server rather than a downloadable
+/// package. A build that reads only format 1 cannot parse an entry without an
+/// `artefact`, so the bump is what tells it to refuse rather than fail.
+pub const SUPPORTED_REGISTRY_FORMAT: u32 = 2;
 
 /// Where the index is, and it is not configurable.
 ///
@@ -137,8 +142,21 @@ pub struct Listed {
     pub summary: String,
     #[serde(default)]
     pub icon: Option<String>,
+    /// The version of the package this entry points at.
+    ///
+    /// Empty for an entry that has no package to version — an MCP server, whose
+    /// `transport` is the whole of what it is. A card that compared versions to
+    /// notice an update treats empty as *nothing to compare*, which is the
+    /// honest answer for a descriptor that is rewritten on re-add rather than
+    /// released.
+    #[serde(default)]
     pub version: String,
     /// The range of Sync's extension API it was written for.
+    ///
+    /// Empty for an MCP server: it is not a package that runs against the
+    /// extension API, so there is no range to check. A build that gates an offer
+    /// on the range treats empty as *no constraint*.
+    #[serde(default)]
     pub sync_api: String,
     #[serde(default)]
     pub capabilities: Vec<String>,
@@ -170,7 +188,73 @@ pub struct Listed {
     /// add without a format bump.
     #[serde(default)]
     pub category: Option<String>,
-    pub artefact: Artefact,
+    /// Where the package's bytes come from. `null` for an MCP server, which has
+    /// no bytes to download — its [`transport`](Self::transport) is the whole
+    /// of what it is. Serialized as `null` rather than omitted so the window,
+    /// which spells the field `RegistryArtefact | null`, reads a value on every
+    /// entry the way it does for `icon` and `category`.
+    #[serde(default)]
+    pub artefact: Option<Artefact>,
+    /// How to reach an MCP server, when this entry names one rather than a
+    /// package. `null` for a downloadable extension. Serialized as `null`
+    /// rather than omitted for the same reason `artefact` is.
+    #[serde(default)]
+    pub transport: Option<McpTransportSpec>,
+}
+
+/// How a catalogue entry names an MCP server, as the registry publishes it.
+///
+/// The spec carries the descriptions a credential prompt needs, which the
+/// project record does not — once a server is installed, only the secret's
+/// name and where it lives in the vault remain, and the prose that told a
+/// person what to paste is no longer anybody's business at call time.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase", tag = "type")]
+pub enum McpTransportSpec {
+    Stdio {
+        command: String,
+        #[serde(default)]
+        args: Vec<String>,
+        #[serde(default)]
+        env: Vec<McpEnvSpec>,
+    },
+    Http {
+        url: String,
+        #[serde(default)]
+        headers: Vec<McpHeaderSpec>,
+    },
+    Sse {
+        url: String,
+        #[serde(default)]
+        headers: Vec<McpHeaderSpec>,
+    },
+}
+
+/// One environment variable an MCP server's stdio transport needs, as the
+/// registry describes it to a person installing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpEnvSpec {
+    pub name: String,
+    /// The vault key the value is stored under, as `mcp-{id}/{secret}`.
+    pub secret: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+/// One HTTP header an MCP server's transport sends, as the registry describes
+/// it to a person installing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpHeaderSpec {
+    pub name: String,
+    /// The vault key the value is stored under, as `mcp-{id}/{secret}`.
+    pub secret: String,
+    /// How the secret is prefixed onto the header value, when it is — `Bearer`
+    /// is the common case. `null` means the value is sent as-is. Serialized as
+    /// `null` rather than omitted, matching the window's `string | null`.
+    #[serde(default)]
+    pub scheme: Option<String>,
+    #[serde(default)]
+    pub description: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -248,11 +332,19 @@ pub struct Registry {
 
 impl Registry {
     /// Names the directory. Nothing is created until something is fetched.
+    ///
+    /// The index the registry reads is [`INDEX_URL`] unless `SYNC_REGISTRY_URL`
+    /// is set in the environment — a development override that points at a fork
+    /// or a local file. A local file is spelled as a path or a `file://` URL,
+    /// and is read fresh on every call rather than fetched and cached; an HTTP
+    /// URL goes through the same fetch as the compiled-in one. Reachable from
+    /// nowhere else: it is the same door `SYNC_MCP_BINARY` opens for the engine,
+    /// for the same reason — a build from source is not a published thing.
     #[must_use]
     pub fn at(root: PathBuf) -> Self {
         Self {
             root,
-            index_url: INDEX_URL.to_owned(),
+            index_url: std::env::var("SYNC_REGISTRY_URL").unwrap_or_else(|_| INDEX_URL.to_owned()),
         }
     }
 
@@ -413,6 +505,21 @@ enum Answer {
     Fresh { body: Vec<u8>, etag: Option<String> },
 }
 
+/// A local file the override points at, when it does.
+///
+/// `file:///abs/path/registry.json` and a bare `/abs/path/registry.json` both
+/// read as that path; an `http` or `https` URL reads as `None` and goes through
+/// the fetch. The boundary is the scheme: anything that is not HTTP is a file,
+/// which is the contract `SYNC_REGISTRY_URL` states.
+fn local_file(url: &str) -> Option<PathBuf> {
+    let stripped = url.strip_prefix("file://").unwrap_or(url);
+    if stripped.starts_with("http://") || stripped.starts_with("https://") {
+        None
+    } else {
+        Some(PathBuf::from(stripped))
+    }
+}
+
 /// One file, fetched with what is held of it and cached by what came back.
 ///
 /// The index and a ledger differ in what they say and in nothing about how they
@@ -424,6 +531,27 @@ fn read<T: serde::de::DeserializeOwned>(
     cached_at: &Path,
     etag_at: &Path,
 ) -> Result<Fetched<T>, RegistryError> {
+    // A local file, for development: read fresh, no ETag. The body is written
+    // to the cache so `cached_index` — which the composition reads to resolve
+    // an install — sees the same entries the marketplace just showed. No ETag
+    // is kept: a local file has none, and a stale one would claim to hold
+    // something the next read would not be asked about in full. The override is
+    // deliberate — `SYNC_REGISTRY_URL` — so a path or `file://` URL is read
+    // straight off the disk rather than handed to a client that speaks HTTP and
+    // enforces `ALLOWED_HOSTS`.
+    if let Some(path) = local_file(url) {
+        let body = std::fs::read(&path)?;
+        if let Some(directory) = cached_at.parent() {
+            std::fs::create_dir_all(directory)?;
+        }
+        std::fs::write(cached_at, &body)?;
+        let _ = std::fs::remove_file(etag_at);
+        return Ok(Fetched {
+            answer: parse(&body)?,
+            cached: false,
+        });
+    }
+
     let held = std::fs::read_to_string(etag_at).ok();
     let from_disk = || -> Result<T, RegistryError> { parse(&std::fs::read(cached_at)?) };
 
@@ -734,6 +862,51 @@ mod tests {
         }
     }
 
+    /// The override is a file when it is not HTTP: a bare path and a `file://`
+    /// URL both read as that path, and an HTTP URL reads as `None` so it goes
+    /// through the fetch. The boundary is the scheme, nothing finer.
+    #[test]
+    fn a_local_override_is_a_file_when_it_is_not_http() {
+        assert_eq!(
+            local_file("/abs/path/registry.json").as_deref(),
+            Some(std::path::Path::new("/abs/path/registry.json")),
+        );
+        assert_eq!(
+            local_file("file:///abs/path/registry.json").as_deref(),
+            Some(std::path::Path::new("/abs/path/registry.json")),
+        );
+        assert!(local_file("https://raw.githubusercontent.com/o/r/main/registry.json").is_none());
+        assert!(local_file("http://localhost:8080/registry.json").is_none());
+    }
+
+    /// A local override is read fresh off the disk, without an `ETag`, and
+    /// written to the cache so the composition — which reads the cache to
+    /// resolve an install — sees the same entries the marketplace just showed.
+    #[test]
+    fn a_local_override_reads_the_file_and_writes_the_cache() {
+        let dir = tempfile::TempDir::new().expect("a temp dir");
+        let index = dir.path().join("registry.json");
+        std::fs::write(
+            &index,
+            br#"{"formatVersion": 2, "extensions": [{
+              "id": "github", "name": "GitHub", "category": "MCP Servers",
+              "transport": {"type": "stdio", "command": "github-mcp-server"}
+            }]}"#,
+        )
+        .expect("written");
+
+        let cached_at = dir.path().join("cache/index.json");
+        let etag_at = dir.path().join("cache/index.etag");
+        let url = format!("file://{}", index.display());
+
+        let fetched: Fetched<Index> = read(&url, &cached_at, &etag_at).expect("read");
+        assert!(!fetched.cached, "a local file is never the cache");
+        assert_eq!(fetched.answer.extensions[0].id, "github");
+        // The cache holds what the file held, so `cached_index` reads the same.
+        assert!(cached_at.exists());
+        assert!(!etag_at.exists(), "no ETag is kept for a local file");
+    }
+
     /// A machine that has never fetched an index has nothing to say about
     /// updates, and says it with `None` rather than with a failure.
     #[test]
@@ -746,8 +919,8 @@ mod tests {
     #[test]
     fn an_index_from_a_newer_registry_says_so_rather_than_naming_a_field() {
         let error =
-            parse::<Index>(br#"{"formatVersion": 2, "whatever": true}"#).expect_err("refused");
-        assert!(matches!(error, RegistryError::Newer { found: 2 }));
+            parse::<Index>(br#"{"formatVersion": 3, "whatever": true}"#).expect_err("refused");
+        assert!(matches!(error, RegistryError::Newer { found: 3 }));
     }
 
     #[test]
@@ -814,5 +987,80 @@ mod tests {
         )
         .expect("valid");
         assert!(index.extensions[0].category.is_none());
+    }
+
+    /// An MCP server entry has a transport where a package has an artefact, and
+    /// the artefact, version and syncApi it does without are absent rather than
+    /// filled in with something they are not.
+    #[test]
+    fn an_mcp_entry_names_a_transport_and_no_artefact() {
+        let index: Index = parse(
+            br#"{"formatVersion": 2, "extensions": [{
+              "id": "github", "name": "GitHub MCP", "summary": "Issues and PRs",
+              "icon": "github", "category": "MCP Servers",
+              "transport": {
+                "type": "stdio", "command": "github-mcp-server", "args": ["stdio"],
+                "env": [{"name": "GITHUB_TOKEN", "secret": "github-token", "description": "A PAT"}]
+              }
+            }]}"#,
+        )
+        .expect("valid");
+        let entry = &index.extensions[0];
+        assert_eq!(entry.category.as_deref(), Some("MCP Servers"));
+        assert!(entry.artefact.is_none());
+        assert!(entry.version.is_empty());
+        assert!(entry.sync_api.is_empty());
+        assert!(matches!(
+            entry.transport.as_ref().expect("a transport"),
+            McpTransportSpec::Stdio { command, args, env }
+            if command == "github-mcp-server"
+                && args == &vec!["stdio".to_owned()]
+                && env[0].name == "GITHUB_TOKEN"
+                && env[0].secret == "github-token"
+        ));
+    }
+
+    /// An HTTP transport carries its secrets as headers, each with an optional
+    /// scheme that tells the call site how to prefix the value.
+    #[test]
+    fn an_http_transport_reads_its_headers_and_scheme() {
+        let index: Index = parse(
+            br#"{"formatVersion": 2, "extensions": [{
+              "id": "linear", "name": "Linear", "category": "MCP Servers",
+              "transport": {
+                "type": "http", "url": "https://mcp.linear.app/sse",
+                "headers": [{"name": "Authorization", "secret": "linear-token", "scheme": "Bearer"}]
+              }
+            }]}"#,
+        )
+        .expect("valid");
+        let entry = &index.extensions[0];
+        assert!(matches!(
+            entry.transport.as_ref().expect("a transport"),
+            McpTransportSpec::Http { url, headers }
+            if url == "https://mcp.linear.app/sse"
+                && headers[0].name == "Authorization"
+                && headers[0].scheme.as_deref() == Some("Bearer")
+        ));
+    }
+
+    /// What round-trips through the index is what the catalogue shows, so an
+    /// MCP entry serialised and read back keeps its transport and stays without
+    /// an artefact.
+    #[test]
+    fn an_mcp_entry_round_trips_without_gaining_an_artefact() {
+        let index: Index = parse(
+            br#"{"formatVersion": 2, "extensions": [{
+              "id": "fs", "name": "Filesystem", "category": "MCP Servers",
+              "transport": {"type": "stdio", "command": "mcp-server-fs", "args": ["/tmp"]}
+            }]}"#,
+        )
+        .expect("valid");
+        let round: Index =
+            serde_json::from_value(serde_json::to_value(&index).expect("serialises"))
+                .expect("reads back");
+        let entry = &round.extensions[0];
+        assert!(entry.artefact.is_none());
+        assert!(entry.transport.is_some());
     }
 }

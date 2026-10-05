@@ -147,6 +147,17 @@ Double brackets are not a link: they carry no kind, so nothing can route on one,
 `sync_apply` refuses a write that spells a record with them. A key left bare in a code \
 span comes back in the answer instead, with the link to write in its place.
 
+**In a message, name the project too.** A message is read where Sync is not, and this \
+machine answers for every project somebody has opened — so an address carrying only the \
+kind and the key points at all of them at once. Put the project first, spelled as the key \
+you called with, and the link opens from a terminal, a chat window or somebody's notes:
+
+    [the record's title](sync://<project>/<kind>/<key>)
+
+In a record's own body, write the two-segment form instead. A body travels with the \
+repository it is in, and the project key is the name this machine answers to: a machine \
+holding two repositories that derived the same name answers differently.
+
 **Never write a secret.** A project's memory travels with its repository. Name where a \
 secret lives, never its value.";
 

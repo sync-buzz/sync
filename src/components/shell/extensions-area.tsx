@@ -3,6 +3,7 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
 
 import { ExtensionRemovalSheet } from "@/components/shell/extension-removal";
+import { McpCredentialSheet } from "@/components/shell/mcp-credential-sheet";
 import { PanelSurface } from "@/components/shell/panel";
 import {
   ExtensionInspector,
@@ -216,6 +217,11 @@ export function ExtensionsWorkspace() {
   const area = useExtensionsArea();
   const composition = useCompositionContext();
   const entry = area.selectedId === null ? null : area.catalogue.byId(area.selectedId);
+  // The credential sheet an MCP server opens on Add: its secrets are written to
+  // the vault before the declaration is recorded. Held here rather than in the
+  // page because the page is one of two surfaces (the card grid is the other)
+  // and the sheet belongs to whichever is showing.
+  const [credentialOpen, setCredentialOpen] = useState(false);
 
   if (entry === null) {
     return (
@@ -248,42 +254,57 @@ export function ExtensionsWorkspace() {
   });
 
   return (
-    <ExtensionPage
-      entry={entry}
-      update={area.updates.get(entry.id) ?? null}
-      dependencies={dependencies}
-      installProgress={composition.installProgress}
-      // Moving to another published version, which is the same operation
-      // whichever direction the number went.
-      onChange={(artefact) => void composition.change(entry.id, artefact)}
-      // The artefact only when this machine has not got the package: an entry
-      // answered by something already unpacked is declared from that, whatever
-      // the registry also says about it.
-      onInstall={() =>
-        void composition.install(
-          entry.id,
-          entry.packaged === null ? (entry.listed?.artefact ?? undefined) : undefined,
-        )
-      }
-      onRemove={() => area.askRemoval(entry.id)}
-      isBusy={composition.isBusy}
-      failure={composition.failure}
-      onDismissFailure={composition.dismissFailure}
-      // A switch only where there is a clock to stop: the package is here, it
-      // asks for one, and this project is the one running it. A card for
-      // something nobody has installed still says that it runs on a clock —
-      // that is what somebody is deciding about — and carries no control over a
-      // schedule that is running nowhere.
-      clock={
-        entry.declared && (entry.packaged?.manifest.schedule.length ?? 0) > 0
-          ? {
-              isOn: area.clocks.isOn(entry.id),
-              isBusy: area.clocks.isBusy,
-              onChange: (on: boolean) => area.clocks.switchTo(entry.id, on),
-            }
-          : null
-      }
-    />
+    <>
+      <ExtensionPage
+        entry={entry}
+        update={area.updates.get(entry.id) ?? null}
+        dependencies={dependencies}
+        installProgress={composition.installProgress}
+        // Moving to another published version, which is the same operation
+        // whichever direction the number went.
+        onChange={(artefact) => void composition.change(entry.id, artefact)}
+        // The artefact only when this machine has not got the package: an entry
+        // answered by something already unpacked is declared from that, whatever
+        // the registry also says about it. An MCP server is added by descriptor —
+        // it has no artefact — and its secrets are collected first.
+        onInstall={() => {
+          if (entry.transport !== null) {
+            setCredentialOpen(true);
+            return;
+          }
+          void composition.install(
+            entry.id,
+            entry.packaged === null ? (entry.listed?.artefact ?? undefined) : undefined,
+          );
+        }}
+        onRemove={() => area.askRemoval(entry.id)}
+        isBusy={composition.isBusy}
+        failure={composition.failure}
+        onDismissFailure={composition.dismissFailure}
+        // A switch only where there is a clock to stop: the package is here, it
+        // asks for one, and this project is the one running it. A card for
+        // something nobody has installed still says that it runs on a clock —
+        // that is what somebody is deciding about — and carries no control over a
+        // schedule that is running nowhere.
+        clock={
+          entry.declared && (entry.packaged?.manifest.schedule.length ?? 0) > 0
+            ? {
+                isOn: area.clocks.isOn(entry.id),
+                isBusy: area.clocks.isBusy,
+                onChange: (on: boolean) => area.clocks.switchTo(entry.id, on),
+              }
+            : null
+        }
+      />
+      {entry.transport === null ? null : (
+        <McpCredentialSheet
+          entry={entry}
+          open={credentialOpen}
+          onOpenChange={setCredentialOpen}
+          onAdded={() => composition.addMcp(entry)}
+        />
+      )}
+    </>
   );
 }
 /**

@@ -96,8 +96,46 @@
 
   /* Interaction states */
   --state-hover: hsl(var(--tint-h) calc(8% * var(--tint-s)) 12% / 0.045);
+  /*
+   * Stayed grey, and that is the decision rather than the leftover. This is
+   * what a pressed toolbar button, a metadata chip, a console tab and the
+   * track on the launch screen are all drawn with — thirty-odd places, none of
+   * which is *where you are*. Tinting it would have spent the accent on every
+   * toggle in the window and left it meaning nothing in the one place it has
+   * to mean something. What is selected in a source list is filled outright
+   * instead; see "Selection" in `docs/design-foundation.md`.
+   */
   --state-selected: hsl(var(--tint-h) calc(8% * var(--tint-s)) 12% / 0.075);
-  --focus-ring: hsl(211 100% 43%);
+
+  /*
+   * The accent, and the whole of the colour this window spends on itself.
+   *
+   * It was already here twice over and had no name: the focus ring is this
+   * blue, and so is the blue a program writes in. Naming it is what lets one
+   * tone say *this is where you are*, *this goes somewhere* and *this is
+   * happening* — three sentences a single colour can carry and three colours
+   * could not, because the third would be a palette and a palette is a theme.
+   *
+   * It is not tinted, for the reason the status colours are not: `--tint-h`
+   * retints the surfaces, the text and the separators together, and an accent
+   * that travelled with them would be five designs rather than one design in
+   * five tints.
+   *
+   * Three values because the tone has three jobs and one value cannot hold
+   * them. A fill; what stays legible on that fill; and the tone as a mark on a
+   * panel — which is the same blue here and cannot be in the dark appearance,
+   * where a blue dark enough to carry white text is too dark to read as a line
+   * on a near-black surface.
+   */
+  --accent-fill: hsl(211 100% 43%);
+  --accent-on: hsl(0 0% 100%);
+  --accent-text: hsl(211 100% 43%);
+  /*
+   * Derived rather than declared. The ring was the first place this window
+   * spent a colour, and leaving it as its own literal would be two blues one
+   * edit apart.
+   */
+  --focus-ring: var(--accent-text);
   /*
    * The dim over the slab while a sheet is open. It is the one overlay in the
    * shell that has to darken a surface rather than tint a control, so no
@@ -109,6 +147,28 @@
   --status-success: hsl(145 63% 27%);
   --status-warning: hsl(32 90% 32%);
   --status-danger: hsl(0 68% 42%);
+
+  /*
+   * A passage somebody commented on, and the one it is being read through.
+   *
+   * The one place in this window where colour is spent on content rather than on
+   * status or destruction, and the reason is that the mark has to survive being
+   * *inside* a sentence. Grey was tried first and rejected on sight: at the
+   * weight prose allows, a grey passage reads as the system's own text selection
+   * — which is a thing that appears and disappears under the pointer — so a
+   * standing mark drawn that way is a selection nobody can dismiss.
+   *
+   * Amber rather than the accent, which is *where you are*, and rather than the
+   * warning tone, which says something is wrong with the record. It is the
+   * convention every document editor made the same way, and a convention a
+   * reader already has is cheaper than one this window has to teach.
+   *
+   * Both are text-behind rather than text-on: the prose keeps its own colour and
+   * its own contrast, so nothing here can push a paragraph under the ratio this
+   * document requires of body text.
+   */
+  --comment-mark: hsl(43 96% 56% / 0.28);
+  --comment-mark-open: hsl(43 96% 56% / 0.55);
 
   /*
    * The metric scale, declared here rather than in the theme block, and that
@@ -307,12 +367,28 @@
 
     --state-hover: hsl(0 0% 100% / 0.05);
     --state-selected: hsl(0 0% 100% / 0.085);
-    --focus-ring: hsl(211 100% 64%);
+
+    /*
+     * Designed rather than inverted, like everything else here. The fill is
+     * *darker* than the light appearance's rather than lighter: it has to carry
+     * white text on a near-black surface, and the blue that reads as a line on
+     * that surface is far too light to do it. That is the whole reason the tone
+     * is three values.
+     */
+    --accent-fill: hsl(211 100% 45%);
+    --accent-on: hsl(0 0% 100%);
+    --accent-text: hsl(211 100% 64%);
+    --focus-ring: var(--accent-text);
     --scrim: hsl(var(--tint-h) calc(7% * var(--tint-s)) 3% / 0.48);
 
     --status-success: hsl(145 50% 58%);
     --status-warning: hsl(38 88% 60%);
     --status-danger: hsl(0 78% 66%);
+
+    /* Dimmer and more saturated on a dark surface: the same amber at the light
+       theme's alpha reads as a highlighter pen rather than as a marked passage. */
+    --comment-mark: hsl(43 92% 58% / 0.2);
+    --comment-mark-open: hsl(43 92% 58% / 0.42);
 
     --surface-console: hsl(var(--tint-h) calc(6% * var(--tint-s)) 9.5% / 0.82);
 
@@ -357,12 +433,26 @@
 
   --state-hover: hsl(0 0% 100% / 0.05);
   --state-selected: hsl(0 0% 100% / 0.085);
-  --focus-ring: hsl(211 100% 64%);
+
+  /*
+   * Designed rather than inverted, like everything else here. The fill is
+   * *darker* than the light appearance's rather than lighter: it has to carry
+   * white text on a near-black surface, and the blue that reads as a line on
+   * that surface is far too light to do it. That is the whole reason the tone
+   * is three values.
+   */
+  --accent-fill: hsl(211 100% 45%);
+  --accent-on: hsl(0 0% 100%);
+  --accent-text: hsl(211 100% 64%);
+  --focus-ring: var(--accent-text);
   --scrim: hsl(var(--tint-h) calc(7% * var(--tint-s)) 3% / 0.48);
 
   --status-success: hsl(145 50% 58%);
   --status-warning: hsl(38 88% 60%);
   --status-danger: hsl(0 78% 66%);
+
+  --comment-mark: hsl(43 92% 58% / 0.2);
+  --comment-mark-open: hsl(43 92% 58% / 0.42);
 
   --surface-console: hsl(var(--tint-h) calc(6% * var(--tint-s)) 9.5% / 0.82);
 
@@ -498,6 +588,14 @@ html[data-vibrancy="on"] body {
     --separator: hsl(var(--tint-h) calc(6% * var(--tint-s)) 62%);
     --separator-strong: hsl(var(--tint-h) calc(8% * var(--tint-s)) 42%);
     --state-selected: hsl(var(--tint-h) calc(8% * var(--tint-s)) 12% / 0.18);
+    /*
+     * The accent darkens rather than saturates, which is what the sixteen
+     * below do and for the same reason: the tone has to stay the tone. A
+     * second blue at this setting would be a second design for anybody who
+     * asked for contrast.
+     */
+    --accent-fill: hsl(211 100% 34%);
+    --accent-text: hsl(211 100% 32%);
 
     /*
      * The sixteen darken rather than saturate, and the two pairs that would
@@ -528,6 +626,8 @@ html[data-vibrancy="on"] body {
     --separator: hsl(var(--tint-h) calc(10% * var(--tint-s)) 100% / 0.32);
     --separator-strong: hsl(var(--tint-h) calc(10% * var(--tint-s)) 100% / 0.48);
     --state-selected: hsl(0 0% 100% / 0.22);
+    --accent-fill: hsl(211 100% 40%);
+    --accent-text: hsl(211 100% 76%);
 
     --ansi-0: hsl(var(--tint-h) calc(5% * var(--tint-s)) 44%);
     --ansi-1: hsl(0 92% 76%);
@@ -627,7 +727,14 @@ html[data-vibrancy="on"] body {
   --color-hover: var(--state-hover);
   --color-selected: var(--state-selected);
   --color-focus: var(--focus-ring);
+
+  --color-accent-fill: var(--accent-fill);
+  --color-accent-on: var(--accent-on);
+  --color-accent-text: var(--accent-text);
   --color-scrim: var(--scrim);
+
+  --color-comment-mark: var(--comment-mark);
+  --color-comment-mark-open: var(--comment-mark-open);
 
   --color-success: var(--status-success);
   --color-warning: var(--status-warning);

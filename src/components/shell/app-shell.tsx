@@ -15,6 +15,8 @@ import { WelcomeScreen } from "@/components/shell/welcome";
 import type { OpenProject } from "@/lib/project/types";
 import { usePlace } from "@/lib/project/use-place";
 import { useAddressed, useWindowHolds } from "@/lib/attention";
+import { useLinked } from "@/lib/deep-link";
+import { useLatestIntent } from "@/lib/sent-to";
 import { useAppMenu } from "@/lib/app-menu";
 import { useDevice } from "@/lib/device";
 import { usePairing } from "@/lib/pairing";
@@ -109,8 +111,13 @@ export function AppShell() {
   // before there is anybody to ask.
   useWindowHolds(project?.path ?? null);
   // What such a click asked for, once this window has answered the half of it
-  // that is opening the project.
+  // that is opening the project. A `sync://` address followed from anywhere on
+  // the machine is the same ask from another direction, and whichever of them
+  // arrived last is what the window is showing: preferring one would swallow an
+  // address followed while a banner's record was still open, or the reverse.
   const addressed = useAddressed(project, enter);
+  const linked = useLinked(project, enter);
+  const shown = useLatestIntent(addressed, linked);
 
   // The computer was forgotten, so everything that was read from it goes with
   // it: the sheet that did it, and the project it was raised over. The project
@@ -168,7 +175,7 @@ export function AppShell() {
           <ProjectWindow
             project={project}
             setup={setup}
-            shown={addressed}
+            shown={shown}
             onProjectChanged={enter}
             // Only where there is a list to go back to. A Mac closes a project
             // by closing its window, and a phone has neither a second window

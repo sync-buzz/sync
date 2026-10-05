@@ -353,20 +353,27 @@ function FilterRow({
       aria-current={isActive ? "true" : undefined}
       aria-label={`${label}, ${count} ${count === 1 ? "change" : "changes"}`}
       onClick={onSelect}
-      className="flex h-(--control-height-lg) w-full items-center gap-2.5 rounded-(--radius-control) px-2 text-left text-base text-fg-secondary transition-colors duration-(--motion-duration-fast) ease-shell hover:bg-hover hover:text-fg data-[active=true]:bg-selected data-[active=true]:font-medium data-[active=true]:text-fg"
+      className="group flex h-(--control-height-lg) w-full items-center gap-2.5 rounded-(--radius-control) px-2 text-left text-base text-fg-secondary transition-colors duration-(--motion-duration-fast) ease-shell hover:bg-hover hover:text-fg data-[active=true]:bg-accent-fill data-[active=true]:font-medium data-[active=true]:text-accent-on"
     >
       {Glyph === null ? (
         <KindGlyph
           icon={icon as string | null | undefined}
-          className="size-4 shrink-0 opacity-80"
+          className="size-4 shrink-0 opacity-80 group-data-[active=true]:opacity-100"
         />
       ) : (
-        <Glyph aria-hidden="true" className="size-4 shrink-0 opacity-80" />
+        <Glyph
+          aria-hidden="true"
+          // Full strength on the filled row. White on the accent is already at
+          // the ceiling this window's contrast rule allows, so four fifths of it
+          // lands under the floor — the tier a glyph carries on a selected row
+          // is its size, which costs no contrast.
+          className="size-4 shrink-0 opacity-80 group-data-[active=true]:opacity-100"
+        />
       )}
       <span className="truncate">{label}</span>
       <span
         aria-hidden="true"
-        className="ml-auto shrink-0 text-xs font-normal text-fg-tertiary"
+        className="ml-auto shrink-0 text-xs font-normal text-fg-tertiary group-data-[active=true]:text-accent-on"
       >
         {count}
       </span>

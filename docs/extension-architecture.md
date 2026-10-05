@@ -536,6 +536,8 @@ the thing* — a platform with no bundled ACP sidecar publishes the same
 | `agent.tools` | An agent is told it is there, and may act through it | manifest | required by `tools[]` |
 | `terminal` | A shell, in a folder, with a screen the package draws | **call** | one screen at a time |
 | `tools.call` | Asking one tool of one server the person already configured | **call** | plus a person's agreement, per server |
+| `handler.call` | Running another package's handler, in that package's isolate | **call** | the answer only — not its vault or its hosts |
+| `models` | Asking a local auxiliary model this machine has downloaded | **call** | the model is shared by every project |
 
 **A capability this build has never heard of is refused rather than ignored.**
 It arrives in exactly one situation — a package built against a newer host — and

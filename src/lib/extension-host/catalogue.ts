@@ -3,7 +3,11 @@
 import { useMemo } from "react";
 
 import { refuseUnrunnable, unavailableFor } from "@/lib/extension-host/activate";
-import type { InstalledExtension, ListedExtension } from "@/lib/extension-host/client";
+import type {
+  InstalledExtension,
+  ListedExtension,
+  McpTransportSpec,
+} from "@/lib/extension-host/client";
 import type { Packages } from "@/lib/extension-host/packages";
 import { refuseIncompatible, unavailableHere } from "@/lib/extension-api/version";
 
@@ -71,6 +75,24 @@ export interface CatalogueEntry {
    * nothing satisfies — the version the project asked for.
    */
   readonly version: string;
+  /**
+   * The icon name a card or a row draws, resolved once from whichever source
+   * describes this entry — the manifest for a package, the index for a
+   * registry listing, `null` for a declaration nothing satisfies.
+   *
+   * Carried here rather than reached for through `packaged?.manifest.icon ??
+   * listed?.icon` at every site that draws one, because that chain is the
+   * symptom of two sources and a card is not the place to decide between them.
+   * An MCP server has no manifest, so its icon is the index's; a package has
+   * one, so its icon is the manifest's; the decision is made once, here.
+   */
+  readonly icon: string | null;
+  /**
+   * One line of what this entry is, resolved from the same source as
+   * [`icon`](Self::icon). Empty for a declaration nothing satisfies — the
+   * card says so in its own words rather than inventing a summary.
+   */
+  readonly summary: string;
   /** The package on this machine, or `null` when nothing answers to the id. */
   readonly packaged: InstalledExtension | null;
   /**
@@ -108,6 +130,16 @@ export interface CatalogueEntry {
    * The marketplace puts entries with no category under *Other*.
    */
   readonly category: string | null;
+  /**
+   * How to reach an MCP server, when this entry names one rather than a
+   * package.
+   *
+   * Present turns this into an MCP entry: it is added by descriptor rather than
+   * fetched, and a card offers *Add* rather than *Install*. `null` for a code
+   * package. The spec carries the descriptions a credential prompt needs; the
+   * project record drops them when it stores one.
+   */
+  readonly transport: McpTransportSpec | null;
 }
 
 /**
@@ -123,12 +155,15 @@ function undeliverable(id: string, version: string): CatalogueEntry {
     id,
     name: id,
     version,
+    icon: null,
+    summary: "",
     packaged: null,
     listed: null,
     declared: true,
     unrunnable: null,
     unavailable: null,
     category: null,
+    transport: null,
   };
 }
 
@@ -141,12 +176,41 @@ function entryOf(
     id: packaged.manifest.id,
     name: packaged.manifest.name,
     version: packaged.manifest.version,
+    icon: packaged.manifest.icon ?? listed?.icon ?? null,
+    summary: packaged.manifest.summary || listed?.summary || "",
     packaged,
     listed,
     declared,
     unrunnable: refuseUnrunnable(packaged),
     unavailable: unavailableFor(packaged),
     category: listed?.category ?? null,
+    transport: null,
+  };
+}
+
+/**
+ * An MCP server the registry lists, as a catalogue entry.
+ *
+ * Delivered by descriptor rather than by package: there is nothing on the disk
+ * to read a manifest from, and nothing to refuse — an MCP server has no
+ * `syncApi` range and no capabilities, so `unrunnable` and `unavailable` are
+ * both `null`. What it has is a `transport`, and a card offers *Add* rather
+ * than *Install* on the strength of it.
+ */
+function mcpOf(listed: ListedExtension, declared: boolean): CatalogueEntry {
+  return {
+    id: listed.id,
+    name: listed.name,
+    version: listed.version,
+    icon: listed.icon,
+    summary: listed.summary,
+    packaged: null,
+    listed,
+    declared,
+    unrunnable: null,
+    unavailable: null,
+    category: listed.category,
+    transport: listed.transport,
   };
 }
 
@@ -160,10 +224,15 @@ function entryOf(
  * somebody's network to tell them no.
  */
 function availableOf(listed: ListedExtension): CatalogueEntry {
+  // An MCP server is delivered by its descriptor, so there is nothing to fetch
+  // and nothing to refuse on the way to fetching it.
+  if (listed.transport !== null) return mcpOf(listed, false);
   return {
     id: listed.id,
     name: listed.name,
     version: listed.version,
+    icon: listed.icon,
+    summary: listed.summary,
     packaged: null,
     listed,
     declared: false,
@@ -179,6 +248,7 @@ function availableOf(listed: ListedExtension): CatalogueEntry {
       capabilities: [...listed.capabilities],
     }),
     category: listed.category,
+    transport: null,
   };
 }
 
@@ -218,9 +288,14 @@ export function useCatalogue(
       const at = one.lastIndexOf("@");
       const id = one.slice(0, at);
       const packaged = packages.byId(id);
+      const listedEntry = inRegistry.get(id) ?? null;
+      // A declared MCP server has no package on the disk and is not missing —
+      // its descriptor is what delivers it. `undeliverable` is for an id
+      // nothing satisfies, which is a different state.
+      if (packaged === null && listedEntry?.transport) return mcpOf(listedEntry, true);
       return packaged === null
         ? undeliverable(id, one.slice(at + 1))
-        : entryOf(packaged, true, inRegistry.get(id) ?? null);
+        : entryOf(packaged, true, listedEntry);
     });
 
     const theirs = packages.all
@@ -242,7 +317,14 @@ export function useCatalogue(
     return {
       entries,
       byId: (id: string) => entries.find((entry) => entry.id === id) ?? null,
-      installed: mine.filter((entry) => entry.packaged !== null && entry.unrunnable === null),
+      // A declared MCP server is installed by descriptor rather than by
+      // package, so `packaged === null` is not the test for one. An entry that
+      // carries a transport is as much a part of what this project runs as one
+      // a package answers to, and the navigator lists it beside the rest.
+      installed: mine.filter(
+        (entry) =>
+          (entry.packaged !== null || entry.transport !== null) && entry.unrunnable === null,
+      ),
     };
   }, [declaredKey, listed, packages]);
 }

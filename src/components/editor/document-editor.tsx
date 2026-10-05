@@ -19,21 +19,34 @@
  * one column.
  */
 
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 
 import { Plate, PlateContent, usePlateEditor } from "platejs/react";
 
 import { FormatToolbar } from "@/components/editor/format-toolbar";
+import { CommentCard } from "@/components/editor/comment-card";
 import { KindMark } from "@/components/shell/entity-marks";
+import type { TextAnchor } from "@/lib/editor/anchor";
+import { CommentCardsProvider, useReportComments } from "@/lib/editor/comment-view";
+import type { DocumentComment } from "@/lib/editor/comments";
 import { blocksFromMarkdown, markdownFromBlocks } from "@/lib/editor/markdown";
 import { EDITOR_PLUGINS } from "@/lib/editor/plugins";
+import { useComments } from "@/lib/editor/use-comments";
 import { showNativeContextMenu } from "@/lib/native-menu";
+
+/** What a view that keeps no comments has. Shared, so its identity is stable. */
+const NO_COMMENTS: readonly DocumentComment[] = [];
 
 export function DocumentEditor({
   opening,
   icon,
   note,
   autoFocusTitle,
+  comments,
+  onCommentWrite,
+  onCommentRewrite,
+  onCommentResolve,
+  onCommentMoved,
   onTitle,
   onBody,
 }: {
@@ -60,6 +73,22 @@ export function DocumentEditor({
    * decision" to find the one field on the page that is waiting for them.
    */
   autoFocusTitle?: boolean;
+  /**
+   * The comments this record carries, and the three things that can happen to one.
+   *
+   * All four are absent where comments have nowhere to be kept, and then the page
+   * is exactly what it was before them: no command over a selection, no shading,
+   * nothing in the column beside it. The shell holds no comments of its own — what
+   * a comment is stored as is a decision of whoever opened this view.
+   */
+  comments?: readonly DocumentComment[];
+  onCommentWrite?: (anchor: TextAnchor, body: string) => void;
+  /** Change what an existing comment says. Its passage is unaffected. */
+  onCommentRewrite?: (key: string, body: string) => void;
+  onCommentResolve?: (key: string) => void;
+  onCommentMoved?: (
+    moves: readonly { readonly key: string; readonly anchor: TextAnchor }[],
+  ) => void;
   onTitle: (title: string) => void;
   /**
    * Called on every change to the body with a way to read it back.
@@ -77,6 +106,56 @@ export function DocumentEditor({
     plugins: EDITOR_PLUGINS,
     value: (editor) => blocksFromMarkdown(editor, opening.content),
   });
+
+  // Comments are only offered where there is somewhere to put one. A record opened
+  // by something that keeps no comments gets the page it has always had.
+  //
+  // One empty list rather than a new one each render: what is placed from it is
+  // reported to the column beside the text, and a report is a write into that
+  // column's state — a fresh `[]` every render would be a fresh report every
+  // render, which is a loop with nothing in it changing.
+  const kept = comments ?? NO_COMMENTS;
+  const wanted = onCommentWrite !== undefined;
+  const surface = useRef<HTMLDivElement>(null);
+  const page = useComments({ editor, surface, comments: kept, onCommentWrite, onCommentMoved });
+  const open = openCard(page.placed, page.active);
+
+  /**
+   * Resolving a comment, as a function that does not change.
+   *
+   * What is reported to the column beside the text is a write into that column's
+   * own state, so anything in it that is newly made on every render is a loop:
+   * report, render, report. The prop this stands in for is an inline arrow in
+   * whoever opened this view — which is ordinary React and not theirs to fix —
+   * so the identity is held here, and the current prop is read when it is called.
+   */
+  const resolveComment = useRef(onCommentResolve);
+  useEffect(() => {
+    resolveComment.current = onCommentResolve;
+  }, [onCommentResolve]);
+  const resolve = useCallback((key: string) => resolveComment.current?.(key), []);
+
+  const reveal = useCallback(
+    (key: string) => {
+      page.cards.open(key);
+      // The passage may be off screen. The mark is drawn beside it and is the
+      // only part of a highlight with a node of its own, so it is what there is
+      // to scroll to.
+      window.document
+        .querySelector(`[data-comment-mark="${key}"]`)
+        ?.scrollIntoView({ block: "center", behavior: "smooth" });
+    },
+    [page.cards],
+  );
+
+  // What the column beside the text lists, and what a row in it does. Withdrawn
+  // while comments are not on offer, so that column says nothing about them.
+  useReportComments(
+    useMemo(
+      () => (wanted ? { placed: page.placed, active: page.active, reveal, resolve } : null),
+      [wanted, page.placed, page.active, reveal, resolve],
+    ),
+  );
 
   useEffect(() => {
     if (autoFocusTitle) titleRef.current?.focus();
@@ -127,21 +206,60 @@ export function DocumentEditor({
         </p>
       ) : null}
 
-      <div className="relative mt-6">
+      <div ref={surface} className="relative mt-6">
         <Plate
           editor={editor}
-          onValueChange={() => onBody(() => markdownFromBlocks(editor))}
+          onValueChange={({ value }) => {
+            onBody(() => markdownFromBlocks(editor));
+            page.reflow(value);
+          }}
         >
-          <FormatToolbar />
-          <PlateContent
-            className="prose-blocks outline-none [&_[data-slate-placeholder]]:text-fg-tertiary"
-            placeholder="Write the body. Press / to insert a block."
-            onContextMenu={editingMenu}
-          />
+          <CommentCardsProvider value={page.cards}>
+            <FormatToolbar onComment={wanted ? page.start : undefined} />
+            <PlateContent
+              className="prose-blocks outline-none [&_[data-slate-placeholder]]:text-fg-tertiary"
+              placeholder="Write the body. Press / to insert a block."
+              onContextMenu={editingMenu}
+            />
+            {/* One card at a time, under the text rather than over it: a card
+                floating on the words it is about covers the sentence somebody is
+                reading it against. The list in the context column is where every
+                comment of the record is at once. */}
+            {page.draft ? (
+              <CommentCard
+                drafting
+                top={page.top}
+                quote={page.draft.anchor.quote}
+                body=""
+                onSave={page.keep}
+                onDismiss={page.cards.dismiss}
+              />
+            ) : null}
+            {open ? (
+              <CommentCard
+                key={open.comment.key}
+                top={page.top}
+                quote={open.comment.anchor.quote}
+                body={open.comment.body}
+                onSave={(body) => onCommentRewrite?.(open.comment.key, body)}
+                onResolve={() => onCommentResolve?.(open.comment.key)}
+                onDismiss={page.cards.dismiss}
+              />
+            ) : null}
+          </CommentCardsProvider>
         </Plate>
       </div>
     </div>
   );
+}
+
+/** The comment whose card is open, if one is. */
+function openCard(
+  placed: readonly { comment: DocumentComment }[],
+  active: string | null,
+): { readonly comment: DocumentComment } | null {
+  if (active === null) return null;
+  return placed.find((one) => one.comment.key === active) ?? null;
 }
 
 /**

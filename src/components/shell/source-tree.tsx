@@ -379,7 +379,7 @@ function TreeRow({
         // suppressed for nothing.
         if (showNativeContextMenu(event, entries)) onSelect();
       }}
-      className="flex h-(--control-height-lg) w-full items-center gap-2.5 rounded-(--radius-control) pr-2 text-left text-base text-fg-secondary transition-colors duration-(--motion-duration-fast) ease-shell hover:bg-hover hover:text-fg data-[active=true]:bg-selected data-[active=true]:font-medium data-[active=true]:text-fg data-[drop=true]:bg-selected data-[drop=true]:ring-1 data-[drop=true]:ring-separator-strong data-[dragging=true]:opacity-50"
+      className="group flex h-(--control-height-lg) w-full items-center gap-2.5 rounded-(--radius-control) pr-2 text-left text-base text-fg-secondary transition-colors duration-(--motion-duration-fast) ease-shell hover:bg-hover hover:text-fg data-[active=true]:bg-accent-fill data-[active=true]:font-medium data-[active=true]:text-accent-on data-[drop=true]:bg-selected data-[drop=true]:ring-1 data-[drop=true]:ring-separator-strong data-[dragging=true]:opacity-50"
     >
       {reserveDisclosure ? (
         <span
@@ -400,27 +400,40 @@ function TreeRow({
         >
           {isFolder ? (
             <ChevronRight
-              className="size-3 text-fg-tertiary transition-transform duration-(--motion-duration-fast) ease-shell"
+              className="size-3 text-fg-tertiary transition-transform duration-(--motion-duration-fast) ease-shell group-data-[active=true]:text-accent-on"
               style={{ transform: isExpanded ? "rotate(90deg)" : undefined }}
             />
           ) : null}
         </span>
       ) : null}
 
+      {/* Every mark on a filled row reads the row's own colour, and the reason
+          is arithmetic rather than tidiness: white on the accent measures about
+          5:1, so any dimmed white lands under the contrast this window requires
+          — and a tertiary grey on it is a mark nobody can read at all. What
+          separates a glyph from the label beside it on that row is its size,
+          which costs no contrast. The warning tone stays: it is status, and
+          status is the one thing colour is kept for. */}
       {Icon ? (
         <Icon
           aria-hidden="true"
           className={
             item.emphasised
-              ? "size-3.5 shrink-0 text-warning"
+              ? "size-3.5 shrink-0 text-warning group-data-[active=true]:text-accent-on"
               : item.muted
-                ? "size-3.5 shrink-0 text-fg-tertiary opacity-60"
-                : "size-3.5 shrink-0 text-fg-tertiary"
+                ? "size-3.5 shrink-0 text-fg-tertiary opacity-60 group-data-[active=true]:text-accent-on group-data-[active=true]:opacity-100"
+                : "size-3.5 shrink-0 text-fg-tertiary group-data-[active=true]:text-accent-on"
           }
         />
       ) : null}
 
-      <span className={item.muted && !item.emphasised ? "truncate text-fg-tertiary" : "truncate"}>
+      <span
+        className={
+          item.muted && !item.emphasised
+            ? "truncate text-fg-tertiary group-data-[active=true]:text-accent-on"
+            : "truncate"
+        }
+      >
         {item.label}
       </span>
 
@@ -428,8 +441,12 @@ function TreeRow({
         <span
           className={
             item.emphasised
-              ? "ml-auto shrink-0 pl-2 font-mono text-xs font-medium text-warning tabular-nums"
-              : "ml-auto shrink-0 pl-2 font-mono text-xs text-fg-tertiary tabular-nums"
+              // The weight is what emphasises it, which is why the colour can
+              // be given up on a filled row: a warning orange over the accent
+              // is two colours arguing, and the one that has to win is the one
+              // saying which row you are on.
+              ? "ml-auto shrink-0 pl-2 font-mono text-xs font-medium text-warning tabular-nums group-data-[active=true]:text-accent-on"
+              : "ml-auto shrink-0 pl-2 font-mono text-xs text-fg-tertiary tabular-nums group-data-[active=true]:text-accent-on"
           }
         >
           {item.count}

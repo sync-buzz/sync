@@ -31,9 +31,7 @@
         },
         "transparent": true,
         "windowEffects": {
-          "effects": [
-            "underWindowBackground"
-          ],
+          "effects": ["underWindowBackground"],
           "state": "followsWindowActiveState"
         }
       }
@@ -43,22 +41,19 @@
     }
   },
   "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["sync"]
+      }
+    },
     "updater": {
-      "endpoints": [
-        "https://raw.githubusercontent.com/sync-buzz/sync/main/updater/manifest.json"
-      ],
+      "endpoints": ["https://raw.githubusercontent.com/sync-buzz/sync/main/updater/manifest.json"],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDgzNjcyRjg0MUIwQjE4NwpSV1NIc2JCQitISTJDSHBaZGpmeTRNOUZjbTd3T1JqSkZ0aExsay9obXlOUW1mSEdCNnAyVzlZNwo="
     }
   },
   "bundle": {
     "active": true,
-    "targets": [
-      "app",
-      "dmg",
-      "deb",
-      "appimage",
-      "nsis"
-    ],
+    "targets": ["app", "dmg", "deb", "appimage", "nsis"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -70,8 +65,7 @@
       "minimumSystemVersion": "13.0",
       "signingIdentity": "Developer ID Application: Nikolai Evseev (5YBHMN5PDS)"
     },
-    "externalBin": [
-      "binaries/sync-mcp"
-    ]
+    "externalBin": ["binaries/sync-mcp", "binaries/sync-inference-server"],
+    "resources": ["binaries/laya_server.py"]
   }
 }
