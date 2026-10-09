@@ -533,6 +533,44 @@ html[data-vibrancy="on"] body {
   background-color: var(--surface-window-material);
 }
 
+/*
+ * The panel has no background of its own, and that is the one rule it needs
+ * from this file.
+ *
+ * What is behind it is the material AppKit applied to its window — the only
+ * thing on this system that can blur the *desktop* rather than the page — and
+ * a colour here would cover the one property that makes the surface read as
+ * floating over another application rather than as a screenshot pasted onto
+ * it. The attribute is set on the document by `ask-panel.tsx`, because which
+ * window a document is showing is not something a stylesheet can ask.
+ */
+html[data-surface="ask"] body {
+  background-color: transparent;
+}
+
+/*
+ * What the panel is, in two numbers, and both are here rather than in a
+ * component for the same reason: the surface they describe is the whole of this
+ * window, and a number stated where one element can see it is a number the
+ * element beside it disagrees with.
+ *
+ * The board is a fixed height because the panel is resized to what it is
+ * showing. A region that grew with its list would move the line somebody is
+ * typing into — and a surface over another application that changes size under
+ * a person's hands is the one thing this window must not do.
+ *
+ * The rows are the window's control height plus four points. The panel is read
+ * at arm's length in the second before somebody goes back to what they were
+ * doing, not studied like a column of a window that has been open all morning,
+ * and the list it is read from is the same list — so what changes is the metric
+ * rather than the component. Everything the panel draws reads it, including the
+ * columns an extension brings, which is the point: one surface, one rhythm.
+ */
+html[data-surface="ask"] {
+  --ask-board-height: 420px;
+  --control-height: 32px;
+}
+
 /* ---------------------------------------------------------------- *
  * Accessibility preferences
  * ---------------------------------------------------------------- */

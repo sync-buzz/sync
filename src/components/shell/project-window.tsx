@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
+import { AskBoard } from "@/components/ask/ask-board";
 import { AppHeader } from "@/components/shell/app-header";
 import { ACTIVITY_AREA, EXTENSIONS_AREA } from "@/components/shell/areas";
 import { ConsoleShade } from "@/components/shell/console-shade";
@@ -114,8 +115,8 @@ export function ProjectWindow({
   project,
   setup,
   shown,
+  panel,
   onProjectChanged,
-  onOpenSettings,
   onLeave,
 }: {
   project: OpenProject;
@@ -127,14 +128,28 @@ export function ProjectWindow({
    * is the same two steps the palette takes with a search result.
    */
   shown?: AreaIntent | null;
+  /**
+   * The line standing in the panel a key opens over another application, where
+   * this is that panel rather than a window.
+   *
+   * Present or absent rather than a second flag beside a query: a window has no
+   * line and the panel always has one, so the two could only ever disagree.
+   * What it changes is the arrangement of the columns and nothing about them —
+   * the areas, their slots, their providers and what the window knows about
+   * them are built once above this and read by all three surfaces.
+   */
+  panel?: {
+    readonly query: string;
+    /**
+     * Whether a conversation is standing in the line, which takes the panels
+     * away: what an agent is saying is read on its own.
+     */
+    readonly talking: boolean;
+    /** Give the keyboard back to the line, having taken it into a column. */
+    readonly focusLine: () => void;
+  };
   /** Installing or removing an extension changes what the project is. */
   onProjectChanged: (project: OpenProject) => void;
-  /**
-   * Raise what this phone is, which the window above draws and this one only
-   * asks for. Absent on a Mac, where the same thing is a window of its own and
-   * is reached from the menu bar rather than from inside a project.
-   */
-  onOpenSettings?: () => void;
   /**
    * Close the project and go back to choosing one, where that is a thing the
    * window can do. On a Mac it is not: a project is what a window *is*, and
@@ -275,6 +290,11 @@ export function ProjectWindow({
   // window claims for itself. Bound here rather than in the menu bar: the menu
   // belongs to whichever area is selected, and this belongs to none of them.
   useEffect(() => {
+    // Not in the panel, which has a line of its own and no palette to open
+    // over it: a key swallowed by a surface that does nothing with it is a key
+    // that stopped working.
+    if (panel !== undefined) return;
+
     const onKeyDown = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "k") return;
       // Something nearer the caret has already answered this — the editor's own
@@ -287,7 +307,7 @@ export function ProjectWindow({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [panel]);
 
   // What the project declares can change under the window — removing the
   // extension whose area is open is the ordinary case — so a selection that no
@@ -526,7 +546,27 @@ export function ProjectWindow({
 
   const columns = (
     <>
-      {isPhone ? (
+      {panel !== undefined ? (
+        <AskBoard
+          project={project}
+          query={panel.query}
+          talking={panel.talking}
+          focusLine={panel.focusLine}
+          sections={sections}
+          hiddenAreas={hiddenAreas}
+          badges={badges}
+          updates={updates}
+          unseen={activity.isLoading ? null : activity.entries.length}
+          active={activeKey === null ? null : (mounted.get(activeKey) ?? null)}
+          attachNavigator={slotRefs.Navigator}
+          attachWorkspace={slotRefs.Workspace}
+          attachInspector={slotRefs.Inspector}
+          onSelectArea={selectArea}
+          onArrange={arrange}
+          onHide={hidden.toggle}
+          onShow={hidden.toggle}
+        />
+      ) : isPhone ? (
         <MobileWindow
           project={project}
           activity={ACTIVITY}
@@ -545,7 +585,6 @@ export function ProjectWindow({
           onSelectArea={selectArea}
           onSearch={() => setSearching(true)}
           onOpenSync={() => setSyncOpen(true)}
-          onOpenSettings={onOpenSettings}
           onLeave={onLeave}
         />
       ) : (
@@ -562,7 +601,7 @@ export function ProjectWindow({
 
           Not on a phone. It is called by a key and typed into with a keyboard,
           and that machine has neither. */}
-      {isPhone ? null : (
+      {isPhone || panel !== undefined ? null : (
         <ConsoleShade
           key={project.path}
           root={project.path}
@@ -574,15 +613,22 @@ export function ProjectWindow({
         />
       )}
 
-      <SearchPalette
-        project={project}
-        opener={opener}
-        open={searching}
-        onOpenChange={setSearching}
-        onShow={show}
-      />
+      {/* Both are the window's. The panel asks its own line and has nowhere
+          to raise a sheet: it is one slab over somebody else's application, and
+          a sheet over that is a second surface claiming the same screen. */}
+      {panel !== undefined ? null : (
+        <>
+          <SearchPalette
+            project={project}
+            opener={opener}
+            open={searching}
+            onOpenChange={setSearching}
+            onShow={show}
+          />
 
-      <SyncSheet open={syncOpen} onOpenChange={setSyncOpen} sync={sync} />
+          <SyncSheet open={syncOpen} onOpenChange={setSyncOpen} sync={sync} />
+        </>
+      )}
     </>
   );
 

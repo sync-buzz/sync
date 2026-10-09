@@ -16,6 +16,7 @@
 //! * Every capability or plugin added here widens the app's attack surface, so
 //!   it is added only when a shipped feature needs it.
 
+pub mod ask;
 pub mod attending;
 pub mod attention;
 pub mod connect;
@@ -75,6 +76,26 @@ pub fn run() {
         // often with nothing of Sync on screen, so which window answers it is
         // decided in `links.rs` before there is a window to ask.
         .plugin(tauri_plugin_deep_link::init())
+        // The panel's key, and the only thing in this application that is heard
+        // while another one is in front. Nothing of the plugin is granted to a
+        // webview: the key has to work with every window closed, which is
+        // exactly when there is no webview to ask — so what it does is decided
+        // in `ask.rs` before there is a surface involved.
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| {
+                    // The press only. A key held down would otherwise open the
+                    // panel and close it again on release.
+                    if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                        ask::toggle(app);
+                    }
+                })
+                .build(),
+        )
+        // What makes the panel a panel. The plugin manages the store the
+        // subclassed window is kept in and nothing else; the window itself is
+        // built in `ask.rs`.
+        .plugin(tauri_nspanel::init())
         // Nothing of this is granted to the webview either. The banner is
         // raised by `attention::announcer`, which runs where a window does not
         // have to exist.
@@ -113,6 +134,10 @@ pub fn run() {
         // reason for a build to stop. What ends them is closing the project.
         .manage(sync_terminal::Terminals::new())
         .manage(terminal::Watchers::default())
+        // Which project the panel speaks for, frozen when its key was pressed:
+        // the panel takes the focus the moment it opens, so *what was in front*
+        // cannot be asked afterwards.
+        .manage(ask::Asking::default())
         // Where each console tab is working. Held by the host because a folder
         // that arrived with the call would be a boundary the caller draws.
         .manage(console::Working::default())
@@ -158,6 +183,10 @@ pub fn run() {
             // can be asked for without Sync being the active application first.
             #[cfg(target_os = "macos")]
             dock::install(&handle);
+            // The panel and its key. Built at launch rather than on the first
+            // press: a surface asked for by a keystroke has to be there on that
+            // keystroke, and a webview takes a few hundred milliseconds.
+            ask::install(&handle);
             // Last, and not awaited: a launch must not wait on a network
             // request, and an offline machine must cost it nothing.
             updates::in_the_background(&handle);
@@ -199,6 +228,10 @@ pub fn run() {
             sessions::session_set_mode,
             sessions::session_close,
             sessions::session_forget,
+            ask::ask_dismiss,
+            ask::ask_project,
+            ask::ask_use,
+            ask::ask_height,
             console::console_work_start,
             console::console_works,
             console::console_shell_start,

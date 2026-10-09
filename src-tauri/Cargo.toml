@@ -124,6 +124,11 @@ tauri-plugin-autostart = "2"
 # to choose a window before there is a window to ask.
 tauri-plugin-deep-link = "2.4.10"
 tauri-plugin-dialog = "2.7.2"
+# The one key that reaches Sync while another application is in front. The
+# shortcut is registered in Rust and nothing of this plugin is granted to the
+# webview: the key has to work with every window closed, which is precisely
+# when there is no webview to ask. What it opens is `src/ask.rs`.
+tauri-plugin-global-shortcut = "2"
 # The banner, and it is the whole of what this window can say from behind
 # another application. Raised in Rust and never through the webview — a
 # notification asked for by a window would exist only while a window does,
@@ -153,6 +158,16 @@ which = "8"
 # already in the tree under Tauri; they are named here because this crate calls
 # them directly.
 [target.'cfg(target_os = "macos")'.dependencies]
+# What makes the panel a panel rather than a window. A Spotlight-like surface
+# has to take the keyboard without taking the application in front of it away
+# from somebody, and that is one AppKit class — `NSPanel` with
+# `NonactivatingPanel` — which Tauri cannot be asked for: it builds an
+# `NSWindow`. The crate subclasses the window Tauri built, which is the same
+# `objc2` and `objc2-app-kit` already in this tree rather than a second
+# toolchain, and it carries the one fix nobody would find twice: `WKWebView`
+# does not report its window level to the input method, so candidate windows
+# for a non-Latin layout draw *behind* an elevated panel.
+tauri-nspanel = "2.1.1"
 # The callback halves of the notification interface below: asking for
 # permission and hearing that somebody clicked are both blocks.
 block2 = "0.6"

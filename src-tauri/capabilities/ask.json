@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "ask",
+  "description": "What the panel needs, which is less than either window. It is shown, placed, resized and put away from Rust — the key that opens it is heard while another application is in front, so none of that can depend on a webview being there to ask — and the commands that do it are this application's own rather than a plugin's, so they need no permission here. `core:default` and nothing else: it drags no title bar, opens no dialog, holds no memory session and reveals itself through none of the window commands the project window is granted.",
+  "windows": ["ask"],
+  "permissions": ["core:default"]
+}

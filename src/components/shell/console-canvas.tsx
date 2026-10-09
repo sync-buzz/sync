@@ -87,8 +87,13 @@ export function ConsoleCanvas({
         {/* Nothing stands here before the first block. What a console can do
             is said under the line being typed, where the hand is, rather than
             over the canvas, which belongs to what came back. */}
-        {blocks.map((block) => (
-          <ConsoleBlock key={block.id} block={block} onRerun={onRerun} />
+        {blocks.map((block, index) => (
+          <ConsoleBlock
+            key={block.id}
+            block={block}
+            last={index === blocks.length - 1}
+            onRerun={onRerun}
+          />
         ))}
       </div>
     </div>
@@ -117,9 +122,20 @@ function gutter(block: Block): { glyph: string; tone: string } | null {
 
 function ConsoleBlock({
   block,
+  last,
   onRerun,
 }: {
   readonly block: Block;
+  /**
+   * Whether this is the newest block, which is the one that draws no blank
+   * line after it.
+   *
+   * A blank line separates one block from the next, and after the last block
+   * there is no next: in the shade the line being typed stands there, and in
+   * the panel a hairline does. Either way a trailing cell is a gap somebody
+   * reads as the canvas having been cut off.
+   */
+  readonly last: boolean;
   readonly onRerun: (typed: string) => void;
 }) {
   const mark = gutter(block);
@@ -172,7 +188,7 @@ function ConsoleBlock({
 
       {/* The blank line between blocks, one cell tall — the same unit
           everything else on the canvas is measured in. */}
-      <div aria-hidden className="h-[var(--console-cell-h)]" />
+      {last ? null : <div aria-hidden className="h-[var(--console-cell-h)]" />}
     </div>
   );
 }

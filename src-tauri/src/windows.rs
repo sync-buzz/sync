@@ -1,6 +1,7 @@
 //! The windows a person works in, and how the second one is made.
 //!
-//! Sync opens one window at launch and can open any number after it. A window
+//! Sync launches with no window at all and can open any number of them. A
+//! window
 //! holds a project and nothing outside itself — the areas, the selection and
 //! the columns are the window's, and the project is opened into it — so two
 //! windows are two projects side by side rather than one interface drawn
@@ -15,7 +16,9 @@
 //! Every window is built from the configured one in `tauri.conf.json`. Copying
 //! its size, its material and its title bar into this file would be the same
 //! window described in two places, and the second description would be the one
-//! that goes stale.
+//! that goes stale. That configured window carries `"create": false`: it is a
+//! description of what a window is, not an instruction to open one — Sync
+//! starts in the menu bar, and the first window is the one a person asked for.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -449,14 +452,27 @@ pub fn show<R: Runtime>(app: &AppHandle<R>) {
 /// bar, and it goes back to `Regular` the moment there is a window to belong to
 /// a Dock icon again.
 ///
+/// Every window counts here, and not only the ones holding a project: settings
+/// is a window somebody is typing in, and an `Accessory` application has no
+/// menu bar — so the policy that hid its Dock icon would take `⌘C` with it.
+///
+/// What does not count is the panel, which is a hidden window for the life of
+/// the process. Asking `webview_windows` plainly would mean an application that
+/// had never shown anything still claimed a Dock icon, and closing the last
+/// window never gave it up.
+///
 /// macOS only, because it is the only platform where the two states have names.
 pub fn follow_the_windows<R: Runtime>(app: &AppHandle<R>) {
     #[cfg(target_os = "macos")]
     {
-        let policy = if app.webview_windows().is_empty() {
-            tauri::ActivationPolicy::Accessory
-        } else {
+        let on_screen = app
+            .webview_windows()
+            .into_keys()
+            .any(|label| label != crate::ask::LABEL);
+        let policy = if on_screen {
             tauri::ActivationPolicy::Regular
+        } else {
+            tauri::ActivationPolicy::Accessory
         };
         let _ = app.set_activation_policy(policy);
     }

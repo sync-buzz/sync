@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef } from "react";
 import type { LucideIcon } from "lucide-react";
 
 import { edgeMask, useScrollFade } from "@/lib/mobile-scroll";
@@ -72,20 +72,15 @@ function opacityOf(active: boolean, unavailable?: boolean): number {
 export function SectionsBar({
   sections,
   activeKey,
-  marks,
   onChoose,
 }: {
   sections: readonly Section[];
   /** The section being shown, or nothing while the project is still opening. */
   activeKey: string | null;
   /**
-   * Which column of the section is showing, drawn on this band's own top edge.
-   *
-   * It belongs to the pager and is drawn here because this band is already the
-   * furniture at the foot of the screen: a strip of its own between the two
-   * cost sixteen points and read as a margin.
+   * Choose a section — or, where the section chosen is the one already
+   * showing, the window's own shortcut back to its first screen.
    */
-  marks?: ReactNode;
   onChoose: (key: string) => void;
 }) {
   const scroller = useRef<HTMLDivElement | null>(null);
@@ -144,15 +139,9 @@ export function SectionsBar({
         }}
       />
 
-      {/* On the band's own edge rather than above it: the marks are two points
-          of ink, and what they need is a place to be, not a zone. */}
-      {marks === undefined ? null : (
-        <div className="flex h-4 items-center justify-center">{marks}</div>
-      )}
-
       <div
         ref={scroller}
-        className="flex gap-1.5 overflow-x-auto px-2 pt-0.5"
+        className="flex gap-1.5 overflow-x-auto px-2 pt-1.5"
         // Proximity rather than mandatory: this band is read as much as it is
         // chosen from, and a list that fights a person looking along it is a
         // list that has forgotten which of the two it is for.
@@ -240,7 +229,11 @@ export function SectionsBar({
                   {section.badge === "dot" ? (
                     <span className="sr-only">Something new</span>
                   ) : (
-                    section.badge
+                    // Capped, because past a hundred the number has stopped
+                    // being a number and started being a width: four digits
+                    // beside a seventy-two point row run over the section next
+                    // to it, and nobody acts differently on 144 than on 99.
+                    countedTo(section.badge)
                   )}
                 </span>
               )}
@@ -250,4 +243,9 @@ export function SectionsBar({
       </div>
     </div>
   );
+}
+
+/** A count as it is drawn: itself, or the word for *more than fits*. */
+function countedTo(count: number): string {
+  return count > 99 ? "99+" : String(count);
 }

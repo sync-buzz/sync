@@ -95,10 +95,11 @@ export function AppShell() {
     setReturnedTo(place.restored.path);
     setProject(place.restored);
   }
-  // Raised over whatever the window is showing, from either of the two screens
-  // that belong to the window rather than to a package. Held here rather than
-  // in each of them because it is one sheet about one phone, and because what
-  // it can do — forget the computer — is a fact this component renders around.
+  // Raised from the list of projects, which is the root of this phone and the
+  // only screen this belongs on: what it holds is which computer the phone
+  // dials, which is true of none of the projects on it. Held here rather than
+  // in the list because what it can do — forget that computer — is a fact this
+  // component renders around, and a project standing open has to go with it.
   const [settingsOpen, setSettingsOpen] = useState(false);
   const setup = useProjectSetup({ onOpened: enter });
   // The window is named after what it holds, for the lists the system draws of
@@ -181,9 +182,6 @@ export function AppShell() {
             // by closing its window, and a phone has neither a second window
             // nor a way to shut the one it has.
             onLeave={isPhone ? () => enter(null) : undefined}
-            onOpenSettings={
-              isPhone ? () => setSettingsOpen(true) : undefined
-            }
           />
         ) : isPhone ? (
           // The same place in the composition and a different question, because

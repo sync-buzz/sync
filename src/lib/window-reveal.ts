@@ -2,10 +2,13 @@
 
 import { useEffect, useSyncExternalStore } from "react";
 
+import { windowRole } from "@/lib/settings/window";
+
 /**
  * When the window appears, and whether it appears loading.
  *
- * `src-tauri/tauri.conf.json` creates the window hidden. A window that is
+ * A window is built hidden, from the description in
+ * `src-tauri/tauri.conf.json`. A window that is
  * visible before its first frame shows the desktop through itself — the
  * material has nothing over it yet — which reads as a broken launch rather
  * than as a starting application, so nothing is revealed until there is
@@ -61,6 +64,20 @@ function subscribeToLoad(onChange: () => void) {
 
 async function revealWindow() {
   if (!("__TAURI_INTERNALS__" in window)) return;
+
+  // The panel is not a window that reveals itself, and the reason is the key
+  // that opens it: it is heard while another application is in front, so where
+  // the panel goes and when it takes the keyboard are decided in Rust before
+  // there is a webview to ask. A reveal from here would put it on screen at
+  // launch, with nobody having pressed anything.
+  //
+  // It reaches this function at all because the role of a window is "main"
+  // until the first commit corrects it — the exported HTML is one document, so
+  // the server snapshot has to be the project window — and the shell mounts for
+  // that one frame. Its capability refuses `show`, which is how this was found;
+  // the refusal is kept and the ask is dropped instead, because a panel that
+  // may show itself is a panel that will.
+  if (windowRole() === "ask") return;
 
   try {
     const { getCurrentWindow } = await import("@tauri-apps/api/window");

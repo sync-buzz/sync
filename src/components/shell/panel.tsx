@@ -27,6 +27,13 @@ import { cn } from "@/lib/utils";
  * unrelated ones. That is also why each column's header must say something
  * different: the navigator names the section, the workspace names what is
  * being shown of it, and the inspector names the object beside it.
+ *
+ * None of that is true at the width of a phone, where the three columns are
+ * three screens one in front of the next: there is no line crossing anything,
+ * and nothing standing beside a column to be told apart from. So both bands
+ * give their controls to the one strip the phone keeps for them, and the
+ * header's title — which on a desk says which of three columns this is — is
+ * left out rather than repeated under the name of the project.
  */
 
 export function PanelSurface({
@@ -50,6 +57,26 @@ export function PanelHeader({
   title: string;
   children?: ReactNode;
 }) {
+  // Offered a band of its own — a phone's — the controls go there and the
+  // title does not go anywhere. On a desk the header names the column because
+  // three columns stand side by side and each has to say which it is; on a
+  // phone the column *is* the screen, and what it is called is already said
+  // twice over it — by the section lit in the band at the foot, and by the
+  // project named in the bar at the head. A third copy between them is the
+  // window saying one thing three times, under a hairline this design does not
+  // draw anywhere else.
+  //
+  // The controls are a different matter and are kept: they act on what the
+  // column lists, and they join whatever its foot put in the same band, which
+  // is the one strip of column controls a phone has.
+  const band = useBandSlot();
+  // `?? null` rather than a branch that returns nothing: a header with no
+  // controls still renders, into a band that hides itself when nothing was
+  // put in it. The difference is the signature — a component that can answer
+  // `null` is a different shape on the extension surface, and this one has no
+  // reason to be.
+  if (band !== null) return createPortal(children ?? null, band);
+
   return (
     <div
       // A band rather than the list, which is a distinction only the phone

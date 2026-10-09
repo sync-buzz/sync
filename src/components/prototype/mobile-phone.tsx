@@ -12,15 +12,14 @@ import {
 } from "@/components/prototype/mobile-content";
 import {
   ColumnBand,
-  PageMarks,
-  Pager,
-  type Page,
-} from "@/components/shell/mobile-pager";
+  Stack,
+  type Screen,
+} from "@/components/shell/mobile-stack";
 import { PanelFooter } from "@/components/shell/panel";
-import { BandSlotsProvider, ColumnProvider } from "@/lib/shell-bands";
-import { ProjectWheel } from "@/components/shell/project-wheel";
+import { BandSlotsProvider, ColumnProvider, type AreaColumn } from "@/lib/shell-bands";
+import { ProjectList } from "@/components/shell/project-list";
 import { SectionsBar, type Section } from "@/components/shell/mobile-sections";
-import { Shade, usePullDown } from "@/components/shell/mobile-shade";
+import { SyncIndicator } from "@/components/shell/sync-indicator";
 import type { SyncStatus } from "@/lib/memory/use-sync-state";
 import { FRAMES, type FrameId } from "@/lib/shell-frames";
 
@@ -36,11 +35,12 @@ import { FRAMES, type FrameId } from "@/lib/shell-frames";
  * exist.
  *
  * It is a route rather than a screenshot because the questions it answers are
- * about movement: whether a swipe lands where a hand expects, whether the
- * threshold gives way at the right moment, whether the shade follows a finger.
- * None of those can be judged from a picture, and none of them can be judged on
- * a Mac without a phone in front of you — which is the other half of why this
- * exists: a simulator is not always at hand, and a browser at 390 points is.
+ * about movement: whether a push lands where a hand expects, whether the
+ * back gesture gives way at the right moment, whether a stack kept per section
+ * is what a person expects to come back to. None of those can be judged from a
+ * picture, and none of them can be judged on a Mac without a phone in front of
+ * you — which is the other half of why this exists: a simulator is not always
+ * at hand, and a browser at 390 points is.
  */
 export function MobilePhone({
   frame,
@@ -61,54 +61,57 @@ export function MobilePhone({
   const [leftFrom, setLeftFrom] = useState<string | undefined>(undefined);
   const [section, setSection] = useState<string>(ACTIVITY_AREA.id);
   const [item, setItem] = useState(0);
-  const [shadeOpen, setShadeOpen] = useState(false);
-  const [goto, setGoto] = useState<{ page: number; id: number } | null>(null);
-  const [at, setAt] = useState(0);
-
-  const pull = usePullDown({
-    enabled: (event) => {
-      const target = event.target;
-      const column =
-        target instanceof Element ? target.closest("[data-scrolls]") : null;
-      return column instanceof HTMLElement ? column.scrollTop <= 0 : true;
-    },
-    onOpen: () => setShadeOpen(true),
-  });
+  /** How deep each section's stack is standing, as the window holds it. */
+  const [depths, setDepths] = useState<ReadonlyMap<string, number>>(new Map());
 
   const sections = useMemo(() => bandOf(), []);
   const columns = FRAMES[frame];
-  // The section to the left of the one showing, which is what the threshold
-  // leads to everywhere but the first.
-  const before = sections[sections.findIndex((one) => one.key === section) - 1];
+  const workspaceAt = columns.navigator ? 1 : 0;
+  const depth = Math.min(
+    depths.get(section) ?? 0,
+    workspaceAt + (columns.inspector ? 1 : 0),
+  );
+  const standAt = useCallback((key: string, screen: number) => {
+    setDepths((held) => {
+      const next = new Map(held);
+      next.set(key, screen);
+      return next;
+    });
+  }, []);
 
   // The foot a package puts under its list, drawn the way the window draws one:
   // the package renders a `PanelFooter`, the shell offers a band, and the
   // controls appear there instead of in place. Without this the stand was
   // missing the one strip every real column has, which is exactly where the
   // gap being hunted turned out to live.
-  const [bands, setBands] = useState<{
-    Navigator: HTMLElement | null;
-    Workspace: HTMLElement | null;
-  }>({ Navigator: null, Workspace: null });
+  const [bands, setBands] = useState<Record<AreaColumn, HTMLElement | null>>({
+    Navigator: null,
+    Workspace: null,
+    Inspector: null,
+  });
   const bandRefs = useMemo(() => {
-    const attach =
-      (column: "Navigator" | "Workspace") => (element: HTMLElement | null) =>
-        setBands((current) =>
-          current[column] === element
-            ? current
-            : { ...current, [column]: element },
-        );
-    return { Navigator: attach("Navigator"), Workspace: attach("Workspace") };
+    const attach = (column: AreaColumn) => (element: HTMLElement | null) =>
+      setBands((current) =>
+        current[column] === element ? current : { ...current, [column]: element },
+      );
+    return {
+      Navigator: attach("Navigator"),
+      Workspace: attach("Workspace"),
+      Inspector: attach("Inspector"),
+    };
   }, []);
 
-  const advance = useCallback((index: number) => {
-    setItem(index);
-    setGoto((asked) => ({ page: 1, id: (asked?.id ?? 0) + 1 }));
-  }, []);
+  const advance = useCallback(
+    (index: number) => {
+      setItem(index);
+      standAt(section, workspaceAt);
+    },
+    [section, standAt, workspaceAt],
+  );
 
   if (project === null) {
     return (
-      <ProjectWheel
+      <ProjectList
         projects={PROJECTS}
         startAt={leftFrom}
         onOpen={(chosen) => {
@@ -119,7 +122,20 @@ export function MobilePhone({
     );
   }
 
-  const pages: Page[] = [
+  const title = (
+    <>
+      <span className="w-full truncate text-center text-[17px] leading-[22px] font-semibold">
+        {project}
+      </span>
+      <SyncIndicator
+        sync={QUIET}
+        onOpen={() => undefined}
+        className="h-4 min-w-0 px-0 text-[11px] leading-[14px]"
+      />
+    </>
+  );
+
+  const screens: Screen[] = [
     ...(columns.navigator
       ? [
           {
@@ -140,6 +156,9 @@ export function MobilePhone({
               </ColumnProvider>
             ),
             band: <ColumnBand attach={bandRefs.Navigator} />,
+            behind: "Projects",
+            title,
+            trailing: <BarButton label="Search" />,
           },
         ]
       : []),
@@ -153,6 +172,19 @@ export function MobilePhone({
         </Scrolls>
       ),
       band: <ColumnBand attach={bandRefs.Workspace} />,
+      behind: columns.navigator ? labelOfSection(section) : "Projects",
+      ...(columns.navigator ? {} : { title }),
+      trailing: (
+        <>
+          {columns.navigator ? null : <BarButton label="Search" />}
+          {columns.inspector ? (
+            <BarButton
+              label="Details"
+              onPress={() => standAt(section, workspaceAt + 1)}
+            />
+          ) : null}
+        </>
+      ),
     },
     ...(columns.inspector
       ? [
@@ -163,6 +195,8 @@ export function MobilePhone({
                 <InspectorBody />
               </Scrolls>
             ),
+            band: <ColumnBand attach={bandRefs.Inspector} />,
+            behind: "Back",
           },
         ]
       : []),
@@ -176,7 +210,6 @@ export function MobilePhone({
       // theme rather than written here, so the stand cannot be lit differently
       // from the product it is standing in for.
       style={{ backgroundImage: "var(--phone-horizon)" }}
-      {...pull.handlers}
     >
       {waiting ? (
         <div
@@ -188,37 +221,25 @@ export function MobilePhone({
         </div>
       ) : null}
 
-      <Pager
-        pages={pages}
-        behind={before?.label ?? "Projects"}
-        returning={section}
-        goto={goto}
-        onPosition={setAt}
-        onBehind={() => {
-          if (before !== undefined) setSection(before.key);
+      <Stack
+        screens={screens}
+        depth={depth}
+        canPop
+        onPop={() => {
+          if (depth > 0) standAt(section, depth - 1);
           else setProject(null);
         }}
-        hasBehind
       />
 
       <SectionsBar
         sections={sections}
         activeKey={section}
-        marks={<PageMarks count={pages.length} at={at} />}
-        onChoose={setSection}
+        onChoose={(key) => {
+          if (key === section) standAt(key, 0);
+          else setSection(key);
+        }}
       />
 
-      <Shade
-        open={shadeOpen}
-        pulled={pull.pulled}
-        project={project}
-        sync={QUIET}
-        onSearch={() => undefined}
-        onOpenSync={() => undefined}
-        onOpenSettings={() => undefined}
-        onClose={() => setShadeOpen(false)}
-        onLeave={() => setProject(null)}
-      />
     </div>
     </BandSlotsProvider>
   );
@@ -234,7 +255,7 @@ export function MobilePhone({
  */
 function Scrolls({ children }: { children: React.ReactNode }) {
   return (
-    <div data-scrolls className="absolute inset-0 overflow-y-auto overscroll-contain">
+    <div data-scrolls className="absolute inset-0 overflow-y-auto overscroll-y-contain">
       {children}
     </div>
   );
@@ -316,4 +337,23 @@ function bandOf(): readonly Section[] {
       icon: EXTENSIONS_AREA.icon,
     },
   ];
+}
+
+/**
+ * One control at the end of a screen's bar, as the window draws one.
+ *
+ * Glyphless on purpose: what the stand is testing is where the control stands
+ * and how much room it leaves the title, not which picture is on it.
+ */
+function BarButton({ label, onPress }: { label: string; onPress?: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      onClick={onPress}
+      className="flex size-11 shrink-0 items-center justify-center rounded-(--radius-control) text-[13px] text-fg-secondary active:bg-hover"
+    >
+      {label.slice(0, 1)}
+    </button>
+  );
 }

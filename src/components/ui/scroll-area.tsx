@@ -50,15 +50,23 @@ function ScrollArea({
           block in a document — still scrolls: the scrollbar is derived from the
           viewport's own `scrollWidth`, which an overflowing child still grows.
 
-          `overscroll-contain` is the other half of a panel owning its own
+          `overscroll-y-contain` is the other half of a panel owning its own
           scrolling: a scroller that has reached its end stops there rather than
           handing the rest of the gesture to whatever is behind it. Without it
           one flick through a list carries on into the surface underneath, and
-          what moves is not the thing the gesture started on. */}
+          what moves is not the thing the gesture started on.
+
+          The axis is named, and that is the whole of why this is not plain
+          `contain`. Containment applies to both axes, and the axis this column
+          does not scroll is the one the phone moves between columns on — so a
+          contained panel silently ate every sideways swipe that began inside
+          it, which on a phone is every swipe a thumb makes. Measured: with the
+          axis released the pager takes the gesture and the section behind this
+          one is reached; with it contained the pager never moves at all. */}
       <ScrollAreaPrimitive.Viewport
         ref={viewportRef}
         data-slot="scroll-area-viewport"
-        className="size-full overscroll-contain rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1 [&>div]:block!"
+        className="size-full overscroll-y-contain rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1 [&>div]:block!"
       >
         {children}
       </ScrollAreaPrimitive.Viewport>

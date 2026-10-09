@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { SlidersHorizontal } from "lucide-react";
 
-import { ProjectWheel } from "@/components/shell/project-wheel";
+import { ProjectList } from "@/components/shell/project-list";
 import { openRegistered, registeredProjects } from "@/lib/project/client";
 import type { OpenProject } from "@/lib/project/types";
 import { said } from "@/lib/refusal";
@@ -35,8 +35,8 @@ export function ProjectsScreen({
   onOpenSettings,
 }: {
   /**
-   * The project this phone was in a moment ago, so the wheel opens turned to
-   * it rather than to the top of the list.
+   * The project this phone was in a moment ago, brought into view when the
+   * list appears rather than being left to be scrolled for.
    *
    * Held by the window above and not asked of the computer: what the computer
    * keeps is where the phone *is*, and this is a fact about where it has just
@@ -46,13 +46,12 @@ export function ProjectsScreen({
   startAt?: string | null;
   onOpened: (project: OpenProject) => void;
   /**
-   * What this phone is, in the band under the list.
+   * What this phone is, beside the title.
    *
-   * This is the root of the phone, and until now it was the one screen with no
-   * way off it but into a project: somebody whose computer had stopped
-   * answering could read that there were no projects and had nothing to do
-   * about it. What the band leads to is where they can see what this phone
-   * dials, and take it off that computer.
+   * This is the root of the phone and the only screen this belongs on. A
+   * project pushed in front of it reaches it by its own back button, which is
+   * drawn at every depth — so a person inside a project is one press from
+   * seeing what this phone dials, and from taking it off that computer.
    */
   onOpenSettings: () => void;
 }) {
@@ -108,9 +107,8 @@ export function ProjectsScreen({
   );
 
   if (projects === null) {
-    // Nothing at all rather than a wheel with no names in it: the list arrives
-    // in a moment, and an empty wheel that fills itself reads as a wheel that
-    // lost something.
+    // Nothing at all rather than an empty list: it arrives in a moment, and a
+    // list that fills itself reads as a list that had lost something.
     return <div className="min-h-0 flex-1 bg-workspace" />;
   }
 
@@ -119,7 +117,7 @@ export function ProjectsScreen({
   }
 
   return (
-    <ProjectWheel
+    <ProjectList
       projects={projects.map((project) => ({
         key: project.path,
         name: project.name,
@@ -130,9 +128,10 @@ export function ProjectsScreen({
         const project = projects.find((one) => one.path === chosen.key);
         if (project !== undefined) void open(project);
       }}
-      // The one control that is not about a project, at the end of the band a
-      // thumb rests on — the same place, with the same icon, that the shade
-      // keeps it in once a project is open. One habit, learned once.
+      // The one control that is not about a project, beside the title. This is
+      // the root of the phone and the only screen the way off this application
+      // belongs on: everything else is pushed in front of it and reaches it
+      // with one press of a back button that is always drawn.
       trailing={
         <button
           type="button"

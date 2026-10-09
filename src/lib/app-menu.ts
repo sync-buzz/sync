@@ -36,7 +36,7 @@
 import { useEffect, useRef } from "react";
 import type { TableCommands } from "@/lib/editor/table-commands";
 import { nativeMenusAvailable, queueMenuWork } from "@/lib/menu-queue";
-import { openSettings } from "@/lib/settings/window";
+import { openSettings, windowRole } from "@/lib/settings/window";
 import { openNewWindow } from "@/lib/window-open";
 
 /** A kind a record can be written as, as the navigator lists it. */
@@ -213,6 +213,20 @@ export function useAppMenu(
  * building one while the other is on screen is a window that never comes back.
  */
 function installAppMenu(read: () => WindowCommands | null): void {
+  // Never from the panel a key opens over another application.
+  //
+  // There is one menu bar, it belongs to the application, and what it says is
+  // about the window somebody is working in. A surface that takes the keyboard
+  // without taking the front has no claim on it — and an area mounted there
+  // would otherwise put its own File menu over the one the project window
+  // built, from a window nobody can see in the menu bar.
+  //
+  // The guard is at this door rather than at each caller because every caller
+  // is one: the window's own commands, the memory commands beside them, and
+  // every area that is selected. It reads the role rather than the document,
+  // so it holds before anything has been laid out.
+  if (windowRole() === "ask") return;
+
   // Kept so that a change to the window's own commands can rebuild the menu
   // without an area asking for one.
   readArea = read;

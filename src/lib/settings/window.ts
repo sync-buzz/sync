@@ -17,10 +17,20 @@
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { command } from "@/lib/command";
 
-export type WindowRole = "main" | "settings";
+export type WindowRole = "main" | "settings" | "ask";
 
 /** The label the Rust side builds the settings window under. */
 const SETTINGS_LABEL = "settings";
+
+/**
+ * And the panel's, which is the third document this export is opened as.
+ *
+ * It is a label here for the same reason the settings window is one: a static
+ * export has no second route to be. What differs is that nothing in the window
+ * opens this one — it is opened by a key heard while another application is in
+ * front, so there is no `openPanel` beside `openSettings` below.
+ */
+const ASK_LABEL = "ask";
 
 function inTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -44,16 +54,17 @@ export function windowRole(): WindowRole {
     }
   ).__TAURI_INTERNALS__;
 
-  return internals?.metadata?.currentWindow?.label === SETTINGS_LABEL
-    ? "settings"
-    : "main";
+  const label = internals?.metadata?.currentWindow?.label;
+  if (label === SETTINGS_LABEL) return "settings";
+  if (label === ASK_LABEL) return "ask";
+  return "main";
 }
 
 /**
  * The role, read the way the loading state is read in `window-reveal.ts`.
  *
  * The exported HTML is one file, so the server snapshot has to be the main
- * window; the settings window corrects it on its first commit, while it is
+ * window; the other two correct it on their first commit, while both are
  * still hidden. Reading it through `useState` instead would be the same answer
  * arriving as a hydration mismatch.
  */

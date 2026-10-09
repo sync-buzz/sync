@@ -1,16 +1,17 @@
 "use client";
 
-import { useCallback, useMemo, useState, type PointerEvent } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { Info, Search } from "lucide-react";
 
-import { ColumnBand, PageMarks, Pager, type Page } from "@/components/shell/mobile-pager";
+import { ColumnBand, Stack, type Screen } from "@/components/shell/mobile-stack";
 import { SectionsBar, type Section } from "@/components/shell/mobile-sections";
-import { Shade, usePullDown } from "@/components/shell/mobile-shade";
+import { SyncIndicator } from "@/components/shell/sync-indicator";
 import { ProgressLine } from "@/components/shell/progress-line";
 import type { MountedArea, UnavailableArea } from "@/lib/extension-host/areas";
 import type { BadgeCount, Badges } from "@/lib/extension-host/badges";
 import type { SyncStatus } from "@/lib/memory/use-sync-state";
 import type { OpenProject } from "@/lib/project/types";
-import { BandSlotsProvider } from "@/lib/shell-bands";
+import { BandSlotsProvider, type AreaColumn } from "@/lib/shell-bands";
 import { FRAMES } from "@/lib/shell-frames";
 import { haptic } from "@/lib/haptic";
 
@@ -22,17 +23,21 @@ import { haptic } from "@/lib/haptic";
  * asks for 500 points before anything stands beside it — and a phone is 390.
  * Below the floor the columns do not get tighter, they get *taken away*.
  *
- * So the same columns are arranged in the one way a phone has for more content
- * than fits: side by side in time. They become the pages of a pager, in the
- * order they stand in on a desk — what lists, then what is shown, then what is
- * true of it — and a swipe moves between them. Not a stack of pushes: a push
- * says *deeper*, and these columns are not deeper than each other.
+ * So they are arranged the way this hardware's own platform arranges them when
+ * a split view runs out of width: one in front of the next, as a stack. The
+ * order is the desk's — what lists, then what is shown, then what is true of it
+ * — and choosing a row pushes. At 390 points *deeper* and *narrower* are the
+ * same thing, and a push is what the person holding the phone already knows how
+ * to undo.
+ *
+ * **Every section keeps its own stack.** Glancing at another section and coming
+ * back arrives at the record, not at the list it was chosen from, which is what
+ * a tab bar means everywhere else on this platform.
  *
  * What is always drawn is the band of sections at the foot, because it is the
- * only chrome a thumb uses more than a few times an hour. Everything else that
- * belongs to the window rather than to a section — searching the corpus, what
- * the memory is doing, this phone's settings, the way back out — is pulled
- * down from the top in a shade.
+ * only chrome a thumb uses more than a few times an hour, and the bar at the
+ * head, because the way back has to be *visible*: a phone whose only way out
+ * was a gesture is a phone somebody can be stuck in.
  *
  * **The columns themselves are untouched, and that is the point.** An area
  * draws into the same three slots by the same names; what differs is where the
@@ -57,7 +62,6 @@ export function MobileWindow({
   onSelectArea,
   onSearch,
   onOpenSync,
-  onOpenSettings,
   onLeave,
 }: {
   project: OpenProject;
@@ -102,7 +106,7 @@ export function MobileWindow({
    * Where each column of the frame is drawn.
    *
    * Three parameters rather than one object of three, because each is the node
-   * one column is attached to and they are handed to three different pages.
+   * one column is attached to and they are handed to three different screens.
    */
   attachNavigator: (element: HTMLDivElement | null) => void;
   attachWorkspace: (element: HTMLDivElement | null) => void;
@@ -119,119 +123,175 @@ export function MobileWindow({
   onSelectArea: (key: string) => void;
   onSearch: () => void;
   onOpenSync: () => void;
-  /**
-   * What this phone is, which is not part of this project and is reached from
-   * inside it anyway — the way a Mac reaches Settings from the menu bar with a
-   * project open. The window above owns it, because forgetting the computer
-   * from in there takes this window with it.
-   *
-   * Optional for the reason `onLeave` is, and it is the same reason: both are
-   * things the window *above* this one can do, and both are handed down by the
-   * phone's composition rather than assumed by this one.
-   */
-  onOpenSettings?: () => void;
   /** Back to the computer's list of projects. */
   onLeave?: () => void;
 }) {
-  const [shadeOpen, setShadeOpen] = useState(false);
-  /** Where the pager is, in pages, for the marks the band draws. */
-  const [at, setAt] = useState(0);
-  const [goto, setGoto] = useState<{ page: number; id: number } | null>(null);
+  /**
+   * How deep each section's stack is standing, by the section's own key.
+   *
+   * Per section rather than one number for the window, and that is the half of
+   * this arrangement a pager could not have. A record left open in one section
+   * is still open when a person comes back to it from another — which is what
+   * a tab bar means on this platform, and what made the old pager's rule
+   * (every section opens at its first column) read as the window throwing work
+   * away.
+   *
+   * A section not in the map is at its first screen, which is where a section
+   * nobody has opened yet should be.
+   */
+  const [depths, setDepths] = useState<ReadonlyMap<string, number>>(new Map());
   const frame = FRAMES[active?.frame ?? catalogue.frame];
+  const activeKey = active?.key ?? catalogue.key;
 
-  // Where each column's foot is drawn — the band at the bottom of its page
+  // Where each column's foot is drawn — the band at the head of its screen
   // rather than a strip inside the column. Held as state for the reason the
   // window holds its panels that way: a portal needs its node to exist before
   // anything can be put through it.
-  const [bands, setBands] = useState<{
-    Navigator: HTMLElement | null;
-    Workspace: HTMLElement | null;
-  }>({ Navigator: null, Workspace: null });
+  const [bands, setBands] = useState<Record<AreaColumn, HTMLElement | null>>({
+    Navigator: null,
+    Workspace: null,
+    Inspector: null,
+  });
   const bandRefs = useMemo(() => {
-    const attach = (column: "Navigator" | "Workspace") => (element: HTMLElement | null) =>
+    const attach = (column: AreaColumn) => (element: HTMLElement | null) =>
       setBands((current) =>
         current[column] === element ? current : { ...current, [column]: element },
       );
-    return { Navigator: attach("Navigator"), Workspace: attach("Workspace") };
+    return {
+      Navigator: attach("Navigator"),
+      Workspace: attach("Workspace"),
+      Inspector: attach("Inspector"),
+    };
   }, []);
-
-  const pull = usePullDown({
-    // The list under the finger, asked whether it has anywhere to scroll back
-    // to. A list halfway down is a list being read, and what it is doing with
-    // this gesture is scrolling back up — so the shade waits its turn.
-    //
-    // Found by walking up from what was touched rather than by asking the page,
-    // because the page does not know: what scrolls is inside a column, and the
-    // column belongs to a package.
-    enabled: atTopOfWhateverScrolls,
-    onOpen: () => setShadeOpen(true),
-  });
 
   const band = useMemo(
     () => bandOf({ activity, sections, unavailable, catalogue, badges, updates, unseen }),
     [activity, sections, unavailable, catalogue, badges, updates, unseen],
   );
 
-  const open = useCallback(
-    (key: string) => {
-      onSelectArea(key);
-      setShadeOpen(false);
+  /** Stand this section's stack at a given screen. */
+  const standAt = useCallback(
+    (key: string, screen: number) => {
+      setDepths((held) => {
+        if ((held.get(key) ?? 0) === screen) return held;
+        const next = new Map(held);
+        next.set(key, screen);
+        return next;
+      });
     },
-    [onSelectArea],
+    [],
   );
 
-  /**
-   * What lies to the left of the section being shown, in the band's own order.
-   *
-   * The sections a phone cannot run are stepped over rather than counted: they
-   * are in the band so that a person can see the project is whole, and moving
-   * onto one would be arriving at a section that refuses to draw.
-   */
-  const before = useMemo(() => {
-    const reachable = band.filter((one) => one.unavailable !== true);
-    const at = reachable.findIndex((one) => one.key === active?.key);
-    return at > 0 ? reachable[at - 1] : null;
-  }, [band, active?.key]);
+  const open = useCallback(
+    (key: string) => {
+      // Pressing the section already showing is the platform's own shortcut
+      // back to its root, and it is the one control on this screen that can do
+      // it without a journey: a stack three deep is otherwise three presses
+      // from the list it started at.
+      if (key === activeKey) standAt(key, 0);
+      else onSelectArea(key);
+    },
+    [activeKey, onSelectArea, standAt],
+  );
+
+  // Which screen of this frame the workspace is. The first one where the frame
+  // has no column that lists — which is the whole of what "no navigator" means
+  // at this width.
+  const workspaceAt = frame.navigator ? 1 : 0;
+  const depth = Math.min(
+    depths.get(activeKey) ?? 0,
+    workspaceAt + (frame.inspector ? 1 : 0),
+  );
 
   // Something was addressed at the area, so the area is what has to be looked
   // at. The window has already selected it; this is the half of that a phone
   // needs and a Mac does not — on a Mac the workspace is on the screen already.
   //
   // Read during the render that shows it rather than in an effect after it: an
-  // effect would draw the page the person was on for one frame and then move
+  // effect would draw the screen the person was on for one frame and then move
   // out from under them.
   const [answered, setAnswered] = useState(intent);
   if (intent !== answered) {
     setAnswered(intent);
-    if (intent !== null) {
-      setGoto((asked) => ({
-        page: frame.navigator ? 1 : 0,
-        id: (asked?.id ?? 0) + 1,
-      }));
-    }
+    if (intent !== null) standAt(activeKey, workspaceAt);
   }
 
-  // Choosing a row moves the pager on to what it opens. Read from the click
-  // rather than told by the area, and that is the whole point: an area is a
-  // package that has never heard of a phone. What the shell can see is that
-  // something in a list was activated, and at this width that *is* what going
-  // on to it means.
+  // Choosing a row pushes on to what it opens. Read from the click rather than
+  // told by the area, and that is the whole point: an area is a package that
+  // has never heard of a phone. What the shell can see is that something in a
+  // list was activated, and at this width that *is* what going on to it means.
   //
   // Not the bands, though. The foot of a column holds controls that act on the
   // list — filtering it, adding to it — and a filter that threw the screen away
   // as it was applied would be unusable.
   const advance = useCallback(() => {
     haptic();
-    setGoto((asked) => ({ page: 1, id: (asked?.id ?? 0) + 1 }));
-  }, []);
+    standAt(activeKey, workspaceAt);
+  }, [activeKey, standAt, workspaceAt]);
 
-  const pages: Page[] = [
+  /** What the window says about itself, in the middle of the first bar. */
+  const title = (
+    <>
+      <span className="w-full truncate text-center text-[17px] leading-[22px] font-semibold">
+        {project.name}
+      </span>
+      {/* Under the name rather than beside it, which is where this platform
+          puts a line about what a screen is doing — and the one place left for
+          it now that the window has no chrome of its own. Silence is still a
+          state: with nothing to say the indicator draws nothing, and the name
+          sits alone and centred. */}
+      <SyncIndicator
+        sync={sync}
+        onOpen={onOpenSync}
+        className="h-4 min-w-0 px-0 text-[11px] leading-[14px]"
+      />
+    </>
+  );
+
+  /** Searching the whole corpus, which belongs to the project and not a column. */
+  const search = (
+    <button
+      type="button"
+      onClick={onSearch}
+      aria-label="Search"
+      className="flex size-11 shrink-0 items-center justify-center rounded-(--radius-control) active:opacity-60"
+    >
+      <Search className="size-[22px] text-fg-secondary" />
+    </button>
+  );
+
+  /**
+   * The way on to what is true of what is being shown.
+   *
+   * A control rather than a swipe, and that is the exchange this arrangement
+   * makes: the one gesture on this screen means one thing — go back — so the
+   * other direction needs somewhere to be pressed. It is the platform's own
+   * answer for a column that describes what is in front of you.
+   */
+  const inspect = frame.inspector ? (
+    <button
+      type="button"
+      onClick={() => {
+        haptic();
+        standAt(activeKey, workspaceAt + 1);
+      }}
+      aria-label="Details"
+      className="flex size-11 shrink-0 items-center justify-center rounded-(--radius-control) active:opacity-60"
+    >
+      <Info className="size-[22px] text-fg-secondary" />
+    </button>
+  ) : null;
+
+  const screens: Screen[] = [
     ...(frame.navigator
       ? [
           {
             key: "navigator",
             body: <AreaSlot attach={attachNavigator} onActivate={advance} />,
             band: <ColumnBand attach={bandRefs.Navigator} />,
+            behind: "Projects",
+            title,
+            trailing: search,
           },
         ]
       : []),
@@ -239,8 +299,31 @@ export function MobileWindow({
       key: "workspace",
       body: <AreaSlot attach={attachWorkspace} />,
       band: <ColumnBand attach={bandRefs.Workspace} />,
+      // The section's own name where there is a list behind it, and the way out
+      // of the project where the workspace *is* the first screen.
+      behind: frame.navigator ? (active?.label ?? catalogue.label) : "Projects",
+      ...(frame.navigator ? {} : { title }),
+      trailing: (
+        <>
+          {frame.navigator ? null : search}
+          {inspect}
+        </>
+      ),
     },
-    ...(frame.inspector ? [{ key: "inspector", body: <AreaSlot attach={attachInspector} /> }] : []),
+    ...(frame.inspector
+      ? [
+          {
+            key: "inspector",
+            body: <AreaSlot attach={attachInspector} />,
+            band: <ColumnBand attach={bandRefs.Inspector} />,
+            // Named by nobody, and deliberately: what the workspace is showing
+            // is a package's to know, and a bar that guessed would be wrong
+            // exactly where it was most read. The platform's own word for a
+            // screen it cannot name is this one.
+            behind: "Back",
+          },
+        ]
+      : []),
   ];
 
   return (
@@ -252,129 +335,32 @@ export function MobileWindow({
         // surface the work is standing on rather than as an absence behind it
         // — the phone's answer to a desk window's frame, which it has none of.
         style={{ backgroundImage: "var(--phone-horizon)" }}
-        {...pull.handlers}
       >
         {/* The window's own report that it is waiting, on the top edge of the
-            screen rather than under a bar — there is no bar. It is the one
-            thing drawn over the hardware's own inset, because a line two
-            points tall under a notch is a line nobody sees. */}
+            screen rather than under a bar — the bar below starts under the
+            hardware's inset. It is the one thing drawn over that inset,
+            because a line two points tall under a notch is a line nobody
+            sees. */}
         <div className="pointer-events-none absolute inset-x-0 top-0 z-30 h-0.5">
           <ProgressLine />
         </div>
 
-        <Pager
-          pages={pages}
-          // The section to the left, or the way out where this is the leftmost
-          // one. Naming it on the threshold is what makes the gesture readable
-          // before it is finished: the strip says where the hand is going.
-          behind={before?.label ?? "Projects"}
-          returning={active?.key ?? catalogue.key}
-          goto={goto}
-          onPosition={setAt}
-          onBehind={() => {
-            haptic();
-            if (before !== null) open(before.key);
+        <Stack
+          screens={screens}
+          depth={depth}
+          // Nothing behind the first screen on a machine that cannot leave a
+          // project, which is every machine but a phone.
+          canPop={onLeave !== undefined}
+          onPop={() => {
+            if (depth > 0) standAt(activeKey, depth - 1);
             else onLeave?.();
           }}
-          // Nothing behind the leftmost section on a machine that cannot leave
-          // a project, which is every machine but a phone.
-          hasBehind={before !== null || onLeave !== undefined}
         />
 
-        <SectionsBar
-          sections={band}
-          activeKey={active?.key ?? null}
-          marks={<PageMarks count={pages.length} at={at} />}
-          onChoose={open}
-        />
-
-        <Shade
-          open={shadeOpen}
-          pulled={pull.pulled}
-          project={project.name}
-          sync={sync}
-          onOpenSync={onOpenSync}
-          onSearch={onSearch}
-          onOpenSettings={onOpenSettings}
-          onClose={() => setShadeOpen(false)}
-          onLeave={onLeave}
-        />
+        <SectionsBar sections={band} activeKey={active?.key ?? null} onChoose={open} />
       </div>
     </BandSlotsProvider>
   );
-}
-
-/**
- * Whether the thing under this finger is already at the top of its own scroll.
- *
- * Walks up from what was touched to the first box that has somewhere to go,
- * because that is the box the gesture belongs to. Reaching the top of the tree
- * without finding one means nothing scrolls here, and the shade may have the
- * gesture.
- */
-function atTopOfWhateverScrolls(event: PointerEvent<HTMLElement>): boolean {
-  let node = event.target instanceof Element ? event.target : null;
-  while (node !== null) {
-    if (node instanceof HTMLElement && node.scrollHeight > node.clientHeight) {
-      const how = getComputedStyle(node).overflowY;
-      if (how === "auto" || how === "scroll") return node.scrollTop <= 0;
-    }
-    node = node.parentElement;
-  }
-  return true;
-}
-
-/**
- * The band the sections are drawn from: the window's own at either end, and
- * what the project brought between them.
- *
- * The sections a phone cannot run keep their place in that order rather than
- * being dropped to the end — where a section is, is the project's decision,
- * and this machine not being able to run one does not change it.
- */
-function bandOf({
-  activity,
-  sections,
-  unavailable,
-  catalogue,
-  badges,
-  updates,
-  unseen,
-}: {
-  activity: MountedArea;
-  sections: readonly MountedArea[];
-  unavailable: readonly UnavailableArea[];
-  catalogue: MountedArea;
-  badges: Badges;
-  updates: number;
-  unseen: number | null;
-}): readonly Section[] {
-  return [
-    {
-      key: activity.key,
-      label: activity.label,
-      icon: activity.icon,
-      badge: unseen === null || unseen === 0 ? undefined : unseen,
-    },
-    ...sections.map((area) => ({
-      key: area.key,
-      label: area.label,
-      icon: area.icon,
-      badge: counted(badges.get(area.key)),
-    })),
-    ...unavailable.map((area) => ({
-      key: area.key,
-      label: area.label,
-      icon: area.icon,
-      unavailable: true,
-    })),
-    {
-      key: catalogue.key,
-      label: catalogue.label,
-      icon: catalogue.icon,
-      badge: updates > 0 ? updates : undefined,
-    },
-  ];
 }
 
 /**
@@ -431,6 +417,59 @@ function AreaSlot({
  * bands are excluded above.
  */
 const ACTIVATED = "button, a[href], [role=option], [role=treeitem], [role=row]";
+
+/**
+ * The band the sections are drawn from: the window's own at either end, and
+ * what the project brought between them.
+ *
+ * The sections a phone cannot run keep their place in that order rather than
+ * being dropped to the end — where a section is, is the project's decision,
+ * and this machine not being able to run one does not change it.
+ */
+function bandOf({
+  activity,
+  sections,
+  unavailable,
+  catalogue,
+  badges,
+  updates,
+  unseen,
+}: {
+  activity: MountedArea;
+  sections: readonly MountedArea[];
+  unavailable: readonly UnavailableArea[];
+  catalogue: MountedArea;
+  badges: Badges;
+  updates: number;
+  unseen: number | null;
+}): readonly Section[] {
+  return [
+    {
+      key: activity.key,
+      label: activity.label,
+      icon: activity.icon,
+      badge: unseen === null || unseen === 0 ? undefined : unseen,
+    },
+    ...sections.map((area) => ({
+      key: area.key,
+      label: area.label,
+      icon: area.icon,
+      badge: counted(badges.get(area.key)),
+    })),
+    ...unavailable.map((area) => ({
+      key: area.key,
+      label: area.label,
+      icon: area.icon,
+      unavailable: true,
+    })),
+    {
+      key: catalogue.key,
+      label: catalogue.label,
+      icon: catalogue.icon,
+      badge: updates > 0 ? updates : undefined,
+    },
+  ];
+}
 
 /** A count the window holds, in the two shapes a section draws. */
 function counted(badge: BadgeCount | undefined): number | "dot" | undefined {

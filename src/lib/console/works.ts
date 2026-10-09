@@ -104,8 +104,14 @@ function startWork(project: string, name: string, text: string): Promise<Session
   return command<SessionRow>("console_work_start", { project, name, text });
 }
 
-/** What the console is running in this project, finished ones included. */
-function works(project: string): Promise<SessionRow[]> {
+/**
+ * What the console is running in this project, finished ones included.
+ *
+ * Exported because a name is resolved against this list wherever it is read,
+ * and there is one list: the panel showing the conversation behind a name it
+ * was given asks the same question this file asks before it addresses one.
+ */
+export function works(project: string): Promise<SessionRow[]> {
   return command<SessionRow[]>("console_works", { project });
 }
 

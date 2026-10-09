@@ -1370,6 +1370,68 @@ notification raised on the phone by the phone reaches only somebody already
 holding it. Waking a phone in a pocket is Apple's push service and nothing else,
 which needs a server this product does not have.
 
+## Asking from outside the window
+
+The section above is this application speaking to somebody who is in another
+one. This is the same boundary crossed the other way: `⌘/` puts one line in
+front of a person wherever they are, takes what they type to the project they
+were last looking at, and goes away.
+
+It is the only surface of Sync that is not inside the slab, and the exception is
+argued rather than assumed. A window is where work is read; this is where one
+sentence is said. Everything that makes a window a window — the frame, the slab,
+the four columns, the title bar — would be a window opened to hold a single
+field, and a person who pressed a key in the middle of someone else's
+application would have had their screen taken over to answer it.
+
+**It does not take the front, and that is the whole design.** The panel is an
+`NSPanel` with `NonactivatingPanel`: it takes the keyboard and leaves the
+application in front of somebody in front. A surface that activated Sync to
+hear a sentence has already interrupted the work it was called to help with,
+which is the one thing a key like this must not do.
+
+**The material is the whole background, which is the opposite of the settings
+window's rule and for the same reason.** Glass in this product is the edge of a
+window; a second *window* wearing it would make it a theme. A panel has no edge
+to be — it is one slab over somebody else's screen, and the material is what
+says *there is something behind me*. Nothing else on this system can say it:
+`backdrop-filter` blurs the page under an element, never the desktop under the
+window. It is the system's own popover material, so both appearances and reduced
+transparency are answered without this document deciding anything.
+
+**The key is a position on the keyboard, not a character.** A shortcut
+registered as a character moves when somebody changes layout, and this one is
+reached without looking, mid-sentence, in whatever layout the other
+application needed. Under a Latin layout the key reads `⌘/` and under a
+Cyrillic one the same key reads `⌘.`; it is one key. Every key the panel itself
+answers — Escape, `⌘P`, the arrows, Tab — is read the same way.
+
+**The project is named and never guessed.** A line has to be about a repository,
+and what the panel speaks for is whatever window was in front when the key was
+pressed — frozen at that moment, because the panel takes the focus and would
+otherwise be asking about itself. With nothing open it asks before it takes a
+line: the list of projects comes first, filtered as somebody types, and a filter
+with one match still waits for Return. `⌘P` reaches that list at any time, and
+what a person chose outranks what was inferred.
+
+**It is exactly as tall as what it is showing.** The window is resized to its
+content on every change, because a transparent region the panel covers and does
+not draw is a place where a click lands on nothing — over another application
+that is a hole rather than a margin, and it is also what lets a click outside
+reach the thing underneath.
+
+**What a line means is the console's reading of it, not a second one.** The
+panel runs the grammar, the resolution and the work in `src/lib/console/`
+unchanged. Two surfaces, one vocabulary: a verb that works in the console works
+here the day it is added, and a line coloured one way and run another cannot
+happen because there is only one reading to disagree with.
+
+*Deliberately absent:* tabs, a scrollback of the day, the terminal grid, and the
+whole of an answer. The shade in a project window is a terminal and this is not
+one — what an agent says at length is read in the window where a conversation
+is, and what is worth having here is the first of it, in the second before
+somebody goes back to what they were doing.
+
 ## Criteria for changing the shell
 
 Change the shell when a real vertical slice needs something it cannot express,
